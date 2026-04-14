@@ -14,7 +14,7 @@ class AarkaaiAPI {
     private init() {}
     
     // Change this to your production backend URL
-    var baseURL: String = "http://10.0.2.2:5000" // Default for local emulator debugging
+    var baseURL: String = "http://3.108.34.65:5000" // Production backend URL
     
     func register(request: AuthRequest) async throws -> AuthResponse {
         return try await performRequest(path: "/auth/register", method: "POST", body: request)
@@ -100,7 +100,7 @@ class AarkaaiAPI {
     private func performRequest<T: Decodable>(
         path: String,
         method: String,
-        body: (any Encodable)? = nil,
+        body: (some Encodable)? = nil,
         headers: [String: String]? = nil
     ) async throws -> T {
         guard let url = URL(string: baseURL + path) else {
