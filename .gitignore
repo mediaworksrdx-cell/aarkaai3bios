@@ -1,0 +1,47 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.env
+.pytest_cache/
+
+# --- Android ---
+.gradle/
+build/
+captures/
+*.apk
+*.ap_
+*.dex
+local.properties
+.externalNativeBuild
+.cxx
+android-app/.idea/
+android-app/*.iml
+android-app/app/*.iml
+
+# --- iOS ---
+.DS_Store
+ios-app/.idea/
+ios-app/*.xcodeproj/
+ios-app/*.xcworkspace/
+ios-app/build/
+ios-app/DerivedData/
+ios-app/Pods/
+ios-app/.swiftpm/
+
+# --- AARKAAI Specific ---
+*.jks
+release.jks
+aarkaa-3b/*.gguf
+aarkaa-3b/*.safetensors
+aarkaa-3b/*.bin
+aarkaa-3b/*.pt
+aarkaa-3b/*.ckpt
+knowledge/
+brain/
+logs/
+temp/

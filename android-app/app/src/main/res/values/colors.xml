@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Claude-inspired palette -->
+    <color name="claude_bg_light">#FFF9F5F1</color>
+    <color name="claude_bg_dark">#FF1A1A1A</color>
+    <color name="claude_surface_light">#FFFFFFFF</color>
+    <color name="claude_surface_dark">#FF2A2A2A</color>
+    <color name="claude_primary">#FFDA7756</color>
+    <color name="claude_primary_dark">#FFE8956E</color>
+    <color name="claude_text_primary_light">#FF2C2C2C</color>
+    <color name="claude_text_primary_dark">#FFE8E8E8</color>
+    <color name="claude_text_secondary_light">#FF7A7A7A</color>
+    <color name="claude_text_secondary_dark">#FF999999</color>
+    <color name="user_bubble_light">#FFF0ECE8</color>
+    <color name="user_bubble_dark">#FF333333</color>
+    <color name="input_border_light">#FFE0DCD8</color>
+    <color name="input_border_dark">#FF444444</color>
+    <color name="splash_bg">#FFDA7756</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="black">#FF000000</color>
+</resources>
