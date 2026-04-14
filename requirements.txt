@@ -1,0 +1,18 @@
+fastapi
+uvicorn[standard]
+yfinance
+pandas
+ddgs
+sqlalchemy
+sentence-transformers
+scikit-learn
+wikipedia-api
+numpy
+pydantic
+llama-cpp-python
+# openvino         – optional, install when Python 3.14 support is available
+tensorflow-cpu
+langdetect
+pyjwt
+passlib[bcrypt]
+python-multipart
