@@ -24,7 +24,7 @@ struct AuthView: View {
                     
                     Text("AARKAAI")
                         .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .letterSpacing(2)
+                        .tracking(2)
                         .foregroundColor(colorScheme == .dark ? .white : AppTheme.textPrimaryLight)
                     
                     Text(viewModel.isLoginMode ? "Welcome back" : "Create your account")
