@@ -97,10 +97,10 @@ class AarkaaiAPI {
     
     // MARK: - Private Core Request Method
     
-    private func performRequest<T: Decodable>(
+    private func performRequest<T: Decodable, E: Encodable>(
         path: String,
         method: String,
-        body: (some Encodable)? = nil,
+        body: E? = nil,
         headers: [String: String]? = nil
     ) async throws -> T {
         guard let url = URL(string: baseURL + path) else {
