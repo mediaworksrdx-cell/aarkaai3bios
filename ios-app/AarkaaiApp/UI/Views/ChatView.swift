@@ -127,7 +127,7 @@ struct HeaderView: View {
             Text("AARKAAI")
                 .font(.headline)
                 .fontWeight(.bold)
-                .letterSpacing(1)
+                .tracking(1)
             
             Spacer()
             
