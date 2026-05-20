@@ -44,6 +44,7 @@ RATE_LIMIT_ENABLED = IS_PRODUCTION or os.getenv("AARKAAI_RATE_LIMIT_ENABLED", "f
 
 # ─── Input Validation ────────────────────────────────────────────────────────
 MAX_QUERY_LENGTH = int(os.getenv("AARKAAI_MAX_QUERY_LENGTH", "2000"))
+MAX_TOKENS = int(os.getenv("AARKAAI_MAX_TOKENS", "2048"))
 
 # ─── Embedding Model ─────────────────────────────────────────────────────────
 EMBEDDING_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
@@ -70,21 +71,58 @@ AUTO_LEARN_INTERVAL = 15  # Trigger auto-learn every N messages
 CRYPTO_SUFFIXES = ["-USD", "-EUR", "-GBP"]
 INDIA_SUFFIX = ".NS"
 COMMODITY_TICKERS = {
-    "gold": "GC=F",
-    "silver": "SI=F",
-    "oil": "CL=F",
-    "crude": "CL=F",
-    "natural gas": "NG=F",
-    "platinum": "PL=F",
-    "copper": "HG=F",
+    # Precious metals
+    "gold": "GC=F", "silver": "SI=F", "platinum": "PL=F", "palladium": "PA=F",
+    # Energy
+    "oil": "CL=F", "crude": "CL=F", "crude oil": "CL=F", "wti": "CL=F",
+    "brent": "BZ=F", "brent crude": "BZ=F",
+    "natural gas": "NG=F", "heating oil": "HO=F", "gasoline": "RB=F",
+    # Industrial metals
+    "copper": "HG=F", "aluminium": "ALI=F", "aluminum": "ALI=F",
+    "zinc": "ZN=F", "nickel": "NI=F", "tin": "TIN=F", "lead": "LE=F",
+    # Agricultural
+    "corn": "ZC=F", "wheat": "ZW=F", "soybean": "ZS=F", "soybeans": "ZS=F",
+    "rice": "ZR=F", "oats": "ZO=F",
+    "sugar": "SB=F", "coffee": "KC=F", "cocoa": "CC=F", "cotton": "CT=F",
+    "lumber": "LBS=F", "orange juice": "OJ=F",
+    # Livestock
+    "cattle": "LE=F", "live cattle": "LE=F", "lean hogs": "HE=F", "feeder cattle": "GF=F",
 }
 FOREX_PAIRS = {
-    "eurusd": "EURUSD=X",
-    "gbpusd": "GBPUSD=X",
-    "usdjpy": "USDJPY=X",
-    "usdcad": "USDCAD=X",
-    "audusd": "AUDUSD=X",
-    "usdinr": "USDINR=X",
+    # Major pairs
+    "eurusd": "EURUSD=X", "eur/usd": "EURUSD=X", "euro dollar": "EURUSD=X",
+    "gbpusd": "GBPUSD=X", "gbp/usd": "GBPUSD=X", "pound dollar": "GBPUSD=X",
+    "usdjpy": "USDJPY=X", "usd/jpy": "USDJPY=X", "dollar yen": "USDJPY=X",
+    "usdchf": "USDCHF=X", "usd/chf": "USDCHF=X",
+    "audusd": "AUDUSD=X", "aud/usd": "AUDUSD=X",
+    "usdcad": "USDCAD=X", "usd/cad": "USDCAD=X",
+    "nzdusd": "NZDUSD=X", "nzd/usd": "NZDUSD=X",
+    # INR pairs (India focused)
+    "usdinr": "USDINR=X", "usd/inr": "USDINR=X", "dollar rupee": "USDINR=X",
+    "usd to inr": "USDINR=X", "dollar to rupee": "USDINR=X",
+    "inr": "USDINR=X", "rupee": "USDINR=X",
+    "eurinr": "EURINR=X", "eur/inr": "EURINR=X", "euro rupee": "EURINR=X",
+    "gbpinr": "GBPINR=X", "gbp/inr": "GBPINR=X", "pound rupee": "GBPINR=X",
+    "jpyinr": "JPYINR=X", "jpy/inr": "JPYINR=X", "yen rupee": "JPYINR=X",
+    # Cross pairs
+    "eurgbp": "EURGBP=X", "eur/gbp": "EURGBP=X",
+    "eurjpy": "EURJPY=X", "eur/jpy": "EURJPY=X",
+    "gbpjpy": "GBPJPY=X", "gbp/jpy": "GBPJPY=X",
+    "eurchf": "EURCHF=X", "eur/chf": "EURCHF=X",
+    "audjpy": "AUDJPY=X", "aud/jpy": "AUDJPY=X",
+    "cadjpy": "CADJPY=X", "cad/jpy": "CADJPY=X",
+    # Exotic
+    "usdsgd": "USDSGD=X", "usd/sgd": "USDSGD=X",
+    "usdhkd": "USDHKD=X", "usd/hkd": "USDHKD=X",
+    "usdcny": "USDCNY=X", "usd/cny": "USDCNY=X", "dollar yuan": "USDCNY=X",
+    "usdtry": "USDTRY=X", "usd/try": "USDTRY=X",
+    "usdzar": "USDZAR=X", "usd/zar": "USDZAR=X",
+    "usdmxn": "USDMXN=X", "usd/mxn": "USDMXN=X",
+    "usdrub": "USDRUB=X", "usd/rub": "USDRUB=X",
+    "usdaed": "USDAED=X", "usd/aed": "USDAED=X", "dollar dirham": "USDAED=X",
+    "usdsar": "USDSAR=X", "usd/sar": "USDSAR=X",
+    # DXY index
+    "dxy": "DX-Y.NYB", "dollar index": "DX-Y.NYB", "us dollar index": "DX-Y.NYB",
 }
 
 # ─── Web Search ───────────────────────────────────────────────────────────────
@@ -108,7 +146,7 @@ BASH_BLOCKLIST = [
 ]
 
 # ─── Server ───────────────────────────────────────────────────────────────────
-BASE_URL = os.getenv("AARKAAI_BASE_URL", "http://3.108.34.65:5000")
+BASE_URL = os.getenv("AARKAAI_BASE_URL", "http://43.204.153.162:5000")
 HOST = os.getenv("AARKAAI_HOST", "0.0.0.0")
 PORT = int(os.getenv("AARKAAI_PORT", "5000"))
 WORKERS = int(os.getenv("AARKAAI_WORKERS", "1"))  # uvicorn workers (keep 1 for llama.cpp)
