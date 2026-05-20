@@ -173,9 +173,8 @@ def _stub_response(query, context=""):
             summary = context[:1500]
 
         return (
-            "Based on the latest real-time data:\n\n"
-            + summary + "\n\n"
-            "Would you like to know more about any specific asset?"
+            "Here is the latest live financial data:\n\n"
+            + summary.strip()
         )
     return (
         '[AARKAA-3B Stub] I received your query: "' + query + '". '
@@ -342,8 +341,10 @@ def _build_final_prompt(query, context, intent=""):
                         prompt += (
                             "IMPORTANT: The context below contains LIVE, REAL-TIME financial data fetched just now from Yahoo Finance. "
                             "You MUST use the exact prices, values, and percentages from the [Finance Data] section. "
-                            "Do NOT use any prices from your training data or prior knowledge — they are outdated.\n\n"
+                            "Do NOT use any prices from your training data or prior knowledge — they are outdated.\n"
+                            "Provide a VERY CONCISE answer showing ONLY the price, change, and percentage change. Do not add fluff or unnecessary conversational filler.\n\n"
                         )
+                        tokens = 100
                     prompt += (
                         "Context information:\n"
                         "---------------------\n"
@@ -353,7 +354,8 @@ def _build_final_prompt(query, context, intent=""):
                         "If the context contains specific numbers, prices, or data, use those exact values.\n\n"
                     )
                 prompt += "Question: " + query + "\n\nAnswer:"
-                tokens = MAX_TOKENS
+                if "has_finance" not in locals() or not has_finance:
+                    tokens = MAX_TOKENS
     return prompt, tokens
 
 
