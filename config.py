@@ -84,7 +84,7 @@ COMMODITY_TICKERS = {
     "corn": "ZC=F", "wheat": "ZW=F", "soybean": "ZS=F", "soybeans": "ZS=F",
     "rice": "ZR=F", "oats": "ZO=F",
     "sugar": "SB=F", "coffee": "KC=F", "cocoa": "CC=F", "cotton": "CT=F",
-    "lumber": "LBS=F", "orange juice": "OJ=F",
+    "orange juice": "OJ=F",
     # Livestock
     "cattle": "LE=F", "live cattle": "LE=F", "lean hogs": "HE=F", "feeder cattle": "GF=F",
 }

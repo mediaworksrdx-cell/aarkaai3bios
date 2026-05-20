@@ -7,14 +7,13 @@ Fetch live prices for ALL tickers across:
   - US Stocks
   - Market Indices
 
-Uses yfinance for real-time data.
+Uses yfinance for real-time data in a single highly-optimized batch request.
 """
 import sys
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 import yfinance as yf
 import json
-import sys
 from datetime import datetime
 
 # ─── COMMODITIES ──────────────────────────────────────────────────────────────
@@ -39,7 +38,7 @@ COMMODITIES = {
     "Coffee": "KC=F",
     "Cocoa": "CC=F",
     "Cotton": "CT=F",
-    "Lumber": "LBS=F",
+    "Weyerhaeuser (Timber)": "WY",
     "Orange Juice": "OJ=F",
     "Live Cattle": "LE=F",
     "Lean Hogs": "HE=F",
@@ -93,26 +92,24 @@ CRYPTO = {
     "Polkadot": "DOT-USD",
     "Chainlink": "LINK-USD",
     "Litecoin": "LTC-USD",
-    "Polygon (MATIC)": "MATIC-USD",
-    "Uniswap": "UNI-USD",
+    "Uniswap": "UNI7083-USD",
     "Cosmos": "ATOM-USD",
     "Monero": "XMR-USD",
     "Stellar": "XLM-USD",
     "NEAR Protocol": "NEAR-USD",
     "Filecoin": "FIL-USD",
-    "Aptos": "APT-USD",
+    "Aptos": "APT21794-USD",
     "Arbitrum": "ARB-USD",
     "Optimism": "OP-USD",
     "Aave": "AAVE-USD",
     "Maker": "MKR-USD",
     "Algorand": "ALGO-USD",
-    "Fantom": "FTM-USD",
     "Hedera": "HBAR-USD",
-    "Pepe": "PEPE-USD",
-    "Sui": "SUI-USD",
+    "Pepe": "PEPE24478-USD",
+    "Sui": "SUI20947-USD",
     "Sei": "SEI-USD",
     "Injective": "INJ-USD",
-    "Render": "RNDR-USD",
+    "Render": "RENDER-USD",
     "Fetch.ai": "FET-USD",
 }
 
@@ -134,7 +131,8 @@ INDIA = {
     "Bajaj Finance": "BAJFINANCE.NS",
     "Bajaj Finserv": "BAJAJFINSV.NS",
     "Maruti Suzuki": "MARUTI.NS",
-    "Tata Motors": "TATAMOTORS.NS",
+    "Tata Motors (PV)": "TMPV.NS",
+    "Tata Motors (CV)": "TMCV.NS",
     "Tata Steel": "TATASTEEL.NS",
     "Sun Pharma": "SUNPHARMA.NS",
     "Titan": "TITAN.NS",
@@ -167,7 +165,7 @@ INDIA = {
     "Tata Power": "TATAPOWER.NS",
     "Tata Elxsi": "TATAELXSI.NS",
     "Tata Consumer": "TATACONSUM.NS",
-    "Zomato": "ZOMATO.NS",
+    "Eternal (Zomato)": "ETERNAL.NS",
     "Paytm": "PAYTM.NS",
     "IRCTC": "IRCTC.NS",
     "HAL": "HAL.NS",
@@ -231,7 +229,7 @@ US = {
     "Mastercard": "MA",
     "PayPal": "PYPL",
     "American Express": "AXP",
-    "Block (Square)": "SQ",
+    "Block (Square)": "XYZ",
     "Charles Schwab": "SCHW",
     "BlackRock": "BLK",
     "Berkshire Hathaway": "BRK-B",
@@ -296,99 +294,56 @@ INDICES = {
 }
 
 
-def fetch_price(symbol: str) -> dict:
-    """Fetch live price data for a single ticker."""
-    try:
-        tk = yf.Ticker(symbol)
-        info = tk.info or {}
+def parse_dataframe(df, symbols_map):
+    """
+    Extract latest price and previous close from downloaded dataframe.
+    Extremely robust handling of NaNs due to timezone variations.
+    """
+    results = {}
+    for name, symbol in symbols_map.items():
+        try:
+            # Extract column series for Close
+            if symbol in df['Close'].columns:
+                close_series = df['Close'][symbol].dropna()
+            else:
+                # Handle single column output from yfinance
+                close_series = df['Close'].dropna()
 
-        price = (
-            info.get("currentPrice")
-            or info.get("regularMarketPrice")
-            or info.get("regularMarketPreviousClose")
-        )
+            if close_series.empty:
+                results[symbol] = {"price": None, "error": "No close data found"}
+                continue
 
-        # Fallback to history
-        if not price:
-            try:
-                hist = tk.history(period="1d")
-                if not hist.empty:
-                    price = round(float(hist["Close"].iloc[-1]), 2)
-            except Exception:
-                pass
+            price = round(float(close_series.iloc[-1]), 4)
+            prev = round(float(close_series.iloc[-2]), 4) if len(close_series) >= 2 else None
+            
+            change = None
+            pct = None
+            if price and prev:
+                change = round(price - prev, 4)
+                pct = round((change / prev) * 100, 2)
 
-        prev = info.get("previousClose") or info.get("regularMarketPreviousClose")
-        change = None
-        pct = None
-        if price and prev:
-            change = round(price - prev, 4)
-            pct = round((change / prev) * 100, 2)
+            currency = "USD"
+            if ".NS" in symbol or symbol.startswith("^N"):
+                currency = "INR"
 
-        return {
-            "price": price,
-            "prev_close": prev,
-            "change": change,
-            "change_pct": pct,
-            "currency": info.get("currency", "USD"),
-            "name": info.get("shortName") or info.get("longName", symbol),
-        }
-    except Exception as e:
-        return {"price": None, "error": str(e)}
-
-
-def fetch_category(cat_name: str, tickers: dict) -> list:
-    """Fetch all tickers in a category and return results."""
-    symbols = list(tickers.values())
-    names = list(tickers.keys())
-    results = []
-
-    print(f"\n{'='*80}")
-    print(f"  {cat_name} ({len(symbols)} tickers)")
-    print(f"{'='*80}")
-    print(f"{'Name':<25} {'Symbol':<18} {'Price':>12} {'Change':>10} {'Chg%':>8} {'Currency':>8}")
-    print(f"{'-'*25} {'-'*18} {'-'*12} {'-'*10} {'-'*8} {'-'*8}")
-
-    # Batch download for speed
-    try:
-        batch = yf.download(symbols, period="1d", group_by="ticker", progress=False, threads=True)
-    except Exception:
-        batch = None
-
-    for name, symbol in zip(names, symbols):
-        data = fetch_price(symbol)
-        price = data.get("price")
-        change = data.get("change")
-        pct = data.get("change_pct")
-        currency = data.get("currency", "USD")
-
-        price_str = f"{price:>12.4f}" if price is not None else "      N/A   "
-        change_str = f"{change:>+10.4f}" if change is not None else "      N/A "
-        pct_str = f"{pct:>+7.2f}%" if pct is not None else "    N/A "
-
-        arrow = ""
-        if change is not None:
-            arrow = "▲" if change > 0 else ("▼" if change < 0 else "─")
-
-        print(f"{name:<25} {symbol:<18} {price_str} {change_str} {pct_str} {currency:>8} {arrow}")
-
-        results.append({
-            "name": name,
-            "symbol": symbol,
-            "price": price,
-            "change": change,
-            "change_pct": pct,
-            "currency": currency,
-        })
-
+            results[symbol] = {
+                "name": name,
+                "symbol": symbol,
+                "price": price,
+                "change": change,
+                "change_pct": pct,
+                "currency": currency,
+            }
+        except Exception as e:
+            results[symbol] = {"price": None, "error": str(e)}
+            
     return results
 
 
 def main():
     print(f"\n{'#'*80}")
-    print(f"  AARKAAI LIVE MARKET DATA — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  AARKAAI BATCH MARKET DATA FETCH — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'#'*80}")
-
-    all_data = {}
 
     categories = [
         ("[INDICES] MARKET INDICES", INDICES),
@@ -399,24 +354,69 @@ def main():
         ("[US] US STOCKS", US),
     ]
 
-    total_tickers = sum(len(v) for _, v in categories)
-    print(f"\n  Total tickers to fetch: {total_tickers}")
+    # Combine all symbols for batch request
+    all_symbols_map = {}
+    for _, tickers in categories:
+        all_symbols_map.update(tickers)
 
+    all_symbols = list(all_symbols_map.values())
+    total_tickers = len(all_symbols)
+    print(f"\n  Batch downloading {total_tickers} tickers from Yahoo Finance...")
+
+    # Download everything at once with 5 days window to ensure weekend gaps are bridged
+    try:
+        df = yf.download(all_symbols, period="5d", progress=True, group_by="column", threads=True)
+    except Exception as exc:
+        print(f"❌ Batch download failed: {exc}")
+        sys.exit(1)
+
+    print("\n  Parsing data...")
+    parsed_results = parse_dataframe(df, all_symbols_map)
+
+    # Reconstruct category structure for save
+    output_data = {}
     for cat_name, tickers in categories:
-        results = fetch_category(cat_name, tickers)
-        all_data[cat_name] = results
+        cat_results = []
+        print(f"\n{'='*80}")
+        print(f"  {cat_name}")
+        print(f"{'='*80}")
+        print(f"{'Name':<25} {'Symbol':<18} {'Price':>12} {'Change':>10} {'Chg%':>8} {'Currency':>8}")
+        print(f"{'-'*25} {'-'*18} {'-'*12} {'-'*10} {'-'*8} {'-'*8}")
 
-    # Save to JSON
+        for name, symbol in tickers.items():
+            data = parsed_results.get(symbol, {"price": None})
+            price = data.get("price")
+            change = data.get("change")
+            pct = data.get("change_pct")
+            currency = data.get("currency", "USD")
+
+            price_str = f"{price:>12.4f}" if price is not None else "      N/A   "
+            change_str = f"{change:>+10.4f}" if change is not None else "      N/A "
+            pct_str = f"{pct:>+7.2f}%" if pct is not None else "    N/A "
+            arrow = "▲" if change and change > 0 else ("▼" if change and change < 0 else "─")
+
+            print(f"{name:<25} {symbol:<18} {price_str} {change_str} {pct_str} {currency:>8} {arrow}")
+            
+            cat_results.append({
+                "name": name,
+                "symbol": symbol,
+                "price": price,
+                "change": change,
+                "change_pct": pct,
+                "currency": currency,
+            })
+        output_data[cat_name] = cat_results
+
     output_file = "live_prices.json"
     with open(output_file, "w") as f:
         json.dump({
             "timestamp": datetime.now().isoformat(),
             "total_tickers": total_tickers,
-            "data": all_data,
+            "data": output_data,
         }, f, indent=2, default=str)
 
     print(f"\n{'='*80}")
-    print(f"  ✅ All {total_tickers} tickers fetched. Data saved to {output_file}")
+    print(f"  ✅ All {total_tickers} tickers fetched in batch. Saved to {output_file}")
     print(f"{'='*80}\n")
 
 

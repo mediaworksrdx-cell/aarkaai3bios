@@ -36,7 +36,7 @@ _US_TICKERS: dict[str, str] = {
     "jpmorgan": "JPM", "jp morgan": "JPM", "goldman sachs": "GS", "goldman": "GS",
     "morgan stanley": "MS", "bank of america": "BAC", "wells fargo": "WFC",
     "citigroup": "C", "visa": "V", "mastercard": "MA", "paypal": "PYPL",
-    "american express": "AXP", "amex": "AXP", "square": "SQ", "block": "SQ",
+    "american express": "AXP", "amex": "AXP", "square": "XYZ", "block": "XYZ",
     "charles schwab": "SCHW", "blackrock": "BLK", "berkshire": "BRK-B",
     # Healthcare / Pharma
     "johnson & johnson": "JNJ", "j&j": "JNJ", "pfizer": "PFE",
@@ -80,7 +80,7 @@ _INDIA_TICKERS: dict[str, str] = {
     "bajaj finance": "BAJFINANCE.NS", "bajaj": "BAJFINANCE.NS", "bajfinance": "BAJFINANCE.NS",
     "bajaj finserv": "BAJAJFINSV.NS",
     "maruti": "MARUTI.NS", "maruti suzuki": "MARUTI.NS",
-    "tata motors": "TATAMOTORS.NS", "tatamotors": "TATAMOTORS.NS",
+    "tata motors": "TMPV.NS", "tatamotors": "TMPV.NS",
     "tata steel": "TATASTEEL.NS", "tatasteel": "TATASTEEL.NS",
     "sunpharma": "SUNPHARMA.NS", "sun pharma": "SUNPHARMA.NS",
     "titan": "TITAN.NS",
@@ -113,7 +113,7 @@ _INDIA_TICKERS: dict[str, str] = {
     "tata power": "TATAPOWER.NS", "tatapower": "TATAPOWER.NS",
     "tata elxsi": "TATAELXSI.NS",
     "tata consumer": "TATACONSUM.NS",
-    "zomato": "ZOMATO.NS",
+    "zomato": "ETERNAL.NS",
     "paytm": "PAYTM.NS",
     "irctc": "IRCTC.NS",
     "hal": "HAL.NS", "hindustan aeronautics": "HAL.NS",
@@ -178,25 +178,23 @@ _CRYPTO_TICKERS: dict[str, str] = {
     "chainlink": "LINK-USD", "link": "LINK-USD",
     "litecoin": "LTC-USD", "ltc": "LTC-USD",
     "polygon": "MATIC-USD", "matic": "MATIC-USD",
-    "uniswap": "UNI-USD", "uni": "UNI-USD",
+    "uniswap": "UNI7083-USD", "uni": "UNI7083-USD",
     "cosmos": "ATOM-USD", "atom": "ATOM-USD",
     "monero": "XMR-USD", "xmr": "XMR-USD",
     "stellar": "XLM-USD", "xlm": "XLM-USD",
     "near": "NEAR-USD", "near protocol": "NEAR-USD",
     "filecoin": "FIL-USD", "fil": "FIL-USD",
-    "aptos": "APT-USD", "apt": "APT-USD",
+    "aptos": "APT21794-USD", "apt": "APT21794-USD",
     "arbitrum": "ARB-USD", "arb": "ARB-USD",
     "optimism": "OP-USD",
     "aave": "AAVE-USD",
     "maker": "MKR-USD", "mkr": "MKR-USD",
     "algorand": "ALGO-USD", "algo": "ALGO-USD",
-    "fantom": "FTM-USD", "ftm": "FTM-USD",
-    "hedera": "HBAR-USD", "hbar": "HBAR-USD",
-    "pepe": "PEPE-USD",
-    "sui": "SUI-USD",
+    "pepe": "PEPE24478-USD",
+    "sui": "SUI20947-USD",
     "sei": "SEI-USD",
     "injective": "INJ-USD", "inj": "INJ-USD",
-    "render": "RNDR-USD", "rndr": "RNDR-USD",
+    "render": "RENDER-USD", "rndr": "RENDER-USD",
     "fetch.ai": "FET-USD", "fet": "FET-USD",
 }
 
@@ -243,36 +241,54 @@ def _fetch_ticker_data(symbol: str) -> dict:
     """Fetch live data for a single ticker."""
     try:
         tk = yf.Ticker(symbol)
-        info = tk.info or {}
+        
+        # Try fast_info first to avoid heavy scraper calls and rate limits
+        try:
+            fast = dict(tk.fast_info)
+            price = fast.get("lastPrice") or fast.get("regularMarketPrice")
+            prev_close = fast.get("previousClose") or fast.get("regularMarketPreviousClose")
+            
+            result: dict = {
+                "symbol": symbol,
+                "name": symbol,  # fallback
+                "price": round(price, 4) if price else None,
+                "previous_close": round(prev_close, 4) if prev_close else None,
+                "open": round(fast.get("open"), 4) if fast.get("open") else None,
+                "day_high": round(fast.get("dayHigh"), 4) if fast.get("dayHigh") else None,
+                "day_low": round(fast.get("dayLow"), 4) if fast.get("dayLow") else None,
+                "volume": fast.get("lastVolume") or fast.get("volume"),
+                "market_cap": fast.get("marketCap"),
+                "currency": fast.get("currency", "INR" if ".NS" in symbol or symbol.startswith("^N") else "USD"),
+            }
+        except Exception:
+            # Fallback to legacy info if fast_info fails
+            info = tk.info or {}
+            price = (
+                info.get("currentPrice")
+                or info.get("regularMarketPrice")
+                or info.get("regularMarketPreviousClose")
+            )
+            result = {
+                "symbol": symbol,
+                "name": info.get("shortName") or info.get("longName", symbol),
+                "price": price,
+                "previous_close": info.get("previousClose") or info.get("regularMarketPreviousClose"),
+                "open": info.get("open") or info.get("regularMarketOpen"),
+                "day_high": info.get("dayHigh") or info.get("regularMarketDayHigh"),
+                "day_low": info.get("dayLow") or info.get("regularMarketDayLow"),
+                "volume": info.get("volume") or info.get("regularMarketVolume"),
+                "market_cap": info.get("marketCap"),
+                "currency": info.get("currency", "INR" if ".NS" in symbol or symbol.startswith("^N") else "USD"),
+            }
 
-        # Get price - try multiple fields (indices use different keys)
-        price = (
-            info.get("currentPrice")
-            or info.get("regularMarketPrice")
-            or info.get("regularMarketPreviousClose")
-        )
-
-        # Fallback: use history if info doesn't have price
-        if not price:
+        # Fallback: use history if price is still empty
+        if not result["price"]:
             try:
                 hist = tk.history(period="1d")
                 if not hist.empty:
-                    price = round(float(hist["Close"].iloc[-1]), 2)
+                    result["price"] = round(float(hist["Close"].iloc[-1]), 2)
             except Exception:
                 pass
-
-        result: dict = {
-            "symbol": symbol,
-            "name": info.get("shortName") or info.get("longName", symbol),
-            "price": price,
-            "previous_close": info.get("previousClose") or info.get("regularMarketPreviousClose"),
-            "open": info.get("open") or info.get("regularMarketOpen"),
-            "day_high": info.get("dayHigh") or info.get("regularMarketDayHigh"),
-            "day_low": info.get("dayLow") or info.get("regularMarketDayLow"),
-            "volume": info.get("volume") or info.get("regularMarketVolume"),
-            "market_cap": info.get("marketCap"),
-            "currency": info.get("currency", "INR" if ".NS" in symbol or symbol.startswith("^N") else "USD"),
-        }
 
         # Compute change
         if result["price"] and result["previous_close"]:
