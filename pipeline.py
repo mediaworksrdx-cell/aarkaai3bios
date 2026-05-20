@@ -69,6 +69,28 @@ class _CircuitBreaker:
 _web_breaker = _CircuitBreaker("web_search", threshold=3, cooldown=300)
 _finance_breaker = _CircuitBreaker("finance", threshold=3, cooldown=120)
 
+_NEWS_KEYWORDS = [
+    "current", "latest", "today", "news", "recent", "update",
+    "now", "2024", "2025", "2026", "happening", "situation",
+    "war", "election", "breaking", "live", "trending",
+    "ताज़ा", "समाचार", "आज", "खबर",
+    "noticias", "hoy", "actual",
+    "nouvelles", "aujourd'hui", "actualité",
+    "nachrichten", "heute", "aktuell",
+    "أخبار", "اليوم",
+    "ニュース", "最新", "今日",
+    "新闻", "最新", "今天",
+]
+
+_FACTUAL_PREFIXES = [
+    "who is", "who are", "who was", "who were", "who's",
+    "what is", "what are", "what's", "what is the current",
+    "when is", "when did", "when will", "when's",
+    "where is", "where are", "where's",
+    "how many", "how much",
+    "tell me about", "give me information on",
+]
+
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -117,7 +139,19 @@ def process_query(query: str, user_id: str = "default") -> PromptResponse:
     logger.info("Detected language: %s", detected_lang)
 
     # ── 1. Semantic Filter ────────────────────────────────────────────────
-    filter_result = semantic_filter.classify(query)
+    clean_q = re.sub(r"[^\w\s]", "", query.lower()).strip()
+    is_greeting = clean_q in ["hello", "hi", "hey", "greetings", "good morning", "good afternoon", "good evening", "how are you", "who are you", "aarka", "aarkaai"]
+    
+    if is_greeting:
+        filter_result = {
+            "domain": "general",
+            "confidence": 1.0,
+            "intent": "general_query",
+            "scores": {"general": 1.0}
+        }
+    else:
+        filter_result = semantic_filter.classify(query)
+        
     domain = filter_result["domain"]
     filter_confidence = filter_result["confidence"]
     intent = filter_result["intent"]
@@ -137,17 +171,19 @@ def process_query(query: str, user_id: str = "default") -> PromptResponse:
     # ── 4. Low confidence – route to external modules ─────────────────────
     context_parts: list[str] = []
 
-    # RAG – always check the knowledge base first
-    try:
-        rag_context = rag.get_context(query)
-        if rag_context:
-            context_parts.append(f"[Knowledge Base]\n{rag_context}")
-            sources.append("rag")
-    except Exception as exc:
-        logger.error("RAG module error: %s", exc)
+    # RAG – check the knowledge base first (skip for simple greetings)
+    if not is_greeting:
+        try:
+            rag_context = rag.get_context(query)
+            if rag_context:
+                context_parts.append(f"[Knowledge Base]\n{rag_context}")
+                sources.append("rag")
+        except Exception as exc:
+            logger.error("RAG module error: %s", exc)
 
     # Domain-specific routing
-    if domain == "finance" or intent.startswith("finance"):
+    fin_tickers = finance.extract_tickers(query)
+    if fin_tickers or domain == "finance" or intent.startswith("finance"):
         if not _finance_breaker.is_open:
             try:
                 fin_data = finance.get_market_data(query)
@@ -163,33 +199,24 @@ def process_query(query: str, user_id: str = "default") -> PromptResponse:
 
     # Detect current events / news queries that need web search
     q_lower = query.lower()
-    _NEWS_KEYWORDS = [
-        # English
-        "current", "latest", "today", "news", "recent", "update",
-        "now", "2024", "2025", "2026", "happening", "situation",
-        "war", "election", "breaking", "live", "trending",
-        # Hindi
-        "ताज़ा", "समाचार", "आज", "खबर",
-        # Spanish
-        "noticias", "hoy", "actual",
-        # French
-        "nouvelles", "aujourd'hui", "actualité",
-        # German
-        "nachrichten", "heute", "aktuell",
-        # Arabic
-        "أخبار", "اليوم",
-        # Japanese
-        "ニュース", "最新", "今日",
-        # Chinese
-        "新闻", "最新", "今天",
-    ]
+    is_factual = any(q_lower.startswith(prefix) for prefix in _FACTUAL_PREFIXES)
+
+    # Skip web search if live finance data was already fetched — web results
+    # often contain stale prices that contradict the live Yahoo Finance feed
+    # and confuse the model into outputting outdated values.
+    has_finance_context = "finance" in sources
+
     needs_web = (
-        domain == "web_search"
-        or intent in ("web_lookup", "news_search")
-        or any(kw in q_lower for kw in _NEWS_KEYWORDS)
+        not has_finance_context
+        and (
+            domain == "web_search"
+            or intent in ("web_lookup", "news_search")
+            or any(kw in q_lower for kw in _NEWS_KEYWORDS)
+            or is_factual
+        )
     )
 
-    agent_triggers = ["execute", "run", "create a file", "modify file", "write to file", "bash"]
+    agent_triggers = ["execute", "run", "create a file", "modify file", "write to file", "bash", "test it", "test this", "test the code", "test them"]
     needs_agent = any(w in query.lower() for w in agent_triggers)
 
     if needs_web and not needs_agent:
@@ -212,7 +239,7 @@ def process_query(query: str, user_id: str = "default") -> PromptResponse:
         chat_ctx = memory.get_chat_context(user_id, limit=5)
         if chat_ctx:
             chat_lines = "\n".join(
-                f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:200]}"
+                f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:1500]}"
                 for m in chat_ctx
             )
             context_parts.insert(0, f"[Recent Conversation]\n{chat_lines}")
@@ -287,7 +314,19 @@ async def stream_query(query: str, user_id: str = "default"):
     detected_lang = _detect_language(query)
 
     # ── 1. Semantic Filter ────────────────────────────────────────────────
-    filter_result = semantic_filter.classify(query)
+    clean_q = re.sub(r"[^\w\s]", "", query.lower()).strip()
+    is_greeting = clean_q in ["hello", "hi", "hey", "greetings", "good morning", "good afternoon", "good evening", "how are you", "who are you", "aarka", "aarkaai"]
+    
+    if is_greeting:
+        filter_result = {
+            "domain": "general",
+            "confidence": 1.0,
+            "intent": "general_query",
+            "scores": {"general": 1.0}
+        }
+    else:
+        filter_result = semantic_filter.classify(query)
+        
     domain = filter_result["domain"]
     filter_confidence = filter_result["confidence"]
     intent = filter_result["intent"]
@@ -297,18 +336,71 @@ async def stream_query(query: str, user_id: str = "default"):
     context_parts: list[str] = []
     
     # RAG
-    try:
-        rag_context = rag.get_context(query)
-        if rag_context:
-            context_parts.append(f"[Knowledge Base]\n{rag_context}")
-            sources.append("rag")
-    except Exception: pass
+    if not is_greeting:
+        try:
+            rag_context = rag.get_context(query)
+            if rag_context:
+                context_parts.append(f"[Knowledge Base]\n{rag_context}")
+                sources.append("rag")
+        except Exception: pass
+
+    # Domain-specific routing
+    fin_tickers = finance.extract_tickers(query)
+    if fin_tickers or domain == "finance" or intent.startswith("finance"):
+        if not _finance_breaker.is_open:
+            try:
+                fin_data = finance.get_market_data(query)
+                if fin_data.get("summary"):
+                    context_parts.append(f"[Finance Data]\n{fin_data['summary']}")
+                    sources.append("finance")
+                _finance_breaker.record_success()
+            except Exception as exc:
+                _finance_breaker.record_failure()
+                logger.error("Finance module error: %s", exc)
+        else:
+            logger.info("Finance circuit breaker is OPEN — skipping")
+
+    # Detect current events / news queries that need web search
+    q_lower = query.lower()
+    is_factual = any(q_lower.startswith(prefix) for prefix in _FACTUAL_PREFIXES)
+
+    # Skip web search if live finance data was already fetched — web results
+    # often contain stale prices that contradict the live Yahoo Finance feed
+    # and confuse the model into outputting outdated values.
+    has_finance_context = "finance" in sources
+
+    needs_web = (
+        not has_finance_context
+        and (
+            domain == "web_search"
+            or intent in ("web_lookup", "news_search")
+            or any(kw in q_lower for kw in _NEWS_KEYWORDS)
+            or is_factual
+        )
+    )
+
+    agent_triggers = ["execute", "run", "create a file", "modify file", "write to file", "bash", "test it", "test this", "test the code", "test them"]
+    needs_agent = any(w in query.lower() for w in agent_triggers)
+
+    if needs_web and not needs_agent:
+        if not _web_breaker.is_open:
+            try:
+                web_ctx = web_search.get_web_context(query, lang=detected_lang)
+                if web_ctx:
+                    context_parts.append(f"[Web Search]\n{web_ctx}")
+                    sources.append("web_search")
+                _web_breaker.record_success()
+            except Exception as exc:
+                _web_breaker.record_failure()
+                logger.error("Web search error: %s", exc)
+        else:
+            logger.info("Web search circuit breaker is OPEN — skipping")
 
     # Memory
     try:
         chat_ctx = memory.get_chat_context(user_id, limit=5)
         if chat_ctx:
-            chat_lines = "\n".join(f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:200]}" for m in chat_ctx)
+            chat_lines = "\n".join(f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:1500]}" for m in chat_ctx)
             context_parts.insert(0, f"[Recent Conversation]\n{chat_lines}")
     except Exception: pass
 
