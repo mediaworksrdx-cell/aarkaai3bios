@@ -393,7 +393,7 @@ def prompt(
 
     try:
         # Pass the verified user_id from the token, not the JSON body
-        result = process_query(query=req.query, user_id=current_user.id)
+        result = process_query(query=req.query, user_id=current_user.id, session_id=req.session_id)
         _metrics["total_processing_time"] += result.processing_time
         return result
     except Exception as exc:
@@ -418,7 +418,7 @@ async def prompt_stream(
 
     async def event_generator():
         try:
-            async for chunk in stream_query(query=req.query, user_id=current_user.id):
+            async for chunk in stream_query(query=req.query, user_id=current_user.id, session_id=req.session_id):
                 yield f"data: {json.dumps(chunk)}\n\n"
         except Exception as exc:
             logger.error("Streaming error: %s", exc, exc_info=True)

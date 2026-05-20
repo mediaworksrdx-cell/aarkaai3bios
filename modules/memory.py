@@ -34,6 +34,7 @@ def _utcnow() -> datetime:
 
 def store_conversation(
     user_id: str,
+    session_id: str,
     query: str,
     response: str,
     intent: str = "general",
@@ -45,6 +46,7 @@ def store_conversation(
     try:
         entry = ConversationHistory(
             user_id=user_id,
+            session_id=session_id,
             query=query,
             response=response,
             intent=intent,
@@ -54,8 +56,8 @@ def store_conversation(
         session.add(entry)
 
         # Also save to personal_chats for context window
-        session.add(PersonalChat(user_id=user_id, message=query, role="user"))
-        session.add(PersonalChat(user_id=user_id, message=response, role="assistant"))
+        session.add(PersonalChat(user_id=user_id, session_id=session_id, message=query, role="user"))
+        session.add(PersonalChat(user_id=user_id, session_id=session_id, message=response, role="assistant"))
 
         session.commit()
         logger.debug("Stored conversation for user %s", user_id)
@@ -109,13 +111,13 @@ def get_conversation_count(user_id: str) -> int:
 # ─── Personal Chats (Context Window) ─────────────────────────────────────────
 
 
-def get_chat_context(user_id: str, limit: int = 10) -> list[dict]:
+def get_chat_context(user_id: str, session_id: str, limit: int = 10) -> list[dict]:
     """Get recent chat messages for context window."""
     session: Session = SessionLocal()
     try:
         rows = (
             session.query(PersonalChat)
-            .filter(PersonalChat.user_id == user_id)
+            .filter(PersonalChat.user_id == user_id, PersonalChat.session_id == session_id)
             .order_by(PersonalChat.timestamp.desc())
             .limit(limit * 2)  # user + assistant pairs
             .all()
