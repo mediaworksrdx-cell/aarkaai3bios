@@ -80,6 +80,7 @@ class ConversationHistory(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(128), nullable=False, index=True)
+    session_id = Column(String(64), nullable=False, default="default", index=True)
     query = Column(Text, nullable=False)
     response = Column(Text, nullable=False)
     intent = Column(String(64), default="general")
@@ -95,6 +96,7 @@ class PersonalChat(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(128), nullable=False, index=True)
+    session_id = Column(String(64), nullable=False, default="default", index=True)
     message = Column(Text, nullable=False)
     role = Column(String(16), nullable=False)  # "user" | "assistant"
     timestamp = Column(DateTime, default=_utcnow)

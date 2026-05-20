@@ -115,7 +115,7 @@ def _sanitize_query(query: str) -> str:
 
 # ─── Main Pipeline ───────────────────────────────────────────────────────────
 
-def process_query(query: str, user_id: str = "default") -> PromptResponse:
+def process_query(query: str, user_id: str = "default", session_id: str = "default") -> PromptResponse:
     """
     End-to-end pipeline: receive a user query and return a
     fully-processed PromptResponse.
@@ -236,7 +236,7 @@ def process_query(query: str, user_id: str = "default") -> PromptResponse:
     # ── 5. Context fusion ─────────────────────────────────────────────────
     # Include recent conversation context for continuity
     try:
-        chat_ctx = memory.get_chat_context(user_id, limit=5)
+        chat_ctx = memory.get_chat_context(user_id, session_id, limit=5)
         if chat_ctx:
             chat_lines = "\n".join(
                 f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:1500]}"
@@ -272,7 +272,7 @@ def process_query(query: str, user_id: str = "default") -> PromptResponse:
     # ── 7–8. Store + auto-learn ───────────────────────────────────────────
     main_source = sources[-1] if len(sources) > 1 else "aarkaa-3b"
     _post_process(
-        user_id, query, final_answer,
+        user_id, session_id, query, final_answer,
         intent, combined_confidence, main_source,
         memory, auto_learn,
     )
@@ -291,7 +291,7 @@ def process_query(query: str, user_id: str = "default") -> PromptResponse:
     )
 
 
-async def stream_query(query: str, user_id: str = "default"):
+async def stream_query(query: str, user_id: str = "default", session_id: str = "default"):
     """
     Streaming version of the pipeline.
     Yields JSON chunks for SSE.
@@ -398,7 +398,7 @@ async def stream_query(query: str, user_id: str = "default"):
 
     # Memory
     try:
-        chat_ctx = memory.get_chat_context(user_id, limit=5)
+        chat_ctx = memory.get_chat_context(user_id, session_id, limit=5)
         if chat_ctx:
             chat_lines = "\n".join(f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:1500]}" for m in chat_ctx)
             context_parts.insert(0, f"[Recent Conversation]\n{chat_lines}")
@@ -427,7 +427,7 @@ async def stream_query(query: str, user_id: str = "default"):
     combined_confidence = (filter_confidence + 0.5) / 2
     
     _post_process(
-        user_id, query, full_response,
+        user_id, session_id, query, full_response,
         intent, combined_confidence, sources[-1],
         memory, auto_learn,
     )
@@ -438,6 +438,7 @@ async def stream_query(query: str, user_id: str = "default"):
 
 def _post_process(
     user_id: str,
+    session_id: str,
     query: str,
     response: str,
     intent: str,
@@ -450,6 +451,7 @@ def _post_process(
     try:
         memory_mod.store_conversation(
             user_id=user_id,
+            session_id=session_id,
             query=query,
             response=response,
             intent=intent,
