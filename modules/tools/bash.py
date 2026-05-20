@@ -22,7 +22,8 @@ class BashTool(Tool):
     name = "BashTool"
     description = (
         "Execute a shell command inside a sandboxed workspace. Use this for running "
-        "tests, checking system state, or executing code. Provide the 'command' argument."
+        "tests, checking system state, or executing code. Provide the 'command' argument. "
+        "NOTE: This server runs Linux. Always use 'python3' (not 'python') to run Python code."
     )
 
     def _is_blocked(self, command: str) -> bool:
@@ -48,8 +49,15 @@ class BashTool(Tool):
         work_dir.mkdir(parents=True, exist_ok=True)
 
         try:
+            # Normalize 'python' to 'python3' on Linux servers where 'python' may not exist
+            cmd_normalized = cmd.replace("python -", "python3 -").replace("python -c", "python3 -c")
+            if cmd.strip().startswith("python ") and not cmd.strip().startswith("python3"):
+                cmd_normalized = "python3" + cmd[len("python"):]
+            else:
+                cmd_normalized = cmd
+
             result = subprocess.run(
-                cmd,
+                cmd_normalized,
                 shell=True,  # Keep shell=True for complex commands (pipes, redirects)
                 check=False,
                 stdout=subprocess.PIPE,

@@ -217,19 +217,23 @@ def extract_tickers(query: str) -> list[str]:
     ns_tickers = re.findall(r"([A-Z]{2,20}\.NS)", query.upper())
     tickers.extend(ns_tickers)
 
-    # Named lookups
-    for name, ticker in {**_US_TICKERS, **_INDIA_TICKERS, **_INDEX_TICKERS, **_CRYPTO_TICKERS}.items():
-        if name in q_lower:
-            tickers.append(ticker)
+    # Combine all dictionaries
+    all_mappings = {**_US_TICKERS, **_INDIA_TICKERS, **_INDEX_TICKERS, **_CRYPTO_TICKERS, **COMMODITY_TICKERS, **FOREX_PAIRS}
+    
+    # Add reverse lookup for bare tickers (e.g., 'aapl' -> 'AAPL')
+    for _, ticker in list(all_mappings.items()):
+        all_mappings[ticker.lower()] = ticker
+        # Also allow prefixes like 'btc' for 'BTC-USD'
+        if "-" in ticker:
+            all_mappings[ticker.split("-")[0].lower()] = ticker
+        if "=" in ticker:
+            all_mappings[ticker.split("=")[0].lower()] = ticker
+        if ".NS" in ticker:
+            all_mappings[ticker.split(".")[0].lower()] = ticker
 
-    # Commodity lookups
-    for name, ticker in COMMODITY_TICKERS.items():
-        if name in q_lower:
-            tickers.append(ticker)
-
-    # Forex lookups
-    for name, ticker in FOREX_PAIRS.items():
-        if name in q_lower:
+    # Search using word boundaries to avoid partial matches
+    for name, ticker in all_mappings.items():
+        if re.search(r"\b" + re.escape(name) + r"\b", q_lower):
             tickers.append(ticker)
 
     return list(dict.fromkeys(tickers))  # deduplicate, preserve order

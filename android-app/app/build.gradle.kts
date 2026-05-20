@@ -20,14 +20,21 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // Inject backend URL from gradle.properties into BuildConfig
+        buildConfigField(
+            "String",
+            "BASE_URL",
+            "\"${project.findProperty("AARKAAI_BASE_URL") ?: "http://10.0.2.2:5000/"}\""
+        )
     }
 
     signingConfigs {
         create("release") {
-            storeFile = file("../release.jks")
-            storePassword = "aarkaai_secret"
-            keyAlias = "aarkaai_key"
-            keyPassword = "aarkaai_secret"
+            storeFile = file(project.findProperty("RELEASE_STORE_FILE") as String? ?: "../release.jks")
+            storePassword = project.findProperty("RELEASE_STORE_PASSWORD") as String? ?: ""
+            keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String? ?: ""
+            keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String? ?: ""
         }
     }
 
@@ -51,6 +58,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"

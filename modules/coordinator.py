@@ -26,7 +26,7 @@ Whenever you want to use a tool, you must output exactly this format:
 
 Thought: <explain what you're thinking and why you need a tool>
 Action: <ToolName>
-Action Input: {{"param": "value"}}
+Action Input: {{"param": "value"}} (IMPORTANT: This must be a single line of valid JSON with NO literal newlines)
 
 You will then receive an "Observation" with the result of the tool execution. 
 Repeat this process until you have gathered all necessary context or finished all edits.
@@ -142,7 +142,14 @@ def process_task(query: str, context: str = "") -> str:
                     pass
                     
         if params is None:
-            observation = "Error: Invalid JSON object format. Action Input must be a valid JSON dictionary."
+            if action_name == "BashTool":
+                # Fallback for unescaped newlines in BashTool commands
+                m = re.search(r'"command"\s*:\s*"(.*?)"\s*\}?$', raw_json, re.DOTALL)
+                if m:
+                    params = {"command": m.group(1).replace('\\"', '"').replace('\\n', '\n')}
+
+        if params is None:
+            observation = "Error: Invalid JSON object format. Action Input must be a valid JSON dictionary on a single line."
             prompt += f"\n{full_response}\nObservation: {observation}\n"
             continue
             

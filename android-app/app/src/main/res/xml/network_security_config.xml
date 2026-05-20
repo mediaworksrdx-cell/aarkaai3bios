@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network Security Configuration for AARKAAI.
+  Only allows cleartext (HTTP) to the known backend IP.
+  All other traffic requires HTTPS.
+  Remove the <domain-config> block once the backend moves to HTTPS.
+-->
+<network-security-config>
+    <!-- Default: require HTTPS for all domains -->
+    <base-config cleartextTrafficPermitted="false" />
+
+    <!-- Exception: allow HTTP only to our backend server -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">43.204.153.162</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain> <!-- Android emulator loopback -->
+    </domain-config>
+</network-security-config>
