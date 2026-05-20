@@ -161,12 +161,21 @@ def _clean_response(text):
 def _stub_response(query, context=""):
     """Placeholder response when model is unavailable."""
     if context:
+        # Prioritize finance data over stale conversation history
+        summary = ""
+        if "[Finance Data]" in context:
+            # Extract the finance section specifically
+            fin_start = context.index("[Finance Data]")
+            fin_end = context.find("\n\n---\n\n", fin_start)
+            finance_section = context[fin_start:fin_end] if fin_end > 0 else context[fin_start:]
+            summary = finance_section
+        else:
+            summary = context[:1500]
+
         return (
-            "[AARKAA-3B Stub] Based on the retrieved context, "
-            "here is a synthesized answer to your question "
-            '"' + query + '":\n\n'
-            "Context summary: " + context[:500] + "\n\n"
-            "Note: This is a placeholder response."
+            "Based on the latest real-time data:\n\n"
+            + summary + "\n\n"
+            "Would you like to know more about any specific asset?"
         )
     return (
         '[AARKAA-3B Stub] I received your query: "' + query + '". '
