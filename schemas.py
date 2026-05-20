@@ -151,3 +151,22 @@ class RLHFRequest(BaseModel):
     user_id: str = Field(max_length=128)
     rating: int = Field(ge=-1, le=1, description="1 for positive, -1 for negative")
     correction: Optional[str] = Field(default=None, max_length=2000, description="Optional text correction to learn from")
+
+
+
+# --- Auth ---
+
+
+class UserCreate(BaseModel):
+    """Request payload for user registration or login."""
+    email: str = Field(description="User email address")
+    password: str = Field(description="User password")
+    name: str | None = Field(default=None, description="Display name (register only)")
+
+
+class TokenResponse(BaseModel):
+    """JWT token response returned after auth."""
+    access_token: str
+    token_type: str = "bearer"
+    user_id: str
+    name: str | None = None

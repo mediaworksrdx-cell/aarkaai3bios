@@ -1,5 +1,6 @@
 package com.aarkaai.app.network
 
+import com.aarkaai.app.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -8,14 +9,17 @@ import java.util.concurrent.TimeUnit
 
 object RetrofitClient {
 
-    // ─── CHANGE THIS to your actual server URL ───
-    // Emulator → local machine:  http://10.0.2.2:5000/
-    // Physical device → LAN:     http://192.168.x.x:5000/
-    // Production:                 https://your-domain.com/
-    private const val BASE_URL = "http://3.108.34.65:5000/"
+    // URL is injected from gradle.properties → BuildConfig at compile time.
+    // Emulator fallback: http://10.0.2.2:5000/
+    // Production:        http://43.204.153.162:5000/
+    private const val BASE_URL = BuildConfig.BASE_URL
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+        // Only log full bodies in debug builds — prevents JWT/query leaks in production
+        level = if (BuildConfig.DEBUG)
+            HttpLoggingInterceptor.Level.BODY
+        else
+            HttpLoggingInterceptor.Level.NONE
     }
 
     private val okHttpClient = OkHttpClient.Builder()
@@ -35,3 +39,4 @@ object RetrofitClient {
             .create(ApiService::class.java)
     }
 }
+

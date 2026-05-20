@@ -34,9 +34,14 @@ ios-app/Pods/
 ios-app/.swiftpm/
 
 # --- AARKAAI Specific ---
+*.gguf
+*.tar.gz
+*.zip
 *.jks
 release.jks
-aarkaa-3b/*.gguf
+live_prices.json
+live_prices_report.md
+llama.cpp/
 aarkaa-3b/*.safetensors
 aarkaa-3b/*.bin
 aarkaa-3b/*.pt

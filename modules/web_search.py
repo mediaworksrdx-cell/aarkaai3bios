@@ -61,31 +61,12 @@ def search_wikipedia(query: str, sentences: int = 5, lang: str = "en") -> Option
         )
         page = wiki.page(query)
 
-        if not page.exists():
-            # Try to search with simplified terms (maximum 3 attempts to avoid excessive HTTP requests)
-            words = query.split()
-            max_attempts = min(3, len(words))
-            for i in range(max_attempts, 0, -1):
-                candidate = " ".join(words[:i])
-                page = wiki.page(candidate)
-                if page.exists():
-                    break
-
-        # If still not found and not English, try English as fallback
         if not page.exists() and lang != "en":
             wiki_en = wikipediaapi.Wikipedia(
                 user_agent="AARKAAI/1.0 (https://aarkaai.local)",
                 language="en",
             )
             page = wiki_en.page(query)
-            if not page.exists():
-                words = query.split()
-                max_attempts = min(3, len(words))
-                for i in range(max_attempts, 0, -1):
-                    candidate = " ".join(words[:i])
-                    page = wiki_en.page(candidate)
-                    if page.exists():
-                        break
 
         if page.exists():
             summary = page.summary

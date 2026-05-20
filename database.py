@@ -14,6 +14,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
     event,
 )
@@ -58,6 +59,7 @@ def _utcnow() -> datetime:
 
 
 # ─── Models ───────────────────────────────────────────────────────────────────
+
 
 class UserAccount(Base):
     """Registered users for the AARKAAI platform."""
