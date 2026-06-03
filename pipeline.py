@@ -205,6 +205,15 @@ def _has_live_finance_intent(query: str, domain: str, intent: str) -> bool:
     if any(kw in q_low for kw in exclude_keywords):
         return False
 
+    # Exclude queries referencing specific years (e.g. "in 2040", "in 2010") to avoid live price mismatches
+    if re.search(r"\b(18\d{2}|19\d{2}|20\d{2}|2100)\b", query):
+        return False
+
+    # Exclude temporal/forecast queries
+    temporal_keywords = ["forecast", "projection", "prediction", "historical", "history", "past", "future"]
+    if any(kw in q_low for kw in temporal_keywords):
+        return False
+
     # Check for explicit ticker symbols ($AAPL, AAPL.NS)
     if re.search(r"\$[A-Za-z]{1,6}\b", query):
         return True
