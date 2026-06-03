@@ -465,13 +465,13 @@ def primary_check(query, lang="en"):
         return _stub_response(query), 0.3
 
 
-def final_response(query, context, intent="", lang="en"):
+def final_response(query, context, intent="", lang="en", mode="production"):
     """Full reasoning pass with fused context from external modules."""
     if _is_stub:
         return _stub_response(query, context)
 
     try:
-        result = _build_final_prompt(query, context, intent, lang)
+        result = _build_final_prompt(query, context, intent, lang, mode)
         prompt, tokens = result[0], result[1]
         temp = result[2] if len(result) > 2 else 0.7
         return _generate(prompt, max_new_tokens=tokens, temperature=temp)
@@ -480,14 +480,14 @@ def final_response(query, context, intent="", lang="en"):
         return _stub_response(query, context)
 
 
-def stream_final_response(query, context, intent="", lang="en"):
+def stream_final_response(query, context, intent="", lang="en", mode="production"):
     """Stream tokens for the final response pass."""
     if _is_stub:
         yield _stub_response(query, context)
         return
 
     try:
-        result = _build_final_prompt(query, context, intent, lang)
+        result = _build_final_prompt(query, context, intent, lang, mode)
         prompt, tokens = result[0], result[1]
         temp = result[2] if len(result) > 2 else 0.7
         yield from _generate_stream(prompt, max_new_tokens=tokens, temperature=temp)
@@ -496,7 +496,7 @@ def stream_final_response(query, context, intent="", lang="en"):
         yield _stub_response(query, context)
 
 
-def _build_final_prompt(query, context, intent="", lang="en"):
+def _build_final_prompt(query, context, intent="", lang="en", mode="production"):
     lang_name = _LANG_NAMES.get(lang, "English")
     is_continue = query.lower().strip() in ["continue", "next phase", "continue code", "continue the code", "go on"]
     if is_continue:
@@ -513,30 +513,45 @@ def _build_final_prompt(query, context, intent="", lang="en"):
 
     is_reasoning = (intent == "reasoning_puzzle")
     if is_reasoning:
-        system_prompt = (
-            "You are AARKAA, a precise and logical AI assistant.\n\n"
-            "ABSOLUTE RULES FOR REASONING / MATH / LOGIC PROBLEMS:\n"
-            "- You MUST solve step-by-step and list concrete values at each step.\n"
-            "- Your FINAL ANSWER must be EXACTLY the value from your LAST STEP. Do NOT re-calculate or summarize differently.\n"
-            "- NEVER multiply N items × interval. Instead, COUNT the intervals between items: N items have (N-1) gaps.\n"
-            "- WORKED EXAMPLE — 3 pills, one every 30 min:\n"
-            "  Pill 1 at 0 min, Pill 2 at 30 min, Pill 3 at 60 min.\n"
-            "  Last pill taken at 60 min → Answer: 60 minutes. (NOT 3×30=90)\n"
-            "- After listing steps, write: 'The last step shows [value]. Therefore the answer is [value].'"
-        )
-        user_prompt = ""
-        if context:
-            user_prompt += "Context:\n" + context + "\n\n"
-        user_prompt += (
-            f"Question: {query}\n\n"
-            "Solve step-by-step. List the exact time/value at each step. "
-            "Your final answer MUST equal the value from your last step."
-        )
-        lang_name = _LANG_NAMES.get(lang, "English")
-        user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
-        prompt = _build_chatml(system_prompt, user_prompt)
-        tokens = 512
-        return prompt, tokens, 0.2  # low temperature for precise reasoning
+        if mode == "benchmark":
+            system_prompt = (
+                "You are AARKAA, a precise and logical AI assistant.\n\n"
+                "Please solve the following problem step-by-step and show your reasoning."
+            )
+            user_prompt = ""
+            if context:
+                user_prompt += "Context:\n" + context + "\n\n"
+            user_prompt += f"Question: {query}\n\nSolve step-by-step."
+            lang_name = _LANG_NAMES.get(lang, "English")
+            user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
+            prompt = _build_chatml(system_prompt, user_prompt)
+            tokens = 512
+            return prompt, tokens, 0.2  # low temperature for precise reasoning
+        else:
+            system_prompt = (
+                "You are AARKAA, a precise and logical AI assistant.\n\n"
+                "ABSOLUTE RULES FOR REASONING / MATH / LOGIC PROBLEMS:\n"
+                "- You MUST solve step-by-step and list concrete values at each step.\n"
+                "- Your FINAL ANSWER must be EXACTLY the value from your LAST STEP. Do NOT re-calculate or summarize differently.\n"
+                "- NEVER multiply N items × interval. Instead, COUNT the intervals between items: N items have (N-1) gaps.\n"
+                "- WORKED EXAMPLE — 3 pills, one every 30 min:\n"
+                "  Pill 1 at 0 min, Pill 2 at 30 min, Pill 3 at 60 min.\n"
+                "  Last pill taken at 60 min → Answer: 60 minutes. (NOT 3×30=90)\n"
+                "- After listing steps, write: 'The last step shows [value]. Therefore the answer is [value].'"
+            )
+            user_prompt = ""
+            if context:
+                user_prompt += "Context:\n" + context + "\n\n"
+            user_prompt += (
+                f"Question: {query}\n\n"
+                "Solve step-by-step. List the exact time/value at each step. "
+                "Your final answer MUST equal the value from your last step."
+            )
+            lang_name = _LANG_NAMES.get(lang, "English")
+            user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
+            prompt = _build_chatml(system_prompt, user_prompt)
+            tokens = 512
+            return prompt, tokens, 0.2  # low temperature for precise reasoning
 
     is_code = intent == "coding_help" or any(
         w in query.lower()

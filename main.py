@@ -392,6 +392,7 @@ async def metrics():
 @app.post("/prompt", response_model=PromptResponse, tags=["core"])
 def prompt(
     req: PromptRequest, 
+    request: Request,
     current_user = fastapi.Depends(modules.auth.get_current_user)
 ):
     """
@@ -403,9 +404,12 @@ def prompt(
 
     _metrics["requests_total"] += 1
 
+    # Extract execution mode from headers or JSON body (default is production)
+    mode = request.headers.get("x-aarkaai-mode", req.mode or "production").lower()
+
     try:
         # Pass the verified user_id from the token, not the JSON body
-        result = process_query(query=req.query, user_id=current_user.id, session_id=req.session_id)
+        result = process_query(query=req.query, user_id=current_user.id, session_id=req.session_id, mode=mode)
         _metrics["total_processing_time"] += result.processing_time
         return result
     except Exception as exc:
@@ -420,6 +424,7 @@ def prompt(
 @app.post("/prompt/stream", tags=["core"])
 async def prompt_stream(
     req: PromptRequest, 
+    request: Request,
     current_user = fastapi.Depends(modules.auth.get_current_user)
 ):
     """
@@ -428,9 +433,12 @@ async def prompt_stream(
     from pipeline import stream_query
     import json
 
+    # Extract execution mode from headers or JSON body (default is production)
+    mode = request.headers.get("x-aarkaai-mode", req.mode or "production").lower()
+
     async def event_generator():
         try:
-            async for chunk in stream_query(query=req.query, user_id=current_user.id, session_id=req.session_id):
+            async for chunk in stream_query(query=req.query, user_id=current_user.id, session_id=req.session_id, mode=mode):
                 yield f"data: {json.dumps(chunk)}\n\n"
         except Exception as exc:
             logger.error("Streaming error: %s", exc, exc_info=True)
