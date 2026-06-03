@@ -184,6 +184,10 @@ def _is_reasoning_query(query: str) -> bool:
         # Clock angle puzzles
         r"\bclock\b.*\bangle\b",
         r"\bangle\b.*\bhand(s)?\b",
+        # Race / positional / overtaking puzzles
+        r"\bovertake\b",
+        r"\brunner(s)?\b.*\brace\b",
+        r"\bposition\b.*\brace\b",
     ]
     for pattern in patterns:
         if re.search(pattern, q):
@@ -408,8 +412,8 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         )
     )
 
-    agent_triggers = ["execute", "run", "create a file", "modify file", "write to file", "bash", "test it", "test this", "test the code", "test them"]
-    needs_agent = any(w in query.lower() for w in agent_triggers)
+    agent_triggers = ["execute", "create a file", "modify file", "write to file", "bash", "test it", "test this", "test the code", "test them"]
+    needs_agent = any(w in query.lower() for w in agent_triggers) or bool(re.search(r"\brun\b", query.lower()))
 
     if needs_web and not needs_agent:
         if not _web_breaker.is_open:
@@ -623,8 +627,8 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         )
     )
 
-    agent_triggers = ["execute", "run", "create a file", "modify file", "write to file", "bash", "test it", "test this", "test the code", "test them"]
-    needs_agent = any(w in query.lower() for w in agent_triggers)
+    agent_triggers = ["execute", "create a file", "modify file", "write to file", "bash", "test it", "test this", "test the code", "test them"]
+    needs_agent = any(w in query.lower() for w in agent_triggers) or bool(re.search(r"\brun\b", query.lower()))
 
     if needs_web and not needs_agent:
         if not _web_breaker.is_open:
