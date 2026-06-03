@@ -89,8 +89,16 @@ def extract_knowledge(conversations: list[dict]) -> list[dict]:
         intent = conv.get("intent", "general")
         intent_groups.setdefault(intent, []).append(conv)
 
+    # Patterns to skip
+    greetings = ["hello", "hi", "hey", "greetings", "good morning", "good afternoon", "good evening", "how are you", "who are you"]
+    skip_keywords = ["sorry", "confusion", "placeholder", "stub", "context provided", "don't have info", "no direct info", "unable to answer", "not have information"]
+    meta_keywords = ["speak", "answer in", "translate", "write in", "write response"]
+
     for intent, convs in intent_groups.items():
-        # Build a combined knowledge entry per intent group
+        # Skip if group represents simple greetings
+        if intent in ["greeting", "general_query"] and all(c["query"].lower().strip() in greetings for c in convs):
+            continue
+
         queries = [c["query"] for c in convs]
         responses = [c["response"] for c in convs]
 
@@ -101,9 +109,21 @@ def extract_knowledge(conversations: list[dict]) -> list[dict]:
         # Combine Q&A into a knowledge document
         qa_pairs = []
         for q, a in zip(queries, responses):
-            # Skip stub responses
-            if "[Stub]" in a:
+            q_low = q.lower()
+            a_low = a.lower()
+
+            # Skip greetings
+            if q_low.strip() in greetings:
                 continue
+
+            # Skip meta questions about language/system
+            if any(kw in q_low for kw in meta_keywords):
+                continue
+
+            # Skip failed or stub responses
+            if "[stub]" in a_low or any(kw in a_low for kw in skip_keywords):
+                continue
+
             qa_pairs.append(f"Q: {q}\nA: {a}")
 
         if qa_pairs:

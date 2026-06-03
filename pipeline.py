@@ -82,6 +82,12 @@ _NEWS_KEYWORDS = [
     "新闻", "最新", "今天",
 ]
 
+_FACTUAL_KEYWORDS = [
+    "stock", "company", "companies", "business", "market", "explain", "list", 
+    "recommend", "analysis", "trend", "latest", "current", "news", "price", 
+    "difference", "how does", "why did", "information", "detail"
+]
+
 _FACTUAL_PREFIXES = [
     "who is", "who are", "who was", "who were", "who's",
     "what is", "what are", "what's", "what is the current",
@@ -91,14 +97,39 @@ _FACTUAL_PREFIXES = [
     "tell me about", "give me information on",
 ]
 
+_STRATEGY_KEYWORDS = [
+    "strategy", "option", "options", "call", "put", "spread",
+    "iron condor", "straddle", "strangle", "covered call",
+    "bull call", "bear put", "technical", "rsi", "macd",
+    "ema", "bollinger", "signal", "setup", "trade setup",
+    "lot size", "stop loss", "target", "risk reward",
+    "technical analysis", "chart", "indicator",
+]
+
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+
+from modules.aarkaa_engine import _LANG_NAMES
+_LANGUAGE_KEYWORDS = {name.lower(): code for code, name in _LANG_NAMES.items()}
+
+
+
+def _detect_requested_language(query: str, current_detected: str) -> str:
+    q_low = query.lower()
+    trigger_words = ["speak in", "speak to me in", "answer in", "respond in", "write in", "reply in", "talk in", "in "]
+    if any(w in q_low for w in trigger_words):
+        for lang_keyword, lang_code in _LANGUAGE_KEYWORDS.items():
+            if lang_keyword in q_low:
+                return lang_code
+    return current_detected
+
 
 def _detect_language(text: str) -> str:
     """Detect the language of the input text. Returns ISO 639-1 code."""
     try:
-        from langdetect import detect
-        return detect(text)
+        import langid
+        lang, _ = langid.classify(text)
+        return lang
     except Exception:
         return "en"
 
@@ -111,6 +142,57 @@ def _sanitize_query(query: str) -> str:
     if len(query) > MAX_QUERY_LENGTH:
         query = query[:MAX_QUERY_LENGTH]
     return query.strip()
+
+
+_FINANCE_INTENT_KEYWORDS = [
+    "stock", "shares", "ticker", "market", "earnings", "price", 
+    "target price", "analyst", "nasdaq", "nyse", "nse", "bse", 
+    "invest", "investment", "portfolio", "dividend", "etf", "mutual fund"
+]
+
+def _is_reasoning_query(query: str) -> bool:
+    """Detect math, logic word problems, and puzzles."""
+    q = query.lower()
+    patterns = [
+        # Bat and ball, farmer sheep, trains leaving station
+        r"\bbat\b.*\bball\b",
+        r"\bsheep\b",
+        r"\btrain\b.*\bstation\b",
+        r"\bif\b.*\bmore than\b",
+        r"\bhow old is\b",
+        r"\briddle\b",
+        r"\bpuzzle\b",
+        r"\blogic question\b",
+        r"\bmath problem\b",
+        r"\bcost(s)?\b.*\bmore than\b",
+        r"\bolder than\b",
+        r"\bsister\b.*\bbrother\b",
+        r"\bfarmer\b",
+        # Pill / doctor / interval puzzles
+        r"\bdoctor\b.*\bpill",
+        r"\bpill(s)?\b.*\bevery\b.*\bminute",
+        r"\btake\b.*\bpill",
+        # Lily pad / doubling puzzles
+        r"\blily\s*pad",
+        r"\bdouble(s)?\b.*\bevery\b",
+        # Classic trick / brain teaser patterns
+        r"\bhow\s+(long|many|much)\b.*\b(take|need|require)\b",
+        r"\bfence\s*post",
+        r"\btrick\s*question",
+        r"\bbrain\s*teaser",
+        r"\bif\b.*\bthen\b.*\bhow\b",
+    ]
+    for pattern in patterns:
+        if re.search(pattern, q):
+            return True
+    return False
+
+def _is_finance_intent(query: str, domain: str, intent: str) -> bool:
+    """Determine if finance intent is active."""
+    if domain == "finance" or intent.startswith("finance"):
+        return True
+    q = query.lower()
+    return any(kw in q for kw in _FINANCE_INTENT_KEYWORDS)
 
 
 # ─── Main Pipeline ───────────────────────────────────────────────────────────
@@ -135,18 +217,27 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
 
     # ── 0. Sanitize + Language Detection ──────────────────────────────────
     query = _sanitize_query(query)
-    detected_lang = _detect_language(query)
-    logger.info("Detected language: %s", detected_lang)
+    raw_detected = _detect_language(query)
+    detected_lang = _detect_requested_language(query, raw_detected)
+    logger.info("Detected language: %s (raw=%s)", detected_lang, raw_detected)
 
     # ── 1. Semantic Filter ────────────────────────────────────────────────
     clean_q = re.sub(r"[^\w\s]", "", query.lower()).strip()
     is_greeting = clean_q in ["hello", "hi", "hey", "greetings", "good morning", "good afternoon", "good evening", "how are you", "who are you", "aarka", "aarkaai"]
+    is_reasoning = _is_reasoning_query(query)
     
     if is_greeting:
         filter_result = {
             "domain": "general",
             "confidence": 1.0,
             "intent": "general_query",
+            "scores": {"general": 1.0}
+        }
+    elif is_reasoning:
+        filter_result = {
+            "domain": "general",
+            "confidence": 1.0,
+            "intent": "reasoning_puzzle",
             "scores": {"general": 1.0}
         }
     else:
@@ -182,7 +273,10 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             logger.error("RAG module error: %s", exc)
 
     # Domain-specific routing
-    fin_tickers = finance.extract_tickers(query)
+    is_fin_intent = _is_finance_intent(query, domain, intent)
+    fin_tickers = []
+    if is_fin_intent and not is_reasoning:
+        fin_tickers = finance.extract_tickers(query)
     if fin_tickers or domain == "finance" or intent.startswith("finance"):
         if not _finance_breaker.is_open:
             try:
@@ -197,6 +291,44 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         else:
             logger.info("Finance circuit breaker is OPEN — skipping")
 
+    # Technical Analysis + Options Strategy (premium feature)
+    q_lower = query.lower()
+    is_strategy_query = any(kw in q_lower for kw in _STRATEGY_KEYWORDS)
+    if is_strategy_query and fin_tickers:
+        try:
+            from modules import technical, options_strategy, subscription
+
+            # Check freemium access
+            access = subscription.check_access(user_id, feature="strategy")
+            if access["allowed"]:
+                # Run technical analysis on first detected ticker
+                target_symbol = fin_tickers[0]
+                indicators = technical.compute_indicators(target_symbol)
+                if indicators:
+                    signal = technical.get_signal(indicators)
+                    tech_summary = technical.format_technical_summary(target_symbol, indicators, signal)
+                    context_parts.append(f"[Technical Analysis]\n{tech_summary}")
+                    sources.append("technical")
+
+                    # Generate options strategy
+                    strategy = options_strategy.generate_strategy(
+                        symbol=target_symbol,
+                        indicators=indicators,
+                        signal=signal,
+                        risk_reward=5.0,
+                    )
+                    if strategy:
+                        strat_text = options_strategy.format_strategy_output(strategy)
+                        context_parts.append(f"[Options Strategy]\n{strat_text}")
+                        sources.append("strategy")
+
+                    subscription.record_premium_usage(user_id)
+            else:
+                # Paywall message
+                context_parts.append(f"[Subscription]\n{access['message']}")
+        except Exception as exc:
+            logger.error("Strategy module error: %s", exc)
+
     # Detect current events / news queries that need web search
     q_lower = query.lower()
     is_factual = any(q_lower.startswith(prefix) for prefix in _FACTUAL_PREFIXES)
@@ -208,10 +340,12 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
 
     needs_web = (
         not has_finance_context
+        and not is_greeting
         and (
             domain == "web_search"
-            or intent in ("web_lookup", "news_search")
+            or intent in ("web_lookup", "news_search", "general_query", "science_query")
             or any(kw in q_lower for kw in _NEWS_KEYWORDS)
+            or any(kw in q_lower for kw in _FACTUAL_KEYWORDS)
             or is_factual
         )
     )
@@ -261,10 +395,10 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             agent_ctx = context_parts[0]
         final_answer = coordinator.process_task(query, agent_ctx)
     elif fused_context:
-        final_answer = aarkaa_engine.final_response(query, fused_context, intent=intent)
+        final_answer = aarkaa_engine.final_response(query, fused_context, intent=intent, lang=detected_lang)
     else:
         # No external context (e.g. "hello", general chat) – run model directly
-        final_answer, _ = aarkaa_engine.primary_check(query)
+        final_answer, _ = aarkaa_engine.primary_check(query, lang=detected_lang)
 
     # Combine confidence (average of filter and primary)
     combined_confidence = (filter_confidence + primary_confidence) / 2
@@ -311,17 +445,26 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
 
     # ── 0. Sanitize + Language Detection ──────────────────────────────────
     query = _sanitize_query(query)
-    detected_lang = _detect_language(query)
+    raw_detected = _detect_language(query)
+    detected_lang = _detect_requested_language(query, raw_detected)
 
     # ── 1. Semantic Filter ────────────────────────────────────────────────
     clean_q = re.sub(r"[^\w\s]", "", query.lower()).strip()
     is_greeting = clean_q in ["hello", "hi", "hey", "greetings", "good morning", "good afternoon", "good evening", "how are you", "who are you", "aarka", "aarkaai"]
+    is_reasoning = _is_reasoning_query(query)
     
     if is_greeting:
         filter_result = {
             "domain": "general",
             "confidence": 1.0,
             "intent": "general_query",
+            "scores": {"general": 1.0}
+        }
+    elif is_reasoning:
+        filter_result = {
+            "domain": "general",
+            "confidence": 1.0,
+            "intent": "reasoning_puzzle",
             "scores": {"general": 1.0}
         }
     else:
@@ -345,7 +488,10 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         except Exception: pass
 
     # Domain-specific routing
-    fin_tickers = finance.extract_tickers(query)
+    is_fin_intent = _is_finance_intent(query, domain, intent)
+    fin_tickers = []
+    if is_fin_intent and not is_reasoning:
+        fin_tickers = finance.extract_tickers(query)
     if fin_tickers or domain == "finance" or intent.startswith("finance"):
         if not _finance_breaker.is_open:
             try:
@@ -360,8 +506,45 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         else:
             logger.info("Finance circuit breaker is OPEN — skipping")
 
-    # Detect current events / news queries that need web search
+    # Technical Analysis + Options Strategy (premium feature)
     q_lower = query.lower()
+    is_strategy_query = any(kw in q_lower for kw in _STRATEGY_KEYWORDS)
+    if is_strategy_query and fin_tickers:
+        try:
+            from modules import technical, options_strategy, subscription
+
+            # Check freemium access
+            access = subscription.check_access(user_id, feature="strategy")
+            if access["allowed"]:
+                # Run technical analysis on first detected ticker
+                target_symbol = fin_tickers[0]
+                indicators = technical.compute_indicators(target_symbol)
+                if indicators:
+                    signal = technical.get_signal(indicators)
+                    tech_summary = technical.format_technical_summary(target_symbol, indicators, signal)
+                    context_parts.append(f"[Technical Analysis]\n{tech_summary}")
+                    sources.append("technical")
+
+                    # Generate options strategy
+                    strategy = options_strategy.generate_strategy(
+                        symbol=target_symbol,
+                        indicators=indicators,
+                        signal=signal,
+                        risk_reward=5.0,
+                    )
+                    if strategy:
+                        strat_text = options_strategy.format_strategy_output(strategy)
+                        context_parts.append(f"[Options Strategy]\n{strat_text}")
+                        sources.append("strategy")
+
+                    subscription.record_premium_usage(user_id)
+            else:
+                # Paywall message
+                context_parts.append(f"[Subscription]\n{access['message']}")
+        except Exception as exc:
+            logger.error("Strategy module error: %s", exc)
+
+    # Detect current events / news queries that need web search
     is_factual = any(q_lower.startswith(prefix) for prefix in _FACTUAL_PREFIXES)
 
     # Skip web search if live finance data was already fetched — web results
@@ -371,10 +554,12 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
 
     needs_web = (
         not has_finance_context
+        and not is_greeting
         and (
             domain == "web_search"
-            or intent in ("web_lookup", "news_search")
+            or intent in ("web_lookup", "news_search", "general_query", "science_query")
             or any(kw in q_lower for kw in _NEWS_KEYWORDS)
+            or any(kw in q_lower for kw in _FACTUAL_KEYWORDS)
             or is_factual
         )
     )
@@ -418,7 +603,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     }
 
     # Stream the tokens
-    for token in aarkaa_engine.stream_final_response(query, fused_context, intent=intent):
+    for token in aarkaa_engine.stream_final_response(query, fused_context, intent=intent, lang=detected_lang):
         full_response += token
         yield {"type": "content", "token": token}
 

@@ -66,6 +66,10 @@ CONFIDENCE_THRESHOLD = 0.7  # Above this → return AARKAA-3B primary answer dir
 # ─── Auto-Learning ───────────────────────────────────────────────────────────
 AUTO_LEARN_INTERVAL = 15  # Trigger auto-learn every N messages
 
+# ─── Freemium / Subscription ─────────────────────────────────────────────────
+FREE_TIER_STRATEGY_LIMIT = int(os.getenv("AARKAAI_FREE_STRATEGY_LIMIT", "15"))
+FREE_TIER_RESET_HOURS = int(os.getenv("AARKAAI_FREE_RESET_HOURS", "5"))
+
 # ─── Finance ─────────────────────────────────────────────────────────────────
 # Common ticker patterns for extraction
 CRYPTO_SUFFIXES = ["-USD", "-EUR", "-GBP"]

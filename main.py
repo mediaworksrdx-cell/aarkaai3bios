@@ -43,6 +43,8 @@ from schemas import (
     HealthResponse,
     PromptRequest,
     PromptResponse,
+    StrategyRequest,
+    StrategyResponse,
     TokenResponse,
     UserCreate,
 )
@@ -163,7 +165,17 @@ def _init_modules() -> None:
         _module_status["memory"] = f"error: {exc}"
         logger.error("✗ Memory module failed: %s", exc)
 
-    # 10. Create workspace directory for sandboxed tools
+    # 10. Subscription (freemium gate)
+    try:
+        from modules import subscription
+        subscription.init()
+        _module_status["subscription"] = "ok"
+        logger.info("✓ Subscription system ready")
+    except Exception as exc:
+        _module_status["subscription"] = f"error: {exc}"
+        logger.error("✗ Subscription module failed: %s", exc)
+
+    # 11. Create workspace directory for sandboxed tools
     try:
         from config import SAFE_WORK_DIR
         SAFE_WORK_DIR.mkdir(parents=True, exist_ok=True)
@@ -425,6 +437,71 @@ async def prompt_stream(
             yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/strategy", response_model=StrategyResponse, tags=["premium"])
+def get_strategy(
+    req: StrategyRequest,
+    current_user = fastapi.Depends(modules.auth.get_current_user),
+):
+    """
+    Technical analysis + options strategy endpoint.
+
+    Requires JWT Bearer token. Subject to freemium daily limits.
+    Returns full technical indicators, consensus signal, and an
+    actionable options strategy with defined risk-to-reward ratio.
+    """
+    import time as _time
+    from modules import technical, options_strategy, subscription
+
+    start = _time.perf_counter()
+
+    # 1. Check subscription access
+    access = subscription.check_access(current_user.id, feature="strategy")
+    if not access["allowed"]:
+        return StrategyResponse(
+            symbol=req.symbol,
+            signal="LOCKED",
+            subscription=access,
+            processing_time=round(_time.perf_counter() - start, 3),
+        )
+
+    # 2. Compute technical indicators
+    indicators = technical.compute_indicators(req.symbol, period=req.period)
+    if indicators is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not fetch sufficient historical data for {req.symbol}. "
+                   f"Verify the ticker symbol is correct.",
+        )
+
+    # 3. Generate signal
+    signal = technical.get_signal(indicators)
+    tech_summary = technical.format_technical_summary(req.symbol, indicators, signal)
+
+    # 4. Generate strategy
+    strategy = options_strategy.generate_strategy(
+        symbol=req.symbol,
+        indicators=indicators,
+        signal=signal,
+        risk_reward=req.risk_reward,
+    )
+    strat_summary = options_strategy.format_strategy_output(strategy) if strategy else ""
+
+    # 5. Record usage
+    subscription.record_premium_usage(current_user.id)
+
+    elapsed = round(_time.perf_counter() - start, 3)
+    return StrategyResponse(
+        symbol=req.symbol,
+        signal=signal,
+        indicators=indicators,
+        strategy=strategy or {},
+        technical_summary=tech_summary,
+        strategy_summary=strat_summary,
+        subscription=access,
+        processing_time=elapsed,
+    )
 
 
 @app.post("/admin/knowledge", tags=["admin"])

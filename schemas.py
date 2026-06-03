@@ -153,6 +153,33 @@ class RLHFRequest(BaseModel):
     correction: Optional[str] = Field(default=None, max_length=2000, description="Optional text correction to learn from")
 
 
+# ─── Strategy ─────────────────────────────────────────────────────────────────
+
+
+class StrategyRequest(BaseModel):
+    """Request payload for the /strategy endpoint."""
+    symbol: str = Field(description="Ticker symbol, e.g. 'SBIN.NS' or 'RELIANCE.NS'")
+    risk_reward: float = Field(default=5.0, ge=1.0, le=20.0, description="Target risk-to-reward ratio (e.g., 5.0 = 1:5)")
+    period: str = Field(default="6mo", description="Historical data period for analysis")
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, v: str) -> str:
+        return v.strip().upper()
+
+
+class StrategyResponse(BaseModel):
+    """Response from the /strategy endpoint."""
+    symbol: str
+    signal: str
+    indicators: dict = Field(default_factory=dict)
+    strategy: dict = Field(default_factory=dict)
+    technical_summary: str = ""
+    strategy_summary: str = ""
+    subscription: dict = Field(default_factory=dict, description="Subscription access info")
+    processing_time: float = 0.0
+
+
 
 # --- Auth ---
 
