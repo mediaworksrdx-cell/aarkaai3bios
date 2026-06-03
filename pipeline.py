@@ -187,12 +187,56 @@ def _is_reasoning_query(query: str) -> bool:
             return True
     return False
 
-def _is_finance_intent(query: str, domain: str, intent: str) -> bool:
-    """Determine if finance intent is active."""
-    if domain == "finance" or intent.startswith("finance"):
+def _has_live_finance_intent(query: str, domain: str, intent: str) -> bool:
+    """
+    Determine if we should query the live yfinance engine.
+    We avoid queries asking about general financial concepts, history,
+    corporate info, or metrics (like revenue, employees, ceo, founded) 
+    unless they explicitly ask for stock/price data.
+    """
+    q_low = query.lower()
+    
+    # Exclude keywords that indicate corporate/historical research rather than stock lookup
+    exclude_keywords = [
+        "revenue", "sales", "income", "employee", "employees", "founded", 
+        "who is the ceo", "ceo of", "history of", "corporate office", 
+        "address", "phone number", "subsidiaries", "products", "services"
+    ]
+    if any(kw in q_low for kw in exclude_keywords):
+        return False
+
+    # Check for explicit ticker symbols ($AAPL, AAPL.NS)
+    if re.search(r"\$[A-Za-z]{1,6}\b", query):
         return True
-    q = query.lower()
-    return any(kw in q for kw in _FINANCE_INTENT_KEYWORDS)
+    if re.search(r"\b[A-Za-z]{2,20}\.NS\b", query):
+        return True
+
+    # Check for keywords related to stock prices/market
+    stock_keywords = [
+        "stock", "shares", "ticker", "price", "dividend", "market cap", 
+        "pe ratio", "volume", "day high", "day low", "nse", "bse", "nasdaq", "nyse",
+        "chart", "trade", "buy", "sell", "portfolio", "etf", "mutual fund"
+    ]
+    if any(kw in q_low for kw in stock_keywords):
+        return True
+
+    # If the domain is finance and it mentions a known uppercase ticker
+    if domain == "finance" or intent.startswith("finance"):
+        # If the query contains any exact uppercase ticker (e.g. AAPL)
+        words = re.findall(r"\b[A-Z]{2,6}\b", query)
+        if words:
+            from modules.finance import _US_TICKERS, _INDIA_TICKERS
+            known_tickers = set(list(_US_TICKERS.values()) + list(_INDIA_TICKERS.values()))
+            if any(w in known_tickers for w in words):
+                return True
+        
+        # If the query is very short (e.g. 1-2 words like "Apple stock" or just "Apple")
+        # we can default to fetching the price
+        word_count = len(q_low.split())
+        if word_count <= 2:
+            return True
+
+    return False
 
 
 # ─── Main Pipeline ───────────────────────────────────────────────────────────
@@ -273,11 +317,11 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             logger.error("RAG module error: %s", exc)
 
     # Domain-specific routing
-    is_fin_intent = _is_finance_intent(query, domain, intent)
+    is_fin_intent = _has_live_finance_intent(query, domain, intent)
     fin_tickers = []
     if is_fin_intent and not is_reasoning and mode != "benchmark":
         fin_tickers = finance.extract_tickers(query)
-    if (fin_tickers or domain == "finance" or intent.startswith("finance")) and mode != "benchmark":
+    if fin_tickers and mode != "benchmark":
         if not _finance_breaker.is_open:
             try:
                 fin_data = finance.get_market_data(query)
@@ -489,11 +533,11 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         except Exception: pass
 
     # Domain-specific routing
-    is_fin_intent = _is_finance_intent(query, domain, intent)
+    is_fin_intent = _has_live_finance_intent(query, domain, intent)
     fin_tickers = []
     if is_fin_intent and not is_reasoning and mode != "benchmark":
         fin_tickers = finance.extract_tickers(query)
-    if (fin_tickers or domain == "finance" or intent.startswith("finance")) and mode != "benchmark":
+    if fin_tickers and mode != "benchmark":
         if not _finance_breaker.is_open:
             try:
                 fin_data = finance.get_market_data(query)
