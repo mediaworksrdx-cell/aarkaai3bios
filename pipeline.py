@@ -197,7 +197,7 @@ def _is_finance_intent(query: str, domain: str, intent: str) -> bool:
 
 # ─── Main Pipeline ───────────────────────────────────────────────────────────
 
-def process_query(query: str, user_id: str = "default", session_id: str = "default") -> PromptResponse:
+def process_query(query: str, user_id: str = "default", session_id: str = "default", mode: str = "production") -> PromptResponse:
     """
     End-to-end pipeline: receive a user query and return a
     fully-processed PromptResponse.
@@ -263,7 +263,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     context_parts: list[str] = []
 
     # RAG – check the knowledge base first (skip for simple greetings)
-    if not is_greeting:
+    if not is_greeting and mode != "benchmark":
         try:
             rag_context = rag.get_context(query)
             if rag_context:
@@ -275,9 +275,9 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # Domain-specific routing
     is_fin_intent = _is_finance_intent(query, domain, intent)
     fin_tickers = []
-    if is_fin_intent and not is_reasoning:
+    if is_fin_intent and not is_reasoning and mode != "benchmark":
         fin_tickers = finance.extract_tickers(query)
-    if fin_tickers or domain == "finance" or intent.startswith("finance"):
+    if (fin_tickers or domain == "finance" or intent.startswith("finance")) and mode != "benchmark":
         if not _finance_breaker.is_open:
             try:
                 fin_data = finance.get_market_data(query)
@@ -339,7 +339,8 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     has_finance_context = "finance" in sources
 
     needs_web = (
-        not has_finance_context
+        mode != "benchmark"
+        and not has_finance_context
         and not is_greeting
         and (
             domain == "web_search"
@@ -394,8 +395,8 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         if context_parts and "[Recent Conversation]" in context_parts[0]:
             agent_ctx = context_parts[0]
         final_answer = coordinator.process_task(query, agent_ctx)
-    elif fused_context:
-        final_answer = aarkaa_engine.final_response(query, fused_context, intent=intent, lang=detected_lang)
+    elif fused_context or (is_reasoning and mode == "benchmark"):
+        final_answer = aarkaa_engine.final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode)
     else:
         # No external context (e.g. "hello", general chat) – run model directly
         final_answer, _ = aarkaa_engine.primary_check(query, lang=detected_lang)
@@ -425,7 +426,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     )
 
 
-async def stream_query(query: str, user_id: str = "default", session_id: str = "default"):
+async def stream_query(query: str, user_id: str = "default", session_id: str = "default", mode: str = "production"):
     """
     Streaming version of the pipeline.
     Yields JSON chunks for SSE.
@@ -479,7 +480,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     context_parts: list[str] = []
     
     # RAG
-    if not is_greeting:
+    if not is_greeting and mode != "benchmark":
         try:
             rag_context = rag.get_context(query)
             if rag_context:
@@ -490,9 +491,9 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     # Domain-specific routing
     is_fin_intent = _is_finance_intent(query, domain, intent)
     fin_tickers = []
-    if is_fin_intent and not is_reasoning:
+    if is_fin_intent and not is_reasoning and mode != "benchmark":
         fin_tickers = finance.extract_tickers(query)
-    if fin_tickers or domain == "finance" or intent.startswith("finance"):
+    if (fin_tickers or domain == "finance" or intent.startswith("finance")) and mode != "benchmark":
         if not _finance_breaker.is_open:
             try:
                 fin_data = finance.get_market_data(query)
@@ -553,7 +554,8 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     has_finance_context = "finance" in sources
 
     needs_web = (
-        not has_finance_context
+        mode != "benchmark"
+        and not has_finance_context
         and not is_greeting
         and (
             domain == "web_search"
@@ -603,7 +605,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     }
 
     # Stream the tokens
-    for token in aarkaa_engine.stream_final_response(query, fused_context, intent=intent, lang=detected_lang):
+    for token in aarkaa_engine.stream_final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode):
         full_response += token
         yield {"type": "content", "token": token}
 

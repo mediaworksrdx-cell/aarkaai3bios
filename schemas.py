@@ -53,6 +53,7 @@ class PromptRequest(BaseModel):
     # user_id is removed from here because we extract it from the bearer token.
     session_id: str = Field(default="1", max_length=64, description="Session identifier")
     context: Optional[dict] = Field(default=None, description="Extra context payload")
+    mode: Optional[str] = Field(default="production", description="Execution mode: 'production' or 'benchmark'")
 
     @field_validator("query")
     @classmethod
