@@ -513,45 +513,19 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
 
     is_reasoning = (intent == "reasoning_puzzle")
     if is_reasoning:
-        if mode == "benchmark":
-            system_prompt = (
-                "You are AARKAA, a precise and logical AI assistant.\n\n"
-                "Please solve the following problem step-by-step and show your reasoning."
-            )
-            user_prompt = ""
-            if context:
-                user_prompt += "Context:\n" + context + "\n\n"
-            user_prompt += f"Question: {query}\n\nSolve step-by-step."
-            lang_name = _LANG_NAMES.get(lang, "English")
-            user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
-            prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = 512
-            return prompt, tokens, 0.2  # low temperature for precise reasoning
-        else:
-            system_prompt = (
-                "You are AARKAA, a precise and logical AI assistant.\n\n"
-                "ABSOLUTE RULES FOR REASONING / MATH / LOGIC PROBLEMS:\n"
-                "- You MUST solve step-by-step and list concrete values at each step.\n"
-                "- Your FINAL ANSWER must be EXACTLY the value from your LAST STEP. Do NOT re-calculate or summarize differently.\n"
-                "- NEVER multiply N items × interval. Instead, COUNT the intervals between items: N items have (N-1) gaps.\n"
-                "- WORKED EXAMPLE — 3 pills, one every 30 min:\n"
-                "  Pill 1 at 0 min, Pill 2 at 30 min, Pill 3 at 60 min.\n"
-                "  Last pill taken at 60 min → Answer: 60 minutes. (NOT 3×30=90)\n"
-                "- After listing steps, write: 'The last step shows [value]. Therefore the answer is [value].'"
-            )
-            user_prompt = ""
-            if context:
-                user_prompt += "Context:\n" + context + "\n\n"
-            user_prompt += (
-                f"Question: {query}\n\n"
-                "Solve step-by-step. List the exact time/value at each step. "
-                "Your final answer MUST equal the value from your last step."
-            )
-            lang_name = _LANG_NAMES.get(lang, "English")
-            user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
-            prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = 512
-            return prompt, tokens, 0.2  # low temperature for precise reasoning
+        system_prompt = (
+            "You are AARKAA, a precise and logical AI assistant.\n\n"
+            "Please solve the following problem step-by-step and show your reasoning clearly."
+        )
+        user_prompt = ""
+        if context:
+            user_prompt += "Context:\n" + context + "\n\n"
+        user_prompt += f"Question: {query}\n\nSolve step-by-step."
+        lang_name = _LANG_NAMES.get(lang, "English")
+        user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
+        prompt = _build_chatml(system_prompt, user_prompt)
+        tokens = 512
+        return prompt, tokens, 0.2  # low temperature for precise reasoning
 
     is_code = intent == "coding_help" or any(
         w in query.lower()
