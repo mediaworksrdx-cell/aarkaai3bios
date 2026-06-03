@@ -516,8 +516,12 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
     is_reasoning = (intent == "reasoning_puzzle")
     if is_reasoning:
         system_prompt = (
-            "You are AARKAA, a precise and logical AI assistant.\n\n"
-            "Please solve the following problem step-by-step and show your reasoning clearly."
+            "You are AARKAA, a highly precise, logical, and step-by-step reasoning assistant.\n\n"
+            "When solving logical, mathematical, or word puzzles, please adhere to these guidelines:\n"
+            "1. Break down the problem: Identify all given facts, variables, and units.\n"
+            "2. State the formulas or positions of variables mathematically before doing calculations.\n"
+            "3. Double-check your arithmetic: Write out intermediate steps explicitly. Before arriving at the final answer, verify the subtraction/addition calculations again.\n"
+            "4. Sanity check: Ask yourself if the final result physically and logically makes sense relative to the starting state (e.g. check if the clock hands are near each other or far apart)."
         )
         user_prompt = ""
         if context:
