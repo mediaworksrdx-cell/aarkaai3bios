@@ -262,8 +262,8 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # ── 4. Low confidence – route to external modules ─────────────────────
     context_parts: list[str] = []
 
-    # RAG – check the knowledge base first (skip for simple greetings)
-    if not is_greeting and mode != "benchmark":
+    # RAG – check the knowledge base first (skip for simple greetings and reasoning puzzles)
+    if not is_greeting and not is_reasoning and mode != "benchmark":
         try:
             rag_context = rag.get_context(query)
             if rag_context:
@@ -480,7 +480,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     context_parts: list[str] = []
     
     # RAG
-    if not is_greeting and mode != "benchmark":
+    if not is_greeting and not is_reasoning and mode != "benchmark":
         try:
             rag_context = rag.get_context(query)
             if rag_context:
