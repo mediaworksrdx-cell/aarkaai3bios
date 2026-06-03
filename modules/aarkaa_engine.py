@@ -529,8 +529,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
             "   - If a quantity doubles every day and is full on day D, it was half-full on day (D - 1).\n"
             "4. Race and Positional Puzzles:\n"
             "   - Overtaking the N-th person in a race: You take their place and become N-th (e.g., overtaking the 2nd person makes you 2nd, not 1st).\n"
-            "   - Overtaking the last runner: In a straight race, it is logically impossible to overtake the last runner because to be behind them, you would have to be the last runner yourself. (Unless it is a circular track and you are lapping them).\n\n"
-            "To solve, first identify the puzzle type from the list above, explicitly state which reference rule/formula applies, write out each calculation or logical reasoning step, and verify your logic and arithmetic before outputting your final answer."
+            "   - Overtaking the last runner: In a straight race, it is logically impossible to overtake the last runner because there is nobody behind the last runner (you would have to be the last runner yourself to be behind them, which is a contradiction). If asked what position you are in after overtaking the last runner, you must explicitly state that the scenario is impossible.\n\n"
+            "To solve, first identify the puzzle type from the list above, explicitly state which reference rule/formula applies, write out each calculation or logical reasoning step, and verify your logic and arithmetic before outputting your final answer. If a scenario is logically impossible or contains a contradiction/paradox, your final answer must state that it is impossible and explain why, rather than trying to assign a position or number."
         )
         user_prompt = ""
         if context:
