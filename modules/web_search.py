@@ -84,10 +84,25 @@ def search_wikipedia(query: str, sentences: int = 5, lang: str = "en") -> Option
         return None
 
 
-# ─── Combined search ─────────────────────────────────────────────────────────
+import re
+
+def _is_live_tracker_snippet(text: str) -> bool:
+    """Detect if a snippet or title looks like a live stock/crypto ticker or widget."""
+    s_low = text.lower()
+    live_patterns = [
+        "price today is", "live price", "current price", "price as of",
+        "trading volume", "market cap of", "market capitalization",
+        "24-hour volume", "circulating supply", "max supply"
+    ]
+    if any(p in s_low for p in live_patterns):
+        return True
+    # Match percentage changes commonly found in live tickers, e.g. -1.09%, +2.5%
+    if re.search(r"[-+]\d+(\.\d+)?%", s_low):
+        return True
+    return False
 
 
-def get_web_context(query: str, max_results: int = 5, lang: str = "en") -> str:
+def get_web_context(query: str, max_results: int = 5, lang: str = "en", filter_live: bool = False) -> str:
     """
     Combined search: DDG + Wikipedia.
     Returns a formatted context string.
@@ -96,6 +111,8 @@ def get_web_context(query: str, max_results: int = 5, lang: str = "en") -> str:
     ----------
     lang : str
         ISO 639-1 language code for Wikipedia (e.g., 'hi', 'ja', 'fr').
+    filter_live : bool
+        If True, filters out live stock/crypto tracker snippets.
     """
     parts: list[str] = []
 
@@ -107,10 +124,18 @@ def get_web_context(query: str, max_results: int = 5, lang: str = "en") -> str:
     # DuckDuckGo for broader results
     ddg_results = search_ddg(query, max_results=max_results)
     if ddg_results:
-        ddg_text = "\n".join(
-            f"• [{r['title']}]({r['url']}): {r['snippet']}"
-            for r in ddg_results
-        )
-        parts.append(f"[Web Search Results]\n{ddg_text}")
+        filtered_results = []
+        for r in ddg_results:
+            if filter_live and (_is_live_tracker_snippet(r["snippet"]) or _is_live_tracker_snippet(r["title"])):
+                logger.info("Filtered out live tracker snippet from web search: %s", r["title"])
+                continue
+            filtered_results.append(r)
+            
+        if filtered_results:
+            ddg_text = "\n".join(
+                f"• [{r['title']}]({r['url']}): {r['snippet']}"
+                for r in filtered_results
+            )
+            parts.append(f"[Web Search Results]\n{ddg_text}")
 
     return "\n\n---\n\n".join(parts) if parts else ""
