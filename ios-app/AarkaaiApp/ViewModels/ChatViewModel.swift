@@ -79,7 +79,7 @@ class ChatViewModel: ObservableObject {
         isTyping = true
         
         do {
-            let req = PromptRequest(query: query)
+            let req = PromptRequest(query: query, session_id: activeConversationId.uuidString)
             let token = appSession.currentUserToken ?? ""
             
             // Initial AI message (empty)
