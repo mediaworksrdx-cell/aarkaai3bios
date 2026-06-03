@@ -199,6 +199,21 @@ _CRYPTO_TICKERS: dict[str, str] = {
 }
 
 
+# Tickers or ticker prefixes that are common English words or single/double letters.
+# We block these from being matched as bare words to avoid false positive matches.
+# They can still be matched if explicitly prefixed with '$' (e.g. $COST, $F) or via company names (e.g. Costco, Ford).
+_TICKER_BLOCKLIST = {
+    # Single letters
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+    # Common English words/conjunctions/pronouns/prepositions
+    "am", "an", "as", "at", "be", "by", "do", "go", "he", "if", "in", "is", "it", "me", "my", "no", "of", "on", "or", "so", "to", "up", "us", "we",
+    "all", "and", "are", "but", "can", "for", "has", "her", "him", "his", "how", "its", "not", "one", "out", "she", "the", "too", "was", "who", "you",
+    "cost", "now", "cat", "arm", "link", "near", "run", "key", "play", "save", "good", "well", "plug", "care", "fast", "free", "grow", "hope",
+    "hurt", "life", "love", "mind", "next", "pace", "plan", "post", "real", "safe", "step", "talk", "team", "time", "true", "walk", "wave", "work", "year",
+    "dot", "op"
+}
+
+
 def extract_tickers(query: str) -> list[str]:
     """
     Extract ticker symbols from a natural-language query.
@@ -220,17 +235,45 @@ def extract_tickers(query: str) -> list[str]:
     
     # Add reverse lookup for bare tickers (e.g., 'aapl' -> 'AAPL')
     for _, ticker in list(all_mappings.items()):
-        all_mappings[ticker.lower()] = ticker
+        ticker_lower = ticker.lower()
+        if ticker_lower not in _TICKER_BLOCKLIST:
+            all_mappings[ticker_lower] = ticker
+            
         # Also allow prefixes like 'btc' for 'BTC-USD'
         if "-" in ticker:
-            all_mappings[ticker.split("-")[0].lower()] = ticker
+            prefix = ticker.split("-")[0].lower()
+            if prefix not in _TICKER_BLOCKLIST:
+                all_mappings[prefix] = ticker
         if "=" in ticker:
-            all_mappings[ticker.split("=")[0].lower()] = ticker
+            prefix = ticker.split("=")[0].lower()
+            if prefix not in _TICKER_BLOCKLIST:
+                all_mappings[prefix] = ticker
         if ".NS" in ticker:
-            all_mappings[ticker.split(".")[0].lower()] = ticker
+            prefix = ticker.split(".")[0].lower()
+            if prefix not in _TICKER_BLOCKLIST:
+                all_mappings[prefix] = ticker
+
+    # Match blocklisted tickers only if they appear in EXACT UPPERCASE in the original query
+    for _, ticker in list(all_mappings.items()):
+        ticker_upper = ticker.upper()
+        # Clean up suffixes
+        clean_ticker = ticker_upper
+        if "-" in clean_ticker:
+            clean_ticker = clean_ticker.split("-")[0]
+        elif "=" in clean_ticker:
+            clean_ticker = clean_ticker.split("=")[0]
+        elif ".NS" in clean_ticker:
+            clean_ticker = clean_ticker.split(".")[0]
+        
+        if clean_ticker.lower() in _TICKER_BLOCKLIST:
+            if re.search(r"\b" + re.escape(clean_ticker) + r"\b", query):
+                tickers.append(ticker)
 
     # Search using word boundaries to avoid partial matches
     for name, ticker in all_mappings.items():
+        # Special case: skip 'target' matching 'TGT' if user says 'target price'
+        if name == "target" and "target price" in q_lower:
+            continue
         if re.search(r"\b" + re.escape(name) + r"\b", q_lower):
             tickers.append(ticker)
 

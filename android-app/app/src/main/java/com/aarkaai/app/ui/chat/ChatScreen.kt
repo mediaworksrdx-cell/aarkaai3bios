@@ -38,6 +38,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.noties.markwon.Markwon
 import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
 import io.noties.markwon.ext.tables.TablePlugin
+import io.noties.markwon.ext.latex.JLatexMathPlugin
+import io.noties.markwon.inlineparser.MarkwonInlineParserPlugin
 import kotlinx.coroutines.launch
 import com.aarkaai.app.ui.theme.*
 
@@ -467,9 +469,14 @@ fun MarkdownText(
     val textColorArgb = textColor.toArgb()
 
     val markwon = remember(context) {
+        val textSizePx = 15f * context.resources.displayMetrics.scaledDensity
         Markwon.builder(context)
             .usePlugin(StrikethroughPlugin.create())
             .usePlugin(TablePlugin.create(context))
+            .usePlugin(MarkwonInlineParserPlugin.create())
+            .usePlugin(JLatexMathPlugin.create(textSizePx) { builder ->
+                builder.inlinesEnabled(true)
+            })
             .build()
     }
 
@@ -483,7 +490,12 @@ fun MarkdownText(
         },
         update = { textView ->
             textView.setTextColor(textColorArgb)
-            markwon.setMarkdown(textView, markdown)
+            val processedMarkdown = markdown
+                .replace("\\[", "$$")
+                .replace("\\]", "$$")
+                .replace("\\(", "$$")
+                .replace("\\)", "$$")
+            markwon.setMarkdown(textView, processedMarkdown)
         }
     )
 }

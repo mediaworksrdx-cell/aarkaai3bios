@@ -277,7 +277,7 @@ def store_rlhf_feedback(
         # Auto-learn from explicit negative corrections
         if rating < 0 and correction:
             from modules import rag
-            topic = f"RLHF Correction for User {user_id}"
+            topic = "Global System Correction (RLHF)"
             if conversation_id:
                 topic += f" (Conv {conversation_id})"
             rag.store_knowledge(
