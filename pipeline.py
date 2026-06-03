@@ -181,6 +181,9 @@ def _is_reasoning_query(query: str) -> bool:
         r"\btrick\s*question",
         r"\bbrain\s*teaser",
         r"\bif\b.*\bthen\b.*\bhow\b",
+        # Clock angle puzzles
+        r"\bclock\b.*\bangle\b",
+        r"\bangle\b.*\bhand(s)?\b",
     ]
     for pattern in patterns:
         if re.search(pattern, q):
@@ -449,7 +452,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         if context_parts and "[Recent Conversation]" in context_parts[0]:
             agent_ctx = context_parts[0]
         final_answer = coordinator.process_task(query, agent_ctx)
-    elif fused_context or (is_reasoning and mode == "benchmark"):
+    elif fused_context or is_reasoning:
         final_answer = aarkaa_engine.final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode)
     else:
         # No external context (e.g. "hello", general chat) – run model directly

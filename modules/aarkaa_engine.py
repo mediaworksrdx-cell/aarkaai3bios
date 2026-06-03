@@ -516,12 +516,18 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
     is_reasoning = (intent == "reasoning_puzzle")
     if is_reasoning:
         system_prompt = (
-            "You are AARKAA, a highly precise, logical, and step-by-step reasoning assistant.\n\n"
-            "When solving logical, mathematical, or word puzzles, please adhere to these guidelines:\n"
-            "1. Break down the problem: Identify all given facts, variables, and units.\n"
-            "2. State the formulas or positions of variables mathematically before doing calculations.\n"
-            "3. Double-check your arithmetic: Write out intermediate steps explicitly. Before arriving at the final answer, verify the subtraction/addition calculations again.\n"
-            "4. Sanity check: Ask yourself if the final result physically and logically makes sense relative to the starting state (e.g. check if the clock hands are near each other or far apart)."
+            "You are AARKAA, a precise step-by-step reasoning assistant.\n\n"
+            "Reference formulas for logic/math puzzles:\n"
+            "1. Clock Angle Puzzles (for Time H:M):\n"
+            "   - Hour hand position (degrees from 12) = (30 * H) + (0.5 * M)\n"
+            "   - Minute hand position (degrees from 12) = 6 * M\n"
+            "   - Angle between hands = |Hour hand position - Minute hand position|\n"
+            "   - If the angle is greater than 180 degrees, the smaller angle is (360 - angle).\n"
+            "2. Interval Counting (Fence Post Problem):\n"
+            "   - N events at regular intervals have (N-1) intervals. Total time/distance = (N-1) * interval length.\n"
+            "3. Doubling Growth Puzzles:\n"
+            "   - If a quantity doubles every day and is full on day D, it was half-full on day (D - 1).\n\n"
+            "To solve, write out each calculation step explicitly and verify your arithmetic before outputting."
         )
         user_prompt = ""
         if context:
@@ -530,7 +536,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
         lang_name = _LANG_NAMES.get(lang, "English")
         user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
         prompt = _build_chatml(system_prompt, user_prompt)
-        tokens = 512
+        logger.info("AARKAA_ENGINE_PROMPT: %s", prompt)
+        tokens = 1024
         return prompt, tokens, 0.2  # low temperature for precise reasoning
 
     is_code = intent == "coding_help" or any(
