@@ -515,23 +515,42 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
 
     is_reasoning = (intent == "reasoning_puzzle")
     if is_reasoning:
-        system_prompt = (
-            "You are AARKAA, a precise step-by-step reasoning assistant.\n\n"
-            "Reference rules and formulas for logic, math, and positional puzzles:\n"
-            "1. Clock Angle Puzzles (for Time H:M):\n"
-            "   - Hour hand position (degrees from 12) = (30 * H) + (0.5 * M)\n"
-            "   - Minute hand position (degrees from 12) = 6 * M\n"
-            "   - Angle between hands = |Hour hand position - Minute hand position|\n"
-            "   - If the angle is greater than 180 degrees, the smaller angle is (360 - angle).\n"
-            "2. Interval Counting (Fence Post Problem):\n"
-            "   - N events at regular intervals have (N-1) intervals. Total time/distance = (N-1) * interval length.\n"
-            "3. Doubling Growth Puzzles:\n"
-            "   - If a quantity doubles every day and is full on day D, it was half-full on day (D - 1).\n"
-            "4. Race and Positional Puzzles:\n"
-            "   - Overtaking the N-th person in a race: You take their place and become N-th (e.g., overtaking the 2nd person makes you 2nd, not 1st).\n"
-            "   - Overtaking the last runner: In a straight race, it is logically impossible to overtake the last runner because there is nobody behind the last runner (you would have to be the last runner yourself to be behind them, which is a contradiction). If asked what position you are in after overtaking the last runner, you must explicitly state that the scenario is impossible.\n\n"
-            "To solve, first identify the puzzle type from the list above, explicitly state which reference rule/formula applies, write out each calculation or logical reasoning step, and verify your logic and arithmetic before outputting your final answer. If a scenario is logically impossible or contains a contradiction/paradox, your final answer must state that it is impossible and explain why, rather than trying to assign a position or number."
-        )
+        is_benchmark = (mode == "benchmark")
+        if is_benchmark:
+            system_prompt = (
+                "You are AARKAA, a precise step-by-step reasoning assistant.\n\n"
+                "Reference rules and formulas for logic, math, and positional puzzles:\n"
+                "1. Clock Angle Puzzles (for Time H:M):\n"
+                "   - Hour hand position (degrees from 12) = (30 * H) + (0.5 * M)\n"
+                "   - Minute hand position (degrees from 12) = 6 * M\n"
+                "   - Angle between hands = |Hour hand position - Minute hand position|\n"
+                "   - If the angle is greater than 180 degrees, the smaller angle is (360 - angle).\n"
+                "2. Interval Counting (Fence Post Problem):\n"
+                "   - N events at regular intervals have (N-1) intervals. Total time/distance = (N-1) * interval length.\n"
+                "3. Doubling Growth Puzzles:\n"
+                "   - If a quantity doubles every day and is full on day D, it was half-full on day (D - 1).\n"
+                "4. Race and Positional Puzzles:\n"
+                "   - Overtaking the N-th person in a race: You take their place and become N-th (e.g., overtaking the 2nd person makes you 2nd, not 1st).\n\n"
+                "To solve, first identify the puzzle type from the list above, explicitly state which reference rule/formula applies, write out each calculation or logical reasoning step, and verify your logic and arithmetic before outputting your final answer."
+            )
+        else:
+            system_prompt = (
+                "You are AARKAA, a precise step-by-step reasoning assistant.\n\n"
+                "Reference rules and formulas for logic, math, and positional puzzles:\n"
+                "1. Clock Angle Puzzles (for Time H:M):\n"
+                "   - Hour hand position (degrees from 12) = (30 * H) + (0.5 * M)\n"
+                "   - Minute hand position (degrees from 12) = 6 * M\n"
+                "   - Angle between hands = |Hour hand position - Minute hand position|\n"
+                "   - If the angle is greater than 180 degrees, the smaller angle is (360 - angle).\n"
+                "2. Interval Counting (Fence Post Problem):\n"
+                "   - N events at regular intervals have (N-1) intervals. Total time/distance = (N-1) * interval length.\n"
+                "3. Doubling Growth Puzzles:\n"
+                "   - If a quantity doubles every day and is full on day D, it was half-full on day (D - 1).\n"
+                "4. Race and Positional Puzzles:\n"
+                "   - Overtaking the N-th person in a race: You take their place and become N-th (e.g., overtaking the 2nd person makes you 2nd, not 1st).\n"
+                "   - Overtaking the last runner: In a straight race, it is logically impossible to overtake the last runner because there is nobody behind the last runner (you would have to be the last runner yourself to be behind them, which is a contradiction). If asked what position you are in after overtaking the last runner, you must explicitly state that the scenario is impossible.\n\n"
+                "To solve, first identify the puzzle type from the list above, explicitly state which reference rule/formula applies, write out each calculation or logical reasoning step, and verify your logic and arithmetic before outputting your final answer. If a scenario is logically impossible or contains a contradiction/paradox, your final answer must state that it is impossible and explain why, rather than trying to assign a position or number."
+            )
         user_prompt = ""
         if context:
             user_prompt += "Context:\n" + context + "\n\n"
