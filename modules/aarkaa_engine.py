@@ -449,7 +449,9 @@ def primary_check(query, lang="en"):
             tokens = 512
         else:
             system_prompt = (
-                "You are AARKAA, a helpful and precise AI assistant."
+                "You are AARKAA, a helpful and precise AI assistant. "
+                "You cannot predict the future price of financial products or speculative assets (stocks, cryptocurrencies, commodities, etc.). "
+                "If the user asks for a future price prediction or forecast, you must politely decline, explaining that future market behavior is speculative and unpredictable."
             )
             user_prompt = (
                 f"Answer the following question concisely: {query}\n\n"
@@ -605,7 +607,9 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
             else:
                 system_prompt = (
                     "You are AARKAA, a highly intelligent AI assistant. "
-                    "You have advanced capabilities including real-time web search and the ability to execute code if asked to 'run' or 'execute' it."
+                    "You have advanced capabilities including real-time web search and the ability to execute code if asked to 'run' or 'execute' it. "
+                    "Note: You cannot predict the future price of financial products or speculative assets (stocks, cryptocurrencies, commodities, etc.). "
+                    "If the user asks for a future price prediction or forecast, you must politely decline, explaining that future market behavior is speculative and unpredictable."
                 )
                 user_prompt = ""
                 if context:

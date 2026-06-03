@@ -248,44 +248,6 @@ def _has_live_finance_intent(query: str, domain: str, intent: str) -> bool:
     return False
 
 
-def _is_future_finance_prediction(query: str) -> bool:
-    """
-    Detect if the user is asking for future predictions/speculations
-    on any financial product, cryptocurrency, stock, or commodity.
-    """
-    q_low = query.lower()
-    
-    # 1. Financial products, cryptos, and commodities
-    finance_keywords = [
-        "bitcoin", "btc", "ethereum", "eth", "solana", "sol", "dogecoin", "doge", "cardano", "ada",
-        "crypto", "cryptocurrency", "cryptocurrencies", "stock", "stocks", "shares", "equity", "equities",
-        "gold", "silver", "commodity", "commodities", "etf", "etfs", "mutual fund", "mutual funds",
-        "nvidia", "nvda", "apple", "aapl", "tesla", "tsla", "microsoft", "msft", "google", "goog", "googl",
-        "amazon", "amzn", "meta"
-    ]
-    if not any(kw in q_low for kw in finance_keywords):
-        return False
-        
-    # 2. Year boundaries (e.g. 2026 to 2200)
-    has_future_year = False
-    match = re.search(r"\b(202[6-9]|20[3-9]\d|2[1-9]\d{2})\b", query)
-    if match:
-        has_future_year = True
-        
-    # 3. Future/forecast prediction keywords
-    future_keywords = [
-        "predict", "prediction", "predictions", "forecast", "forecasts", "forecasting",
-        "project", "projection", "projections", "future", "will reach", "will be worth",
-        "how high will", "where will", "long term price", "price prediction", "price predictions"
-    ]
-    has_future_keyword = any(kw in q_low for kw in future_keywords)
-    
-    # Ensure it's asking about the price/value/worth (rather than corporate history of e.g. Apple in 2026)
-    price_keywords = ["price", "value", "worth", "valuation", "cost", "dollar", "usd", "inr"]
-    has_price_intent = any(kw in q_low for kw in price_keywords)
-    
-    return (has_future_year and has_price_intent) or (has_future_keyword and has_price_intent)
-
 
 # ─── Main Pipeline ───────────────────────────────────────────────────────────
 
@@ -312,30 +274,6 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     raw_detected = _detect_language(query)
     detected_lang = _detect_requested_language(query, raw_detected)
     logger.info("Detected language: %s (raw=%s)", detected_lang, raw_detected)
-
-    if _is_future_finance_prediction(query):
-        response_text = "I cannot predict the future price of financial products or speculative assets. Future valuations are highly uncertain and depend on market conditions, adoption, and regulatory factors."
-        try:
-            memory.store_conversation(
-                user_id=user_id,
-                session_id=session_id,
-                query=query,
-                response=response_text,
-                intent="finance_prediction",
-                confidence=1.0,
-                source="aarkaa-3b",
-            )
-        except Exception as exc:
-            logger.error("Memory saving failed for prediction block: %s", exc)
-            
-        return PromptResponse(
-            response=response_text,
-            intent="finance_prediction",
-            confidence=1.0,
-            sources=["aarkaa-3b"],
-            detected_language=detected_lang,
-            processing_time=0.01,
-        )
 
     # ── 1. Semantic Filter ────────────────────────────────────────────────
     clean_q = re.sub(r"[^\w\s]", "", query.lower()).strip()
@@ -564,35 +502,6 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     query = _sanitize_query(query)
     raw_detected = _detect_language(query)
     detected_lang = _detect_requested_language(query, raw_detected)
-
-    if _is_future_finance_prediction(query):
-        response_text = "I cannot predict the future price of financial products or speculative assets. Future valuations are highly uncertain and depend on market conditions, adoption, and regulatory factors."
-        yield {
-            "type": "metadata",
-            "intent": "finance_prediction",
-            "sources": ["aarkaa-3b"],
-            "detected_language": detected_lang
-        }
-        words = response_text.split()
-        for i, word in enumerate(words):
-            token = word + (" " if i < len(words) - 1 else "")
-            yield {"type": "content", "token": token}
-            
-        elapsed = round(time.perf_counter() - start, 3)
-        try:
-            memory.store_conversation(
-                user_id=user_id,
-                session_id=session_id,
-                query=query,
-                response=response_text,
-                intent="finance_prediction",
-                confidence=1.0,
-                source="aarkaa-3b",
-            )
-        except Exception as exc:
-            logger.error("Memory saving failed for prediction block: %s", exc)
-        yield {"type": "final", "processing_time": elapsed}
-        return
 
     # ── 1. Semantic Filter ────────────────────────────────────────────────
     clean_q = re.sub(r"[^\w\s]", "", query.lower()).strip()
