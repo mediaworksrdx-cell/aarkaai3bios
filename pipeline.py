@@ -410,7 +410,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     if needs_web and not needs_agent:
         if not _web_breaker.is_open:
             try:
-                web_ctx = web_search.get_web_context(query, lang=detected_lang)
+                web_ctx = web_search.get_web_context(query, lang=detected_lang, filter_live=(not is_fin_intent))
                 if web_ctx:
                     context_parts.append(f"[Web Search]\n{web_ctx}")
                     sources.append("web_search")
@@ -625,7 +625,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     if needs_web and not needs_agent:
         if not _web_breaker.is_open:
             try:
-                web_ctx = web_search.get_web_context(query, lang=detected_lang)
+                web_ctx = web_search.get_web_context(query, lang=detected_lang, filter_live=(not is_fin_intent))
                 if web_ctx:
                     context_parts.append(f"[Web Search]\n{web_ctx}")
                     sources.append("web_search")
