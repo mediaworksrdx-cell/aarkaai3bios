@@ -309,7 +309,7 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7):
         max_tokens=max_new_tokens,
         temperature=temperature,
         top_p=0.9,
-        repeat_penalty=1.1,
+        repeat_penalty=1.15,
         stop=stop_tokens,
         stream=True
     )
@@ -676,7 +676,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "You have advanced capabilities including real-time web search and the ability to execute code if asked to 'run' or 'execute' it. "
                     "Note: If a question is a trick question or a riddle (e.g., involving Moses and the Ark, or weight of feathers vs gold), pay close attention to the details, identify any fallacies or logical twists, and answer it accurately using facts. "
                     "You cannot predict the future price of financial products or speculative assets (stocks, cryptocurrencies, commodities, etc.). "
-                    "If the user asks for a future price prediction or forecast, you must politely decline, explaining that future market behavior is speculative and unpredictable."
+                    "If the user asks for a future price prediction or forecast, you must politely decline, explaining that future market behavior is speculative and unpredictable. "
+                    "Provide clear, complete, and concise responses. If presenting lists or multiple points, limit them to at most 5 key points to ensure high quality, focus, and completeness."
                 )
                 user_prompt = ""
                 if context:
