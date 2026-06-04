@@ -156,18 +156,19 @@ def _is_reasoning_query(query: str) -> bool:
     patterns = [
         # Bat and ball, farmer sheep, trains leaving station
         r"\bbat\b.*\bball\b",
-        r"\bsheep\b",
+        r"\bsheep\b.*\b(farmer|wolf|wolves|river|boat|count|puzzle|riddle)\b",
+        r"\b(farmer|count|riddle|puzzle|logic)\b.*\bsheep\b",
         r"\btrain\b.*\bstation\b",
-        r"\bif\b.*\bmore than\b",
-        r"\bhow old is\b",
+        r"\bif\b.*\bmore than\b.*\bhow\b",
+        r"\bhow\s+old\s+is\b.*\b(brother|sister|father|mother|son|daughter|years|times|age)\b",
         r"\briddle\b",
         r"\bpuzzle\b",
         r"\blogic question\b",
         r"\bmath problem\b",
         r"\bcost(s)?\b.*\bmore than\b",
-        r"\bolder than\b",
+        r"\bolder\s+than\b.*\b(brother|sister|father|mother|son|daughter|years|times|age)\b",
         r"\bsister\b.*\bbrother\b",
-        r"\bfarmer\b",
+        r"\bfarmer\b.*\b(sheep|cabbage|wolf|goat|river|boat|crossing|puzzle|riddle)\b",
         # Pill / doctor / interval puzzles
         r"\bdoctor\b.*\bpill",
         r"\bpill(s)?\b.*\bevery\b.*\bminute",
@@ -176,7 +177,7 @@ def _is_reasoning_query(query: str) -> bool:
         r"\blily\s*pad",
         r"\bdouble(s)?\b.*\bevery\b",
         # Classic trick / brain teaser patterns
-        r"\bhow\s+(long|many|much)\b.*\b(take|need|require)\b",
+        r"\bhow\s+(long|many|much)\b.*\b(take|need|require)\b.*\b(minute|hour|day|second|pill|interval|fence|post|task|work|job|complete|finish)\b",
         r"\bfence\s*post",
         r"\btrick\s*question",
         r"\bbrain\s*teaser",
