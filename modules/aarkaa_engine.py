@@ -662,7 +662,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
                         "---------------------\n"
                     )
                 user_prompt += f"Question: {query}\n\n"
-                user_prompt += f"Answer the question using ONLY the context above. Write your entire response ONLY in the following language: {lang_name}."
+                user_prompt += f"Answer the question using the context above as reference. If the context does not contain the answer, you may use your general knowledge to answer accurately. Write your entire response ONLY in the following language: {lang_name}."
                 prompt = _build_chatml(system_prompt, user_prompt)
                 if "has_finance" not in locals() or not has_finance:
                     tokens = 1024
