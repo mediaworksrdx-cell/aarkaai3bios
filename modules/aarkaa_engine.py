@@ -343,6 +343,25 @@ def generate_raw(prompt, max_new_tokens=300, stop=None):
     return output["choices"][0]["text"].strip()
 
 
+def _is_list_header(text, pos):
+    # pos is the index of '.'
+    i = pos - 1
+    while i >= 0 and text[i].isdigit():
+        i -= 1
+    if i < pos - 1:
+        # Digits found. Check if preceded by a newline (possibly with space) or start of text
+        prefix = text[:i + 1]
+        if not prefix.strip():
+            return True
+        # Check if the prefix ends with a newline character, possibly followed by spaces
+        stripped_len = len(prefix) - len(prefix.rstrip(' '))
+        if stripped_len > 0:
+            prefix = prefix[:-stripped_len]
+        if prefix and prefix[-1] == '\n':
+            return True
+    return False
+
+
 def _clean_response(text):
     """Truncate at the last complete sentence to avoid unfinished answers."""
     if not text:
@@ -358,18 +377,32 @@ def _clean_response(text):
         if text.count("```") % 2 != 0:
             return text + "\n```"
         return text
+
+    import re
+    # Remove trailing unfinished list headers or newlines (e.g. \n\n7. or \n-)
+    text = re.sub(r'\n+\s*(?:-|\*|\d+\.)\s*$', '', text)
         
     # If it naturally ends in a punctuation mark (and isn't a dangling list number like "5."), leave it alone!
     if text[-1] in ".!?" and not (text[-1] == "." and len(text) > 1 and text[-2].isdigit()):
         return text
 
-    # Otherwise, it might be an unfinished sentence. Find the last complete sentence.
+    # Otherwise, find the latest complete sentence ending in the second half of the text
+    best_pos = -1
     for end_char in [". ", "! ", "? ", ".\n", "!\n", "?\n"]:
-        last_pos = text.rfind(end_char)
-        if last_pos > len(text) * 0.5:
-            return text[:last_pos + 1]
+        pos = text.rfind(end_char)
+        while pos > best_pos:
+            # If the period is part of a list header, ignore it and search backwards
+            if end_char in [". ", ".\n"] and _is_list_header(text, pos):
+                pos = text.rfind(end_char, 0, pos)
+                continue
+            best_pos = pos
+            break
+            
+    if best_pos > len(text) * 0.5:
+        return text[:best_pos + 1]
             
     return text + "."
+
 
 
 def _stub_response(query, context=""):
