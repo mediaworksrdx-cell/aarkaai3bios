@@ -189,11 +189,31 @@ def _is_reasoning_query(query: str) -> bool:
         r"\bovertake\b",
         r"\brunner(s)?\b.*\brace\b",
         r"\bposition\b.*\brace\b",
+        # Heads/Legs and Wheels/Vehicles puzzles
+        r"\bheads?\b.*\blegs?\b",
+        r"\blegs?\b.*\bheads?\b",
+        r"\bwheels?\b.*\b(cars?|motorcycles?|bicycles?|vehicles?|tricycles?)\b",
+        r"\b(cars?|motorcycles?|bicycles?|vehicles?|tricycles?)\b.*\bwheels?\b",
     ]
     for pattern in patterns:
         if re.search(pattern, q):
             return True
     return False
+
+
+def _is_trick_question(query: str) -> bool:
+    """Detect common trick questions or riddles that should bypass web search."""
+    q = query.lower()
+    if "moses" in q and "ark" in q:
+        return True
+    if "heavier" in q and "feather" in q and ("gold" in q or "brick" in q or "lead" in q or "pound" in q):
+        return True
+    if "surgeon" in q and "father" in q and "son" in q:
+        return True
+    if "trick question" in q or "riddle" in q or "brain teaser" in q:
+        return True
+    return False
+
 
 def _has_live_finance_intent(query: str, domain: str, intent: str) -> bool:
     """
@@ -400,8 +420,10 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # and confuse the model into outputting outdated values.
     has_finance_context = "finance" in sources
 
+    is_trick = _is_trick_question(query)
     needs_web = (
         mode != "benchmark"
+        and not is_trick
         and not has_finance_context
         and not is_greeting
         and (
