@@ -543,7 +543,31 @@ def stream_final_response(query, context, intent="", lang="en", mode="production
         yield _stub_response(query, context)
 
 
+def _filter_history_repeats(query: str, history: list[dict] | None) -> list[dict] | None:
+    if not history:
+        return history
+    
+    clean_q = "".join(c for c in query.lower() if c.isalnum())
+    filtered_history = []
+    
+    i = 0
+    while i < len(history):
+        msg = history[i]
+        if msg.get("role") == "user":
+            hist_q = "".join(c for c in msg.get("message", "").lower() if c.isalnum())
+            if hist_q == clean_q or (len(hist_q) > 10 and (hist_q in clean_q or clean_q in hist_q)):
+                i += 1
+                if i < len(history) and history[i].get("role") == "assistant":
+                    i += 1
+                continue
+        filtered_history.append(msg)
+        i += 1
+        
+    return filtered_history if filtered_history else None
+
+
 def _build_final_prompt(query, context, intent="", lang="en", mode="production", history=None):
+    history = _filter_history_repeats(query, history)
     lang_name = _LANG_NAMES.get(lang, "English")
     is_continue = query.lower().strip() in ["continue", "next phase", "continue code", "continue the code", "go on"]
     if is_continue:
@@ -585,7 +609,12 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 "   - Let X be 2-wheeled vehicles (e.g. motorcycles) and Y be 4-wheeled vehicles (e.g. cars).\n"
                 "   - Equation 1 (Total Vehicles): X + Y = Total Vehicles\n"
                 "   - Equation 2 (Total Wheels): 2*X + 4*Y = Total Wheels\n"
-                "   - Solve: Y = (Total Wheels - 2 * Total Vehicles) / 2, and X = Total Vehicles - Y\n\n"
+                "   - Solve: Y = (Total Wheels - 2 * Total Vehicles) / 2, and X = Total Vehicles - Y\n"
+                "7. Percentage Gain/Loss Return Puzzles (Value Recovery):\n"
+                "   - If a value or stock falls by D% (where 0 < D < 100), the required percentage gain to return to the original price is: Gain % = (D / (100 - D)) * 100\n"
+                "   - Example (75% drop): Gain % = (75 / (100 - 75)) * 100 = (75 / 25) * 100 = 300% gain.\n"
+                "   - If a value or stock rises by R%, the required percentage loss to return to the original price is: Loss % = (R / (100 + R)) * 100\n"
+                "   - Example (100% rise): Loss % = (100 / (100 + 100)) * 100 = (100 / 200) * 100 = 50% loss.\n\n"
                 "To solve, check if the puzzle type matches any of the reference categories/rules listed above. If it does, explicitly state which rule applies and use it. If it does not match any of the categories, solve it using general logical reasoning step-by-step. In either case, write out each logical step, verify your reasoning, and state your final answer clearly."
             )
         else:
@@ -613,7 +642,12 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 "   - Let X be 2-wheeled vehicles (e.g. motorcycles) and Y be 4-wheeled vehicles (e.g. cars).\n"
                 "   - Equation 1 (Total Vehicles): X + Y = Total Vehicles\n"
                 "   - Equation 2 (Total Wheels): 2*X + 4*Y = Total Wheels\n"
-                "   - Solve: Y = (Total Wheels - 2 * Total Vehicles) / 2, and X = Total Vehicles - Y\n\n"
+                "   - Solve: Y = (Total Wheels - 2 * Total Vehicles) / 2, and X = Total Vehicles - Y\n"
+                "7. Percentage Gain/Loss Return Puzzles (Value Recovery):\n"
+                "   - If a value or stock falls by D% (where 0 < D < 100), the required percentage gain to return to the original price is: Gain % = (D / (100 - D)) * 100\n"
+                "   - Example (75% drop): Gain % = (75 / (100 - 75)) * 100 = (75 / 25) * 100 = 300% gain.\n"
+                "   - If a value or stock rises by R%, the required percentage loss to return to the original price is: Loss % = (R / (100 + R)) * 100\n"
+                "   - Example (100% rise): Loss % = (100 / (100 + 100)) * 100 = (100 / 200) * 100 = 50% loss.\n\n"
                 "To solve, check if the puzzle type matches any of the reference categories/rules listed above. If it does, explicitly state which rule applies and use it. If it does not match any of the categories, solve it using general logical reasoning step-by-step. In either case, write out each logical step, verify your reasoning, and state your final answer clearly. If a scenario is logically impossible or contains a contradiction/paradox, your final answer must state that it is impossible and explain why, rather than trying to assign a position or number."
             )
         user_prompt = ""
@@ -632,16 +666,41 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
         for w in ["code", "program", "function", "script", "write", "implement"]
     )
     if is_code:
-        system_prompt = (
-            "You are AARKAA, an expert programming AI assistant. "
-            "You have the ability to execute code and bash commands if the user asks you to 'run' or 'execute' them."
-        )
-        user_prompt = ""
-        if context:
+        if "[Code Execution Result]" in context:
+            history = None  # Clear history to avoid bias from previous incorrect code execution outputs in the same conversation session.
+            actual_out = ""
+            if "[stdout]" in context:
+                start_idx = context.index("[stdout]") + len("[stdout]")
+                actual_out = context[start_idx:].strip()
+            elif "[stderr]" in context:
+                start_idx = context.index("[stderr]") + len("[stderr]")
+                actual_out = context[start_idx:].strip()
+            else:
+                actual_out = "Code executed successfully."
+            
+            system_prompt = (
+                "You are AARKAA, an expert programming AI assistant. "
+                "You are provided with the exact output of running the user's code snippet. "
+                f"Your response MUST start with: 'The output of the code is {actual_out}.'\n"
+                "After stating the output, explain step-by-step why the code produces this output.\n"
+                "IMPORTANT: Review the user's code for any logical or syntax errors/bugs (e.g. comparing a string to a reversed iterator instead of a string, mutable default arguments, incorrect loops). If the output differs from the user's expected behavior or contains a bug, explain the root cause of the bug clearly, detail how to fix it, and provide the corrected code snippet using markdown blocks."
+            )
+            user_prompt = ""
             user_prompt += "Context:\n" + context + "\n\n"
-        user_prompt += f"Request: {query}\n\n"
-        user_prompt += f"Provide working code with a clear explanation. You MUST write your response ONLY in the following language: {lang_name}."
+            user_prompt += f"Request: {query}\n\n"
+            user_prompt += f"State the exact output and explain why. You MUST write your response ONLY in the following language: {lang_name}."
+        else:
+            system_prompt = (
+                "You are AARKAA, an expert programming AI assistant. "
+                "You have the ability to execute code and bash commands if the user asks you to 'run' or 'execute' them."
+            )
+            user_prompt = ""
+            if context:
+                user_prompt += "Context:\n" + context + "\n\n"
+            user_prompt += f"Request: {query}\n\n"
+            user_prompt += f"Provide working code with a clear explanation. You MUST write your response ONLY in the following language: {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt)
+        logger.info("AARKAA_ENGINE_PROMPT (is_code):\n%s", prompt)
         tokens = 1500
     else:
         import re
@@ -705,12 +764,52 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 tokens = 1500
             else:
                 system_prompt = (
-                    "You are AARKAA, a highly intelligent AI assistant. "
-                    "You have advanced capabilities including real-time web search and the ability to execute code if asked to 'run' or 'execute' it. "
-                    "Note: If a question is a trick question or a riddle (e.g., involving Moses and the Ark, or weight of feathers vs gold), pay close attention to the details, identify any fallacies or logical twists, and answer it accurately using facts. "
-                    "You cannot predict the future price of financial products or speculative assets (stocks, cryptocurrencies, commodities, etc.). "
-                    "If the user asks for a future price prediction or forecast, you must politely decline, explaining that future market behavior is speculative and unpredictable. "
-                    "Provide clear, complete, and concise responses. If presenting lists or multiple points, limit them to at most 5 key points to ensure high quality, focus, and completeness."
+                    "You are Aarkaa AI, created by Synthetix Analytics.\n\n"
+                    "Your purpose is to provide accurate, helpful, practical, and intelligent assistance across finance, trading, investing, business, coding, mathematics, science, technology, and general knowledge.\n\n"
+                    "Core Behavior:\n"
+                    "- Always answer the user's question directly.\n"
+                    "- Prioritize usefulness, accuracy, and clarity.\n"
+                    "- Use reasoning to understand the user's intent.\n"
+                    "- Do not unnecessarily refuse questions.\n"
+                    "- Do not respond with 'the context does not contain information' unless answering is genuinely impossible. Use general knowledge and reasoning to answer whenever possible.\n"
+                    "- If a question contains a false premise, identify and correct it.\n"
+                    "- If a question is logically impossible or contradictory, explain why.\n"
+                    "- If information is unknown, unavailable, or concerns future events, clearly state that it cannot be determined rather than inventing facts.\n"
+                    "- Never hallucinate facts, statistics, events, people, companies, or sources.\n"
+                    "- Keep answers concise for simple questions. Give detailed explanations for complex questions.\n"
+                    "- Provide step-by-step reasoning only when the user requests it or when solving a complex problem.\n"
+                    "- Maintain consistency between reasoning and final answers. Never contradict your own explanation.\n"
+                    "- Verify calculations before presenting results.\n"
+                    "- Prefer correctness over confidence.\n"
+                    "- Limit lists or multiple points to at most 5 key points to ensure high quality and focus.\n\n"
+                    "Finance & Investing:\n"
+                    "- Explain concepts clearly and accurately.\n"
+                    "- Distinguish between revenue, profit, earnings, cash flow, EBITDA, free cash flow, enterprise value, market capitalization, ROE, ROA, and ROIC.\n"
+                    "- Analyze financial information using sound business reasoning.\n"
+                    "- Avoid making unsupported investment predictions.\n"
+                    "- For future prices, valuations, elections, or unknown future events, explain that the outcome cannot be known with certainty.\n\n"
+                    "Trading:\n"
+                    "- Understand technical analysis, market structure, liquidity, order blocks, fair value gaps, BOS, CHOCH, MSS, risk management, probability, and risk/reward concepts.\n"
+                    "- Explain trading concepts objectively.\n"
+                    "- Never guarantee profits or future market outcomes.\n\n"
+                    "Coding:\n"
+                    "- Explain code accurately.\n"
+                    "- Detect bugs and logical errors.\n"
+                    "- Provide correct complexity analysis.\n"
+                    "- Understand algorithms, data structures, databases, APIs, Python, JavaScript, Java, Kotlin, SQL, and system design concepts.\n"
+                    "- Ensure outputs match the code logic.\n\n"
+                    "Reasoning:\n"
+                    "- Solve mathematical and logical problems carefully.\n"
+                    "- Detect trick questions and false assumptions.\n"
+                    "- Show calculations when needed.\n"
+                    "- For impossible scenarios, explain why they are impossible.\n\n"
+                    "Communication:\n"
+                    "- Be professional, friendly, and concise.\n"
+                    "- Focus on answering the question rather than discussing limitations.\n"
+                    "- Avoid repetitive disclaimers.\n"
+                    "- Use structured formatting when it improves readability.\n\n"
+                    "Primary Objective:\n"
+                    "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
                 )
                 user_prompt = ""
                 if context:

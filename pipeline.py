@@ -27,6 +27,7 @@ from typing import Optional
 
 from config import CONFIDENCE_THRESHOLD, MAX_QUERY_LENGTH
 from schemas import PromptResponse
+from modules.semantic_filter import _is_coding_syntax
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +198,11 @@ def _is_reasoning_query(query: str) -> bool:
         r"\blegs?\b.*\bheads?\b",
         r"\bwheels?\b.*\b(cars?|motorcycles?|bicycles?|vehicles?|tricycles?)\b",
         r"\b(cars?|motorcycles?|bicycles?|vehicles?|tricycles?)\b.*\bwheels?\b",
+        # Percentage gain/loss return puzzles (Value Recovery)
+        r"\b(falls?|decreases?|rises?|increases?)\b.*\bpercentage\s+gain\b",
+        r"\b(falls?|decreases?|rises?|increases?)\b.*\bpercentage\s+loss\b",
+        r"\bpercentage\s+gain\b.*\breturn\b.*\boriginal\b",
+        r"\bpercentage\s+loss\b.*\breturn\b.*\boriginal\b",
     ]
     for pattern in patterns:
         if re.search(pattern, q):
@@ -278,6 +284,90 @@ def _has_live_finance_intent(query: str, domain: str, intent: str) -> bool:
 
     return False
 
+
+
+def _extract_python_code(query: str) -> str:
+    import re
+    # 1. Look for markdown code blocks
+    code_blocks = re.findall(r"```(?:python)?\n(.*?)```", query, re.DOTALL | re.IGNORECASE)
+    if code_blocks:
+        return code_blocks[0].strip()
+    
+    # 2. Otherwise, look for code-like lines
+    lines = query.split("\n")
+    code_lines = []
+    in_code = False
+    
+    for line in lines:
+        stripped = line.strip()
+        # Start code detection on typical python statements
+        if (
+            stripped.startswith("def ")
+            or stripped.startswith("class ")
+            or stripped.startswith("import ")
+            or stripped.startswith("from ")
+            or stripped.startswith("print(")
+            or (stripped.startswith("x ") and "=" in stripped)
+            or (stripped.startswith("y ") and "=" in stripped)
+        ):
+            in_code = True
+        
+        if in_code:
+            # Skip instruction/intent phrasing inside the code block
+            if any(p in stripped.lower() for p in ["what is the output", "output of", "explain"]):
+                continue
+            code_lines.append(line)
+            
+    if code_lines:
+        return "\n".join(code_lines).strip()
+        
+    return ""
+
+
+def _execute_python_code(code: str) -> str:
+    import subprocess
+    import sys
+    import uuid
+    from pathlib import Path
+    from config import SAFE_WORK_DIR
+    
+    work_dir = SAFE_WORK_DIR
+    work_dir.mkdir(parents=True, exist_ok=True)
+    
+    filename = f"temp_eval_{uuid.uuid4().hex}.py"
+    temp_file = work_dir / filename
+    try:
+        temp_file.write_text(code, encoding="utf-8")
+        
+        cmd = [sys.executable, filename]
+        
+        result = subprocess.run(
+            cmd,
+            cwd=str(work_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5.0
+        )
+        
+        output = ""
+        if result.stdout:
+            output += f"[stdout]\n{result.stdout}\n"
+        if result.stderr:
+            output += f"[stderr]\n{result.stderr}\n"
+        if not output:
+            output = "Code executed successfully with no output."
+        return output.strip()
+    except subprocess.TimeoutExpired:
+        return "Error: Code execution timed out after 5.0 seconds."
+    except Exception as exc:
+        return f"Error executing code: {exc}"
+    finally:
+        try:
+            if temp_file.exists():
+                temp_file.unlink()
+        except Exception:
+            pass
 
 
 # ─── Main Pipeline ───────────────────────────────────────────────────────────
@@ -423,12 +513,49 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # and confuse the model into outputting outdated values.
     has_finance_context = "finance" in sources
 
+    # ── 4a. Code Output Sandbox ───────────────────────────────────────────
+    # If this query is a coding query asking for the output of code, we run the code
+    # directly in our python sandbox and inject the output to the prompt context.
+    # This avoids initiating the slow ReAct agent loop for simple output/tracing queries.
+    is_coding_output = False
+    is_coding_query = (intent == "coding_help" or _is_coding_syntax(query))
+    has_output_intent = any(p in query.lower() for p in ["output", "print", "run", "trace", "execute", "result"])
+    if is_coding_query and has_output_intent:
+        code_snippet = _extract_python_code(query)
+        if code_snippet:
+            sandbox_output = _execute_python_code(code_snippet)
+            context_parts.append(
+                f"[Code Execution Result]\n"
+                f"We executed the user's code snippet inside a secure Python sandbox. Here is the actual execution output:\n"
+                f"{sandbox_output}"
+            )
+            sources.append("code_execution")
+            is_coding_output = True
+
     is_trick = _is_trick_question(query)
+    agent_triggers = [
+        "execute", "create a file", "modify file", "write to file", "bash",
+        "test it", "test this", "test the code", "test them", "run the",
+        "what is the output", "what's the output", "output of the code", "what does this print",
+        "what will this print", "what is printed", "what does it print", "output of this",
+        "trace this", "trace the code"
+    ]
+    needs_agent = (
+        not is_coding_output
+        and (
+            any(w in query.lower() for w in agent_triggers)
+            or bool(re.search(r"\brun\b", query.lower()))
+            or (intent == "coding_help" and any(p in query.lower() for p in ["run", "execute", "trace", "test"]))
+        )
+    )
+
     needs_web = (
         mode != "benchmark"
         and not is_trick
         and not has_finance_context
         and not is_greeting
+        and intent != "coding_help"
+        and intent != "reasoning_puzzle"
         and (
             domain == "web_search"
             or intent in ("web_lookup", "news_search", "general_query", "science_query")
@@ -437,9 +564,6 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             or is_factual
         )
     )
-
-    agent_triggers = ["execute", "create a file", "modify file", "write to file", "bash", "test it", "test this", "test the code", "test them"]
-    needs_agent = any(w in query.lower() for w in agent_triggers) or bool(re.search(r"\brun\b", query.lower()))
 
     if needs_web and not needs_agent:
         if not _web_breaker.is_open:
@@ -638,10 +762,48 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     # and confuse the model into outputting outdated values.
     has_finance_context = "finance" in sources
 
+    # ── 4a. Code Output Sandbox ───────────────────────────────────────────
+    # If this query is a coding query asking for the output of code, we run the code
+    # directly in our python sandbox and inject the output to the prompt context.
+    # This avoids initiating the slow ReAct agent loop for simple output/tracing queries.
+    is_coding_output = False
+    is_coding_query = (intent == "coding_help" or _is_coding_syntax(query))
+    has_output_intent = any(p in query.lower() for p in ["output", "print", "run", "trace", "execute", "result"])
+    if is_coding_query and has_output_intent:
+        code_snippet = _extract_python_code(query)
+        if code_snippet:
+            sandbox_output = _execute_python_code(code_snippet)
+            context_parts.append(
+                f"[Code Execution Result]\n"
+                f"We executed the user's code snippet inside a secure Python sandbox. Here is the actual execution output:\n"
+                f"{sandbox_output}"
+            )
+            sources.append("code_execution")
+            is_coding_output = True
+
+    agent_triggers = [
+        "execute", "create a file", "modify file", "write to file", "bash",
+        "test it", "test this", "test the code", "test them", "run the",
+        "what is the output", "what's the output", "output of the code", "what does this print",
+        "what will this print", "what is printed", "what does it print", "output of this",
+        "trace this", "trace the code"
+    ]
+    needs_agent = (
+        not is_coding_output
+        and (
+            any(w in query.lower() for w in agent_triggers)
+            or bool(re.search(r"\brun\b", query.lower()))
+            or (intent == "coding_help" and any(p in query.lower() for p in ["run", "execute", "trace", "test"]))
+        )
+    )
+
     needs_web = (
         mode != "benchmark"
+        and not _is_trick_question(query)
         and not has_finance_context
         and not is_greeting
+        and intent != "coding_help"
+        and intent != "reasoning_puzzle"
         and (
             domain == "web_search"
             or intent in ("web_lookup", "news_search", "general_query", "science_query")
@@ -650,9 +812,6 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             or is_factual
         )
     )
-
-    agent_triggers = ["execute", "create a file", "modify file", "write to file", "bash", "test it", "test this", "test the code", "test them"]
-    needs_agent = any(w in query.lower() for w in agent_triggers) or bool(re.search(r"\brun\b", query.lower()))
 
     if needs_web and not needs_agent:
         if not _web_breaker.is_open:
@@ -687,10 +846,28 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         "detected_language": detected_lang
     }
 
-    # Stream the tokens
-    for token in aarkaa_engine.stream_final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode, history=chat_ctx):
-        full_response += token
-        yield {"type": "content", "token": token}
+    if needs_agent:
+        from modules import coordinator
+        import asyncio
+        agent_ctx = ""
+        if chat_ctx:
+            chat_lines = "\n".join(
+                f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:1500]}"
+                for m in chat_ctx
+            )
+            agent_ctx = f"[Recent Conversation]\n{chat_lines}"
+        final_answer = coordinator.process_task(query, agent_ctx)
+        chunk_size = 8
+        for i in range(0, len(final_answer), chunk_size):
+            token = final_answer[i:i+chunk_size]
+            full_response += token
+            yield {"type": "content", "token": token}
+            await asyncio.sleep(0.01)
+    else:
+        # Stream the tokens
+        for token in aarkaa_engine.stream_final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode, history=chat_ctx):
+            full_response += token
+            yield {"type": "content", "token": token}
 
     # ── 7–8. Store + auto-learn (post-process) ───────────────────────────
     elapsed = round(time.perf_counter() - start, 3)
