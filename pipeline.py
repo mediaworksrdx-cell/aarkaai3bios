@@ -456,15 +456,9 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             logger.info("Web search circuit breaker is OPEN — skipping")
 
     # ── 5. Context fusion ─────────────────────────────────────────────────
-    # Include recent conversation context for continuity
+    chat_ctx = None
     try:
         chat_ctx = memory.get_chat_context(user_id, session_id, limit=5)
-        if chat_ctx:
-            chat_lines = "\n".join(
-                f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:1500]}"
-                for m in chat_ctx
-            )
-            context_parts.insert(0, f"[Recent Conversation]\n{chat_lines}")
     except Exception as exc:
         logger.error("Memory context error: %s", exc)
 
@@ -479,11 +473,15 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         # DANGER: Do NOT pass Web or RAG context to the autonomous agent to prevent 4096 context window explosions.
         # The agent has its own WebSearchTool if it needs information. Only pass the chat history.
         agent_ctx = ""
-        if context_parts and "[Recent Conversation]" in context_parts[0]:
-            agent_ctx = context_parts[0]
+        if chat_ctx:
+            chat_lines = "\n".join(
+                f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:1500]}"
+                for m in chat_ctx
+            )
+            agent_ctx = f"[Recent Conversation]\n{chat_lines}"
         final_answer = coordinator.process_task(query, agent_ctx)
     elif fused_context or is_reasoning:
-        final_answer = aarkaa_engine.final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode)
+        final_answer = aarkaa_engine.final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode, history=chat_ctx)
     else:
         # No external context (e.g. "hello", general chat) – run model directly
         final_answer, _ = aarkaa_engine.primary_check(query, lang=detected_lang)
@@ -671,11 +669,9 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             logger.info("Web search circuit breaker is OPEN — skipping")
 
     # Memory
+    chat_ctx = None
     try:
         chat_ctx = memory.get_chat_context(user_id, session_id, limit=5)
-        if chat_ctx:
-            chat_lines = "\n".join(f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:1500]}" for m in chat_ctx)
-            context_parts.insert(0, f"[Recent Conversation]\n{chat_lines}")
     except Exception: pass
 
     fused_context = "\n\n---\n\n".join(context_parts)
@@ -692,7 +688,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     }
 
     # Stream the tokens
-    for token in aarkaa_engine.stream_final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode):
+    for token in aarkaa_engine.stream_final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode, history=chat_ctx):
         full_response += token
         yield {"type": "content", "token": token}
 

@@ -269,6 +269,18 @@ def _build_chatml(system: str, user: str) -> str:
     return f"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n"
 
 
+def _build_chatml_multi(system: str, history: list[dict] | None, user: str) -> str:
+    """Build ChatML format with system message, multi-turn history, and current user prompt."""
+    prompt = f"<|im_start|>system\n{system}<|im_end|>\n"
+    if history:
+        for msg in history:
+            role = "user" if msg["role"] == "user" else "assistant"
+            content = msg["message"]
+            prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
+    prompt += f"<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n"
+    return prompt
+
+
 def _generate(prompt, max_new_tokens=150, stop=None, temperature=0.7):
     """Run generation via llama.cpp."""
     if _is_stub or _model is None:
@@ -467,13 +479,13 @@ def primary_check(query, lang="en"):
         return _stub_response(query), 0.3
 
 
-def final_response(query, context, intent="", lang="en", mode="production"):
+def final_response(query, context, intent="", lang="en", mode="production", history=None):
     """Full reasoning pass with fused context from external modules."""
     if _is_stub:
         return _stub_response(query, context)
 
     try:
-        result = _build_final_prompt(query, context, intent, lang, mode)
+        result = _build_final_prompt(query, context, intent, lang, mode, history=history)
         prompt, tokens = result[0], result[1]
         temp = result[2] if len(result) > 2 else 0.7
         return _generate(prompt, max_new_tokens=tokens, temperature=temp)
@@ -482,14 +494,14 @@ def final_response(query, context, intent="", lang="en", mode="production"):
         return _stub_response(query, context)
 
 
-def stream_final_response(query, context, intent="", lang="en", mode="production"):
+def stream_final_response(query, context, intent="", lang="en", mode="production", history=None):
     """Stream tokens for the final response pass."""
     if _is_stub:
         yield _stub_response(query, context)
         return
 
     try:
-        result = _build_final_prompt(query, context, intent, lang, mode)
+        result = _build_final_prompt(query, context, intent, lang, mode, history=history)
         prompt, tokens = result[0], result[1]
         temp = result[2] if len(result) > 2 else 0.7
         yield from _generate_stream(prompt, max_new_tokens=tokens, temperature=temp)
@@ -498,7 +510,7 @@ def stream_final_response(query, context, intent="", lang="en", mode="production
         yield _stub_response(query, context)
 
 
-def _build_final_prompt(query, context, intent="", lang="en", mode="production"):
+def _build_final_prompt(query, context, intent="", lang="en", mode="production", history=None):
     lang_name = _LANG_NAMES.get(lang, "English")
     is_continue = query.lower().strip() in ["continue", "next phase", "continue code", "continue the code", "go on"]
     if is_continue:
@@ -509,9 +521,9 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
         user_prompt = "The previous response was cut off due to token limits. Complete the previous response starting from exactly where it was truncated."
         if context:
             user_prompt += "\n\nContext:\n" + context
-        prompt = _build_chatml(system_prompt, user_prompt)
+        prompt = _build_chatml_multi(system_prompt, history, user_prompt)
         tokens = 1024
-        return prompt, tokens
+        return prompt, tokens, 0.7
 
     is_reasoning = (intent == "reasoning_puzzle")
     if is_reasoning:
@@ -577,7 +589,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
         user_prompt += f"Question: {query}\n\nSolve step-by-step."
         lang_name = _LANG_NAMES.get(lang, "English")
         user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
-        prompt = _build_chatml(system_prompt, user_prompt)
+        prompt = _build_chatml_multi(system_prompt, history, user_prompt)
         logger.info("AARKAA_ENGINE_PROMPT: %s", prompt)
         tokens = 1024
         return prompt, tokens, 0.2  # low temperature for precise reasoning
@@ -596,7 +608,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
             user_prompt += "Context:\n" + context + "\n\n"
         user_prompt += f"Request: {query}\n\n"
         user_prompt += f"Provide working code with a clear explanation. You MUST write your response ONLY in the following language: {lang_name}."
-        prompt = _build_chatml(system_prompt, user_prompt)
+        prompt = _build_chatml_multi(system_prompt, history, user_prompt)
         tokens = 1500
     else:
         import re
@@ -612,7 +624,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
                 f"Respond naturally and warmly to the user: {query}\n\n"
                 f"You MUST respond ONLY in the following language: {lang_name}."
             )
-            prompt = _build_chatml(system_prompt, user_prompt)
+            prompt = _build_chatml_multi(system_prompt, history, user_prompt)
             tokens = 250
         else:
             _self_keywords = [
@@ -656,7 +668,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
                     "Do NOT write any introductory or conversational filler like 'Sure, here is...'. Just output the headings and the lists directly.\n"
                     f"You MUST write your entire response ONLY in {lang_name}."
                 )
-                prompt = _build_chatml(system_prompt, user_prompt)
+                prompt = _build_chatml_multi(system_prompt, history, user_prompt)
                 tokens = 1024
             else:
                 system_prompt = (
@@ -685,10 +697,10 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
                     )
                 user_prompt += f"Question: {query}\n\n"
                 user_prompt += f"Answer the question using the context above as reference. If the context does not contain the answer, you may use your general knowledge to answer accurately. Write your entire response ONLY in the following language: {lang_name}."
-                prompt = _build_chatml(system_prompt, user_prompt)
+                prompt = _build_chatml_multi(system_prompt, history, user_prompt)
                 if "has_finance" not in locals() or not has_finance:
                     tokens = 1024
-    temp = 0.2 if (context or is_code) else 0.7
+    temp = 0.2 if (context or is_code or history) else 0.7
     return prompt, tokens, temp
 
 
