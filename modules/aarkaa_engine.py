@@ -522,7 +522,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
         if context:
             user_prompt += "\n\nContext:\n" + context
         prompt = _build_chatml_multi(system_prompt, history, user_prompt)
-        tokens = 1024
+        tokens = 1500
         return prompt, tokens, 0.7
 
     is_reasoning = (intent == "reasoning_puzzle")
@@ -591,7 +591,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
         user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt)
         logger.info("AARKAA_ENGINE_PROMPT: %s", prompt)
-        tokens = 1024
+        tokens = 1500
         return prompt, tokens, 0.2  # low temperature for precise reasoning
 
     is_code = intent == "coding_help" or any(
@@ -669,7 +669,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     f"You MUST write your entire response ONLY in {lang_name}."
                 )
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt)
-                tokens = 1024
+                tokens = 1500
             else:
                 system_prompt = (
                     "You are AARKAA, a highly intelligent AI assistant. "
@@ -700,7 +700,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 user_prompt += f"Answer the question using the context above as reference. If the context does not contain the answer, you may use your general knowledge to answer accurately. Write your entire response ONLY in the following language: {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt)
                 if "has_finance" not in locals() or not has_finance:
-                    tokens = 1024
+                    tokens = 1500
     temp = 0.2 if (context or is_code or history) else 0.7
     return prompt, tokens, temp
 
