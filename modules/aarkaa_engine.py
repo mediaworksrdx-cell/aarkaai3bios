@@ -599,8 +599,9 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
         prompt = _build_chatml(system_prompt, user_prompt)
         tokens = 1500
     else:
+        import re
         is_chat_or_greeting = any(
-            w in query.lower()
+            re.search(r"\b" + re.escape(w) + r"\b", query.lower())
             for w in ["hello", "hi", "hey", "greetings", "good morning", "good afternoon", "good evening", "how are you"]
         )
         if is_chat_or_greeting:
