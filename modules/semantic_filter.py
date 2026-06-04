@@ -254,6 +254,45 @@ def init(embed_fn) -> None:
         _domain_prototypes = None
 
 
+def _is_coding_syntax(query: str) -> bool:
+    q = query.lower()
+    if "```" in query:
+        return True
+    import re
+    coding_patterns = [
+        r"\bdef\s+\w+\s*\(",
+        r"\bclass\s+\w+\b",
+        r"\bimport\s+\w+\b",
+        r"\bfrom\s+\w+\s+import\b",
+        r"\bprint\s*\(",
+        r"\bconsole\.log\s*\(",
+        r"\bpublic\s+class\s+\w+\b",
+        r"\bpublic\s+static\s+void\s+main\b",
+        r"\bconst\s+\w+\s*=",
+        r"\blet\s+\w+\s*=",
+        r"\bfunction\s+\w+\s*\(",
+        r"\binclude\s*<\w+\.h>",
+        r"\busing\s+namespace\s+\w+\b",
+        r"\bfn\s+\w+\s*\(",
+        r"\bstruct\s+\w+\b",
+        r"\binterface\s+\w+\b",
+    ]
+    if any(re.search(pat, q) for pat in coding_patterns):
+        return True
+    
+    lines = [line.strip() for line in query.split("\n") if line.strip()]
+    if len(lines) > 1:
+        code_starts = ["def ", "class ", "import ", "from ", "print(", "for ", "if ", "while ", "return ", "const ", "let "]
+        if any(any(line.startswith(start) for start in code_starts) for line in lines):
+            return True
+            
+    trace_phrases = ["what is the output", "output of", "what does this code", "run this", "execute this", "compile this"]
+    if any(p in q for p in trace_phrases):
+        return True
+        
+    return False
+
+
 def classify(query: str) -> dict:
     """
     Classify a query into a domain with confidence.
@@ -325,6 +364,11 @@ def classify(query: str) -> dict:
         confidence = 0.5
 
     intent = _refine_intent(query, best_domain)
+
+    if _is_coding_syntax(query):
+        best_domain = "technology"
+        intent = "coding_help"
+        confidence = max(confidence, 0.9)
 
     return {
         "domain": best_domain,
