@@ -85,7 +85,9 @@ _NEWS_KEYWORDS = [
 _FACTUAL_KEYWORDS = [
     "stock", "company", "companies", "business", "market", "explain", "list", 
     "recommend", "analysis", "trend", "latest", "current", "news", "price", 
-    "difference", "how does", "why did", "information", "detail"
+    "difference", "how does", "why did", "information", "detail",
+    "ebitda", "fcf", "cash flow", "capex", "ebit", "revenue", "income", "earnings",
+    "working capital", "depreciation", "amortization"
 ]
 
 _FACTUAL_PREFIXES = [
@@ -95,6 +97,7 @@ _FACTUAL_PREFIXES = [
     "where is", "where are", "where's",
     "how many", "how much",
     "tell me about", "give me information on",
+    "why ", "explain ", "how does ", "how do ", "how is ", "how can ",
 ]
 
 _STRATEGY_KEYWORDS = [
