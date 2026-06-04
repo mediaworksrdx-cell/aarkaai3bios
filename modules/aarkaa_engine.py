@@ -641,7 +641,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
                 system_prompt = (
                     "You are AARKAA, a highly intelligent AI assistant. "
                     "You have advanced capabilities including real-time web search and the ability to execute code if asked to 'run' or 'execute' it. "
-                    "Note: You cannot predict the future price of financial products or speculative assets (stocks, cryptocurrencies, commodities, etc.). "
+                    "Note: If a question is a trick question or a riddle (e.g., involving Moses and the Ark, or weight of feathers vs gold), pay close attention to the details, identify any fallacies or logical twists, and answer it accurately using facts. "
+                    "You cannot predict the future price of financial products or speculative assets (stocks, cryptocurrencies, commodities, etc.). "
                     "If the user asks for a future price prediction or forecast, you must politely decline, explaining that future market behavior is speculative and unpredictable."
                 )
                 user_prompt = ""
@@ -666,7 +667,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production")
                 prompt = _build_chatml(system_prompt, user_prompt)
                 if "has_finance" not in locals() or not has_finance:
                     tokens = 1024
-    return prompt, tokens
+    temp = 0.2 if (context or is_code) else 0.7
+    return prompt, tokens, temp
 
 
 def is_available():
