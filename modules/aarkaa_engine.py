@@ -449,7 +449,20 @@ def primary_check(query, lang="en"):
         ]
         is_self = any(kw in q_lower for kw in _self_keywords)
 
-        if is_self:
+        import re
+        is_chat_or_greeting = any(
+            re.search(r"\b" + re.escape(w) + r"\b", q_lower)
+            for w in ["hello", "hi", "hey", "greetings", "good morning", "good afternoon", "good evening", "how are you"]
+        )
+
+        if is_chat_or_greeting:
+            system_prompt = "You are AARKAA, a highly intelligent, warm and friendly AI assistant."
+            user_prompt = f"Respond naturally and warmly to the user: {query}"
+            if lang != "en":
+                user_prompt += f"\n\nYou MUST respond ONLY in the following language: {lang_name}."
+            prompt = _build_chatml(system_prompt, user_prompt)
+            tokens = 250
+        elif is_self:
             system_prompt = (
                 "You are AARKAA (Autonomous Adaptive Reasoning Kernel for Augmented AI), "
                 "a production-grade AI assistant built by Synthetix Analytics.\n\n"
@@ -477,19 +490,19 @@ def primary_check(query, lang="en"):
                 f"Write a direct, elegant response to: '{query}'.\n"
                 "Format the capabilities as a beautiful, sequentially numbered list (1, 2, 3, 4...) and security features as a bulleted list.\n"
                 "Highlight the important terms using bold markdown (e.g. **Real-time web search**).\n"
-                "Do NOT write any introductory or conversational filler like 'Sure, here is...'. Just output the headings and the lists directly.\n"
-                f"You MUST write your entire response ONLY in {lang_name}."
+                "Do NOT write any introductory or conversational filler like 'Sure, here is...'. Just output the headings and the lists directly."
             )
+            if lang != "en":
+                user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
             tokens = 1024
         elif any(w in q_lower for w in ["code", "program", "function", "script", "write", "implement", "create a"]):
             system_prompt = (
                 "You are AARKAA, an expert programming AI assistant."
             )
-            user_prompt = (
-                f"Request: {query}\n\n"
-                f"Provide working code with a brief explanation. You MUST respond ONLY in the following language: {lang_name}."
-            )
+            user_prompt = f"Request: {query}\n\nProvide working code with a brief explanation."
+            if lang != "en":
+                user_prompt += f" You MUST respond ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
             tokens = 512
         else:
@@ -498,10 +511,9 @@ def primary_check(query, lang="en"):
                 "You cannot predict the future price of financial products or speculative assets (stocks, cryptocurrencies, commodities, etc.). "
                 "If the user asks for a future price prediction or forecast, you must politely decline, explaining that future market behavior is speculative and unpredictable."
             )
-            user_prompt = (
-                f"Answer the following question concisely: {query}\n\n"
-                f"You MUST write your response ONLY in the following language: {lang_name}."
-            )
+            user_prompt = f"Answer the following question concisely: {query}\n\n"
+            if lang != "en":
+                user_prompt += f"You MUST write your response ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
             tokens = 300
         response = _generate(prompt, max_new_tokens=tokens)
@@ -571,10 +583,13 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
     lang_name = _LANG_NAMES.get(lang, "English")
     is_continue = query.lower().strip() in ["continue", "next phase", "continue code", "continue the code", "go on"]
     if is_continue:
-        system_prompt = (
-            "You are AARKAA, a highly intelligent programming and multilingual AI assistant.\n"
-            f"You MUST write your entire response ONLY in the following language: {lang_name}."
-        )
+        if lang != "en":
+            system_prompt = (
+                "You are AARKAA, a highly intelligent programming and multilingual AI assistant.\n"
+                f"You MUST write your entire response ONLY in the following language: {lang_name}."
+            )
+        else:
+            system_prompt = "You are AARKAA, a highly intelligent programming AI assistant."
         user_prompt = "The previous response was cut off due to token limits. Complete the previous response starting from exactly where it was truncated."
         if context:
             user_prompt += "\n\nContext:\n" + context
@@ -655,7 +670,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             user_prompt += "Context:\n" + context + "\n\n"
         user_prompt += f"Question: {query}\n\nSolve step-by-step."
         lang_name = _LANG_NAMES.get(lang, "English")
-        user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
+        if lang != "en":
+            user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt)
         logger.info("AARKAA_ENGINE_PROMPT: %s", prompt)
         tokens = 1500
@@ -688,7 +704,9 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             user_prompt = ""
             user_prompt += "Context:\n" + context + "\n\n"
             user_prompt += f"Request: {query}\n\n"
-            user_prompt += f"State the exact output and explain why. You MUST write your response ONLY in the following language: {lang_name}."
+            user_prompt += "State the exact output and explain why."
+            if lang != "en":
+                user_prompt += f" You MUST write your response ONLY in the following language: {lang_name}."
         else:
             system_prompt = (
                 "You are AARKAA, an expert programming AI assistant. "
@@ -698,7 +716,9 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             if context:
                 user_prompt += "Context:\n" + context + "\n\n"
             user_prompt += f"Request: {query}\n\n"
-            user_prompt += f"Provide working code with a clear explanation. You MUST write your response ONLY in the following language: {lang_name}."
+            user_prompt += "Provide working code with a clear explanation."
+            if lang != "en":
+                user_prompt += f" You MUST write your response ONLY in the following language: {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt)
         logger.info("AARKAA_ENGINE_PROMPT (is_code):\n%s", prompt)
         tokens = 1500
@@ -712,10 +732,9 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             system_prompt = (
                 "You are AARKAA, a highly intelligent, warm and friendly AI assistant."
             )
-            user_prompt = (
-                f"Respond naturally and warmly to the user: {query}\n\n"
-                f"You MUST respond ONLY in the following language: {lang_name}."
-            )
+            user_prompt = f"Respond naturally and warmly to the user: {query}\n\n"
+            if lang != "en":
+                user_prompt += f"You MUST respond ONLY in the following language: {lang_name}."
             prompt = _build_chatml_multi(system_prompt, history, user_prompt)
             tokens = 250
         else:
@@ -757,9 +776,10 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     f"Write a direct, elegant response to: '{query}'.\n"
                     "Format the capabilities as a beautiful, sequentially numbered list (1, 2, 3, 4...) and security features as a bulleted list.\n"
                     "Highlight the important terms using bold markdown (e.g. **Real-time web search**).\n"
-                    "Do NOT write any introductory or conversational filler like 'Sure, here is...'. Just output the headings and the lists directly.\n"
-                    f"You MUST write your entire response ONLY in {lang_name}."
+                    "Do NOT write any introductory or conversational filler like 'Sure, here is...'. Just output the headings and the lists directly."
                 )
+                if lang != "en":
+                    user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt)
                 tokens = 1500
             else:
@@ -829,7 +849,9 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                         "---------------------\n"
                     )
                 user_prompt += f"Question: {query}\n\n"
-                user_prompt += f"Answer the question using the context above as reference. If the context does not contain the answer, you may use your general knowledge to answer accurately. Write your entire response ONLY in the following language: {lang_name}."
+                user_prompt += "Answer the question using the context above as reference. If the context does not contain the answer, you may use your general knowledge to answer accurately."
+                if lang != "en":
+                    user_prompt += f" Write your entire response ONLY in the following language: {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt)
                 if "has_finance" not in locals() or not has_finance:
                     tokens = 1500

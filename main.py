@@ -544,11 +544,33 @@ def admin_set_user_memory(req: AdminUserMemoryRequest):
 def submit_rlhf_feedback(req: RLHFRequest):
     """Submit RLHF feedback and optionally auto-learn from correction."""
     from modules import memory
+    from database import SessionLocal, ConversationHistory
+
+    db_conv_id = None
+    if req.conversation_id is not None:
+        try:
+            db_conv_id = int(req.conversation_id)
+        except ValueError:
+            session = SessionLocal()
+            try:
+                latest_conv = (
+                    session.query(ConversationHistory)
+                    .filter(ConversationHistory.session_id == req.conversation_id)
+                    .order_by(ConversationHistory.timestamp.desc())
+                    .first()
+                )
+                if latest_conv:
+                    db_conv_id = latest_conv.id
+            except Exception as e:
+                logger.error("Failed to lookup conversation by session_id: %s", e)
+            finally:
+                session.close()
+
     try:
         memory.store_rlhf_feedback(
             user_id=req.user_id,
             rating=req.rating,
-            conversation_id=req.conversation_id,
+            conversation_id=db_conv_id,
             correction=req.correction,
         )
         return {"status": "success", "message": "Feedback recorded"}

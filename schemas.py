@@ -4,7 +4,7 @@ AARKAAI Backend – Pydantic Request / Response Schemas
 All user inputs are validated and sanitized.
 """
 import re
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -148,7 +148,7 @@ class AdminUserMemoryRequest(BaseModel):
 class RLHFRequest(BaseModel):
     """Request payload for submitting RLHF feedback."""
 
-    conversation_id: Optional[int] = None
+    conversation_id: Optional[Union[int, str]] = None
     user_id: str = Field(max_length=128)
     rating: int = Field(ge=-1, le=1, description="1 for positive, -1 for negative")
     correction: Optional[str] = Field(default=None, max_length=2000, description="Optional text correction to learn from")
