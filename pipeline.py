@@ -586,6 +586,15 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     chat_ctx = None
     try:
         chat_ctx = memory.get_chat_context(user_id, session_id, limit=5)
+        if chat_ctx:
+            last_user_msg = None
+            for msg in reversed(chat_ctx):
+                if msg["role"] == "user":
+                    last_user_msg = msg["message"]
+                    break
+            if last_user_msg and last_user_msg.strip().lower() == query.strip().lower():
+                logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
+                chat_ctx = None
     except Exception as exc:
         logger.error("Memory context error: %s", exc)
 
@@ -834,6 +843,15 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     chat_ctx = None
     try:
         chat_ctx = memory.get_chat_context(user_id, session_id, limit=5)
+        if chat_ctx:
+            last_user_msg = None
+            for msg in reversed(chat_ctx):
+                if msg["role"] == "user":
+                    last_user_msg = msg["message"]
+                    break
+            if last_user_msg and last_user_msg.strip().lower() == query.strip().lower():
+                logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
+                chat_ctx = None
     except Exception: pass
 
     fused_context = "\n\n---\n\n".join(context_parts)
