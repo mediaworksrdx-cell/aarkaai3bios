@@ -203,9 +203,12 @@ def _is_reasoning_query(query: str) -> bool:
         r"\b(falls?|decreases?|rises?|increases?)\b.*\bpercentage\s+loss\b",
         r"\bpercentage\s+gain\b.*\breturn\b.*\boriginal\b",
         r"\bpercentage\s+loss\b.*\breturn\b.*\boriginal\b",
+        # Scale weighing puzzles (e.g. finding heavier/lighter outlier items)
+        r"\b(weigh\w*|scale|balance)\b.*\b(heavier|lighter|outlier|ball|balls|coin|coins|marble|marbles|item|items|bar|bars)\b",
+        r"\b(heavier|lighter|outlier|ball|balls|coin|coins|marble|marbles|item|items|bar|bars)\b.*\b(weigh\w*|scale|balance)\b",
     ]
     for pattern in patterns:
-        if re.search(pattern, q):
+        if re.search(pattern, q, re.DOTALL):
             return True
     return False
 

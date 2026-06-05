@@ -248,18 +248,17 @@ def init():
 
 
 def _has_repetition(text: str) -> bool:
-    """Returns True if a 15-word window has repeated in the text."""
+    """Returns True if a sequence of words is repeated consecutively, indicating a loop."""
     import re
     words = re.findall(r'\b\w+\b', text.lower())
     n = len(words)
-    if n < 30:
+    if n < 16:
         return False
     
-    window_size = 15
-    last_window = words[-window_size:]
-    
-    for i in range(n - 2 * window_size):
-        if words[i:i+window_size] == last_window:
+    # Check for consecutive repetition of windows of size w (from 8 to 50 words)
+    # e.g., if words[-w:] == words[-2w:-w]
+    for w in range(8, min(50, n // 2 + 1)):
+        if words[-w:] == words[-2*w:-w]:
             return True
     return False
 
@@ -298,7 +297,6 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7):
         return
 
     stop_tokens = [
-        "\nContext:", "\nQuestion:", "Context:", "Question:", "User:", "AARKAA:", "\nUser:", "\nAARKAA:", "[User Input]", "\n[User Input]",
         "<|im_end|>", "<|im_start|>", "<|endoftext|>"
     ]
     if stop:
@@ -309,7 +307,7 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7):
         max_tokens=max_new_tokens,
         temperature=temperature,
         top_p=0.9,
-        repeat_penalty=1.15,
+        repeat_penalty=1.0 if temperature < 0.1 else 1.15,
         stop=stop_tokens,
         stream=True
     )
@@ -409,20 +407,23 @@ def _stub_response(query, context=""):
     """Placeholder response when model is unavailable."""
     if context:
         # Prioritize finance data over stale conversation history
-        summary = ""
         if "[Finance Data]" in context:
             # Extract the finance section specifically
             fin_start = context.index("[Finance Data]")
             fin_end = context.find("\n\n---\n\n", fin_start)
             finance_section = context[fin_start:fin_end] if fin_end > 0 else context[fin_start:]
-            summary = finance_section
+            return (
+                "Here is the latest live financial data:\n\n"
+                + finance_section.strip()
+            )
+        elif "[Web Search Results]" in context or "[Web Search]" in context:
+            return (
+                "Here are the search results matching your query:\n\n"
+                + context[:1500].strip()
+            )
         else:
-            summary = context[:1500]
+            return context[:1500].strip()
 
-        return (
-            "Here is the latest live financial data:\n\n"
-            + summary.strip()
-        )
     return (
         '[AARKAA-3B Stub] I received your query: "' + query + '". '
         "The full AARKAA-3B model is not loaded; this is a placeholder response."
@@ -578,8 +579,42 @@ def _filter_history_repeats(query: str, history: list[dict] | None) -> list[dict
     return filtered_history if filtered_history else None
 
 
+def _filter_history_reasoning(query: str, history: list[dict] | None) -> list[dict] | None:
+    if not history:
+        return history
+    
+    import re
+    q_words = set(re.findall(r"\w+", query.lower()))
+    weighing_kws = {"weigh", "scale", "balance", "heavier", "lighter", "outlier", "ball", "balls", "coin", "coins", "marble", "marbles"}
+    clock_kws = {"clock", "angle", "hand", "hands", "time", "hour", "minute"}
+    race_kws = {"race", "position", "overtake", "runner", "runners", "second", "last"}
+    
+    is_q_weighing = bool(q_words & weighing_kws)
+    is_q_clock = bool(q_words & clock_kws)
+    is_q_race = bool(q_words & race_kws)
+    
+    filtered_history = []
+    for msg in history:
+        msg_text = msg.get("message", "").lower()
+        msg_words = set(re.findall(r"\w+", msg_text))
+        is_msg_weighing = bool(msg_words & weighing_kws)
+        is_msg_clock = bool(msg_words & clock_kws)
+        is_msg_race = bool(msg_words & race_kws)
+        
+        if is_q_weighing and is_msg_weighing:
+            filtered_history.append(msg)
+        elif is_q_clock and is_msg_clock:
+            filtered_history.append(msg)
+        elif is_q_race and is_msg_race:
+            filtered_history.append(msg)
+            
+    return filtered_history if filtered_history else None
+
+
 def _build_final_prompt(query, context, intent="", lang="en", mode="production", history=None):
     history = _filter_history_repeats(query, history)
+    if intent == "reasoning_puzzle":
+        history = _filter_history_reasoning(query, history)
     lang_name = _LANG_NAMES.get(lang, "English")
     is_continue = query.lower().strip() in ["continue", "next phase", "continue code", "continue the code", "go on"]
     if is_continue:
@@ -629,8 +664,21 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 "   - If a value or stock falls by D% (where 0 < D < 100), the required percentage gain to return to the original price is: Gain % = (D / (100 - D)) * 100\n"
                 "   - Example (75% drop): Gain % = (75 / (100 - 75)) * 100 = (75 / 25) * 100 = 300% gain.\n"
                 "   - If a value or stock rises by R%, the required percentage loss to return to the original price is: Loss % = (R / (100 + R)) * 100\n"
-                "   - Example (100% rise): Loss % = (100 / (100 + 100)) * 100 = (100 / 200) * 100 = 50% loss.\n\n"
-                "To solve, check if the puzzle type matches any of the reference categories/rules listed above. If it does, explicitly state which rule applies and use it. If it does not match any of the categories, solve it using general logical reasoning step-by-step. In either case, write out each logical step, verify your reasoning, and state your final answer clearly."
+                "   - Example (100% rise): Loss % = (100 / (100 + 100)) * 100 = (100 / 200) * 100 = 50% loss.\n"
+                "8. Scale Weighing Puzzles (e.g., Finding Heavier/Lighter Outlier):\n"
+                "   - To find 1 heavier/lighter outlier among N items in minimum weighings, divide the items into 3 groups (Group A, Group B, and Group C). Group A and Group B must have the exact same size (the closest integer to N/3), and Group C has the remainder (N - 2 * size). For example, for 8 items, Group A and Group B must have exactly 3 items each, and Group C has exactly 2 items.\n"
+                "   - Example (8 items, 1 heavier, 2 weighings):\n"
+                "     - Weighing 1: Weigh Group A (3 items) against Group B (3 items). Group C has 2 items.\n"
+                "       - Case 1 (Group A and Group B balance): The heavier item is in Group C (which has 2 items).\n"
+                "         - Weighing 2: Weigh the 2 items of Group C against each other. The heavier one on the scale is the heavier item.\n"
+                "       - Case 2 (Group A is heavier): The heavier item is in Group A (which has 3 items).\n"
+                "         - Weighing 2: Choose 2 items from Group A and weigh them against each other. If they balance, the 3rd unweighed item of Group A is the heavier one. If they do not balance, the heavier one on the scale is the heavier item.\n"
+                "       - Case 3 (Group B is heavier): The heavier item is in Group B (which has 3 items).\n"
+                "         - Weighing 2: Choose 2 items from Group B and weigh them against each other. If they balance, the 3rd unweighed item of Group B is the heavier one. If they do not balance, the heavier one on the scale is the heavier item.\n"
+                "   - CRITICAL RULES FOR WEIGHING PUZZLES:\n"
+                "     1. NO NAMING OR NUMBERING: Do NOT assign specific numbers, letters, or names (e.g., 'Ball 1', 'Ball 2', 'Ball 5', 'Ball 6', 'Coin A', 'Coin B') to the individual items unless the input question explicitly names them. Refer to them ONLY as 'Group A items', 'Group B items', 'Group C items', or 'the unweighed item from that group'. Assigning artificial names/numbers causes logical errors and group contamination.\n"
+                "     2. STRICT CASE ISOLATION: Each Case is a separate hypothetical universe. In Case 2 (Group A is heavier), the second weighing must ONLY involve items from Group A. You must NEVER reference, weigh, or mix items from Group B or Group C in Case 2. In Case 3 (Group B is heavier), the second weighing must ONLY involve items from Group B, and you must NEVER reference or use items from Group A or Group C. Keep the branches completely independent.\n\n"
+                "To solve: First, identify which of the reference categories/rules applies to the question (e.g. Scale Weighing Puzzles). Explicitly state the category name and the rule/formula. Then, apply the rule step-by-step to the specific numbers in the question. Verify your logic at each step: double-check that you do not introduce contradictions (e.g., if Group A is heavier, Weighing 2 must only involve Group A balls, never Group C; if Group B is heavier, Weighing 2 must only involve Group B balls, never Group C). Finally, state the complete and correct solution clearly."
             )
         else:
             system_prompt = (
@@ -662,20 +710,76 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 "   - If a value or stock falls by D% (where 0 < D < 100), the required percentage gain to return to the original price is: Gain % = (D / (100 - D)) * 100\n"
                 "   - Example (75% drop): Gain % = (75 / (100 - 75)) * 100 = (75 / 25) * 100 = 300% gain.\n"
                 "   - If a value or stock rises by R%, the required percentage loss to return to the original price is: Loss % = (R / (100 + R)) * 100\n"
-                "   - Example (100% rise): Loss % = (100 / (100 + 100)) * 100 = (100 / 200) * 100 = 50% loss.\n\n"
-                "To solve, check if the puzzle type matches any of the reference categories/rules listed above. If it does, explicitly state which rule applies and use it. If it does not match any of the categories, solve it using general logical reasoning step-by-step. In either case, write out each logical step, verify your reasoning, and state your final answer clearly. If a scenario is logically impossible or contains a contradiction/paradox, your final answer must state that it is impossible and explain why, rather than trying to assign a position or number."
+                "   - Example (100% rise): Loss % = (100 / (100 + 100)) * 100 = (100 / 200) * 100 = 50% loss.\n"
+                "8. Scale Weighing Puzzles (e.g., Finding Heavier/Lighter Outlier):\n"
+                "   - To find 1 heavier/lighter outlier among N items in minimum weighings, divide the items into 3 groups (Group A, Group B, and Group C). Group A and Group B must have the exact same size (the closest integer to N/3), and Group C has the remainder (N - 2 * size). For example, for 8 items, Group A and Group B must have exactly 3 items each, and Group C has exactly 2 items.\n"
+                "   - Example (8 items, 1 heavier, 2 weighings):\n"
+                "     - Weighing 1: Weigh Group A (3 items) against Group B (3 items). Group C has 2 items.\n"
+                "       - Case 1 (Group A and Group B balance): The heavier item is in Group C (which has 2 items).\n"
+                "         - Weighing 2: Weigh the 2 items of Group C against each other. The heavier one on the scale is the heavier item.\n"
+                "       - Case 2 (Group A is heavier): The heavier item is in Group A (which has 3 items).\n"
+                "         - Weighing 2: Choose 2 items from Group A and weigh them against each other. If they balance, the 3rd unweighed item of Group A is the heavier one. If they do not balance, the heavier one on the scale is the heavier item.\n"
+                "       - Case 3 (Group B is heavier): The heavier item is in Group B (which has 3 items).\n"
+                "         - Weighing 2: Choose 2 items from Group B and weigh them against each other. If they balance, the 3rd unweighed item of Group B is the heavier one. If they do not balance, the heavier one on the scale is the heavier item.\n"
+                "   - CRITICAL RULES FOR WEIGHING PUZZLES:\n"
+                "     1. NO NAMING OR NUMBERING: Do NOT assign specific numbers, letters, or names (e.g., 'Ball 1', 'Ball 2', 'Ball 5', 'Ball 6', 'Coin A', 'Coin B') to the individual items unless the input question explicitly names them. Refer to them ONLY as 'Group A items', 'Group B items', 'Group C items', or 'the unweighed item from that group'. Assigning artificial names/numbers causes logical errors and group contamination.\n"
+                "     2. STRICT CASE ISOLATION: Each Case is a separate hypothetical universe. In Case 2 (Group A is heavier), the second weighing must ONLY involve items from Group A. You must NEVER reference, weigh, or mix items from Group B or Group C in Case 2. In Case 3 (Group B is heavier), the second weighing must ONLY involve items from Group B, and you must NEVER reference or use items from Group A or Group C. Keep the branches completely independent.\n\n"
+                "To solve: First, identify which of the reference categories/rules applies to the question (e.g. Scale Weighing Puzzles). Explicitly state the category name and the rule/formula. Then, apply the rule step-by-step to the specific numbers in the question. Verify your logic at each step: double-check that you do not introduce contradictions (e.g., if Group A is heavier, Weighing 2 must only involve Group A balls, never Group C; if Group B is heavier, Weighing 2 must only involve Group B balls, never Group C). Finally, state the complete and correct solution clearly. If a scenario is logically impossible or contains a contradiction/paradox, your final answer must state that it is impossible and explain why, rather than trying to assign a position or number."
             )
+        # Detect puzzle category for targeted guidelines
+        import re
+        q_words = set(re.findall(r"\w+", query.lower()))
+        weighing_kws = {"weigh", "scale", "balance", "heavier", "lighter", "outlier", "ball", "balls", "coin", "coins", "marble", "marbles", "item", "items"}
+        clock_kws = {"clock", "angle", "hand", "hands", "time", "hour", "minute"}
+        race_kws = {"race", "position", "overtake", "runner", "runners", "second", "last"}
+        
+        is_weighing = bool(q_words & weighing_kws)
+        is_clock = bool(q_words & clock_kws)
+        is_race = bool(q_words & race_kws)
+        
         user_prompt = ""
         if context:
             user_prompt += "Context:\n" + context + "\n\n"
-        user_prompt += f"Question: {query}\n\nSolve step-by-step."
+        
+        user_prompt += f"Question: {query}\n\n"
+        user_prompt += "To solve this puzzle, follow these instructions strictly:\n"
+        
+        if is_weighing:
+            user_prompt += (
+                "Apply the 'Scale Weighing Puzzles' rule to solve the question. "
+                "You must use the exact logical cases (Case 1, Case 2, Case 3) and wording from the example in the rules, but adapted to this question. "
+                "Do NOT assign numbers, letters, or names to individual items."
+            )
+        elif is_clock:
+            user_prompt += (
+                "1. Identify and state the applicable category from the reference rules above (e.g., 'Clock Angle Puzzles').\n"
+                "2. Calculate the exact positions in degrees for both the hour hand and the minute hand using the formulas:\n"
+                "   - Hour Hand Position = (30 * H) + (0.5 * M)\n"
+                "   - Minute Hand Position = 6 * M\n"
+                "3. Calculate the absolute difference between these positions, and adjust if it is greater than 180 degrees.\n"
+                "4. State the final angle clearly and concisely."
+            )
+        elif is_race:
+            user_prompt += (
+                "1. Identify and state the applicable category from the reference rules (e.g., 'Race and Positional Puzzles').\n"
+                "2. Determine the starting position of the person being overtaken.\n"
+                "3. Apply the rule: when you overtake that person, you take their place and become that position.\n"
+                "4. State your final position clearly and concisely."
+            )
+        else:
+            user_prompt += (
+                "1. Identify and state the applicable category from the reference rules above.\n"
+                "2. Apply the exact logic, steps, and case breakdown from the example in that category.\n"
+                "3. Double-check your step-by-step reasoning for logical consistency.\n"
+                "4. Provide the final solution clearly and concisely."
+            )
         lang_name = _LANG_NAMES.get(lang, "English")
         if lang != "en":
             user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt)
         logger.info("AARKAA_ENGINE_PROMPT: %s", prompt)
-        tokens = 1500
-        return prompt, tokens, 0.2  # low temperature for precise reasoning
+        tokens = 3800
+        return prompt, tokens, 0.0  # temperature 0.0 for deterministic, precise reasoning
 
     is_code = intent == "coding_help" or any(
         w in query.lower()
@@ -721,7 +825,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 user_prompt += f" You MUST write your response ONLY in the following language: {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt)
         logger.info("AARKAA_ENGINE_PROMPT (is_code):\n%s", prompt)
-        tokens = 1500
+        tokens = 3800
     else:
         import re
         is_chat_or_greeting = any(
@@ -736,7 +840,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             if lang != "en":
                 user_prompt += f"You MUST respond ONLY in the following language: {lang_name}."
             prompt = _build_chatml_multi(system_prompt, history, user_prompt)
-            tokens = 250
+            tokens = 500
         else:
             _self_keywords = [
                 "security feature", "built-in", "your feature", "your capabilit",
@@ -781,7 +885,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 if lang != "en":
                     user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt)
-                tokens = 1500
+                tokens = 3800
             else:
                 system_prompt = (
                     "You are Aarkaa AI, created by Synthetix Analytics.\n\n"
@@ -854,8 +958,11 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     user_prompt += f" Write your entire response ONLY in the following language: {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt)
                 if "has_finance" not in locals() or not has_finance:
-                    tokens = 1500
-    temp = 0.2 if (context or is_code or history) else 0.7
+                    tokens = 3800
+    if is_reasoning:
+        temp = 0.0
+    else:
+        temp = 0.2 if (context or is_code or history) else 0.7
     return prompt, tokens, temp
 
 
