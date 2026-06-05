@@ -462,7 +462,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f"\n\nYou MUST respond ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = 250
+            tokens = 500
         elif is_self:
             system_prompt = (
                 "You are AARKAA (Autonomous Adaptive Reasoning Kernel for Augmented AI), "
@@ -496,7 +496,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = 1024
+            tokens = 3800
         elif any(w in q_lower for w in ["code", "program", "function", "script", "write", "implement", "create a"]):
             system_prompt = (
                 "You are AARKAA, an expert programming AI assistant."
@@ -505,7 +505,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f" You MUST respond ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = 512
+            tokens = 3800
         else:
             system_prompt = (
                 "You are AARKAA, a helpful and precise AI assistant. "
@@ -516,7 +516,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f"You MUST write your response ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = 300
+            tokens = 3800
         response = _generate(prompt, max_new_tokens=tokens)
         confidence = min(0.9, 0.5 + len(response.split()) / 150)
         return response, confidence
