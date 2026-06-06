@@ -566,7 +566,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = 3800
+            tokens = MAX_TOKENS
         elif any(w in q_lower for w in ["code", "program", "function", "script", "write", "implement", "create a"]):
             system_prompt = (
                 "You are AARKAA, an expert programming AI assistant."
@@ -575,7 +575,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f" You MUST respond ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = 3800
+            tokens = MAX_TOKENS
         else:
             system_prompt = (
                 "You are AARKAA, a helpful and precise AI assistant. "
@@ -586,7 +586,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f"You MUST write your response ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = 3800
+            tokens = MAX_TOKENS
         temp = _get_temperature(query, "general_query")
         response = _generate(prompt, max_new_tokens=tokens, temperature=temp)
         confidence = min(0.9, 0.5 + len(response.split()) / 150)
@@ -849,7 +849,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt)
         logger.info("AARKAA_ENGINE_PROMPT: %s", prompt)
-        tokens = 3800
+        tokens = MAX_TOKENS
         return prompt, tokens, 0.0  # temperature 0.0 for deterministic, precise reasoning
 
     is_code = intent == "coding_help" or any(
@@ -896,7 +896,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 user_prompt += f" You MUST write your response ONLY in the following language: {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt)
         logger.info("AARKAA_ENGINE_PROMPT (is_code):\n%s", prompt)
-        tokens = 3800
+        tokens = MAX_TOKENS
     else:
         import re
         is_chat_or_greeting = any(
@@ -956,7 +956,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 if lang != "en":
                     user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt)
-                tokens = 3800
+                tokens = MAX_TOKENS
             else:
                 system_prompt = (
                     "You are Aarkaa AI, created by Synthetix Analytics.\n\n"
@@ -1030,7 +1030,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     user_prompt += f" Write your entire response ONLY in the following language: {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt)
                 if "has_finance" not in locals() or not has_finance:
-                    tokens = 3800
+                    tokens = MAX_TOKENS
     temp = _get_temperature(query, intent, context)
     return prompt, tokens, temp
 
