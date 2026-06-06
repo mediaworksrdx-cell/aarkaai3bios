@@ -51,7 +51,7 @@ def _deserialize(blob: bytes) -> np.ndarray:
 # ─── Storage ──────────────────────────────────────────────────────────────────
 
 
-def store_knowledge(topic: str, content: str, source: str = "auto_learn") -> None:
+def store_knowledge(topic: str, content: str, source: str = "auto_learn", user_id: Optional[str] = None) -> None:
     """
     Embed and store a knowledge entry.
     """
@@ -65,6 +65,7 @@ def store_knowledge(topic: str, content: str, source: str = "auto_learn") -> Non
     session: Session = SessionLocal()
     try:
         entry = KnowledgeEntry(
+            user_id=user_id,
             topic=topic,
             content=content,
             embedding=blob,
@@ -72,7 +73,7 @@ def store_knowledge(topic: str, content: str, source: str = "auto_learn") -> Non
         )
         session.add(entry)
         session.commit()
-        logger.info("Stored knowledge: %s (%d chars)", topic, len(content))
+        logger.info("Stored knowledge: %s (%d chars) for user %s", topic, len(content), user_id)
     except Exception as exc:
         session.rollback()
         logger.error("store_knowledge failed: %s", exc)
@@ -83,7 +84,7 @@ def store_knowledge(topic: str, content: str, source: str = "auto_learn") -> Non
 # ─── Retrieval ────────────────────────────────────────────────────────────────
 
 
-def search(query: str, top_k: int = 5) -> list[dict]:
+def search(query: str, top_k: int = 5, user_id: Optional[str] = None) -> list[dict]:
     """
     Semantic search over knowledge entries.
 
@@ -96,9 +97,23 @@ def search(query: str, top_k: int = 5) -> list[dict]:
 
     session: Session = SessionLocal()
     try:
-        entries = session.query(KnowledgeEntry).filter(
-            KnowledgeEntry.embedding.isnot(None)
-        ).all()
+        filters = [
+            KnowledgeEntry.embedding.isnot(None),
+            KnowledgeEntry.source != "auto_learn"
+        ]
+
+        # Isolate user knowledge profiles.
+        # Global entries (empty/system user_id) are accessible to all users.
+        if user_id:
+            filters.append(
+                (KnowledgeEntry.user_id == user_id) | (KnowledgeEntry.user_id.is_(None)) | (KnowledgeEntry.user_id == "")
+            )
+        else:
+            filters.append(
+                (KnowledgeEntry.user_id.is_(None)) | (KnowledgeEntry.user_id == "")
+            )
+
+        entries = session.query(KnowledgeEntry).filter(*filters).all()
 
         if not entries:
             return []
@@ -137,11 +152,11 @@ def search(query: str, top_k: int = 5) -> list[dict]:
         session.close()
 
 
-def get_context(query: str, top_k: int = 3) -> str:
+def get_context(query: str, top_k: int = 3, user_id: Optional[str] = None) -> str:
     """
     Get a formatted context string for the query from the knowledge base.
     """
-    results = search(query, top_k=top_k)
+    results = search(query, top_k=top_k, user_id=user_id)
     if not results:
         return ""
 

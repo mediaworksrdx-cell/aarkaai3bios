@@ -280,6 +280,76 @@ def _build_chatml_multi(system: str, history: list[dict] | None, user: str) -> s
     return prompt
 
 
+def _get_temperature(query: str, intent: str, context: str = "") -> float:
+    """Determine dynamic generation temperature based on task/intent."""
+    q_low = query.lower()
+    
+    # 1. Reasoning / Math (temp: 0.0)
+    # Check intent first
+    if intent == "reasoning_puzzle" or "reasoning" in intent:
+        return 0.0
+    
+    # Look for common reasoning / puzzle patterns
+    reasoning_keywords = [
+        "weigh", "scale", "balance", "heavier", "lighter", "outlier", "ball", "balls", "coin", "coins", "marble", "marbles",
+        "clock", "angle", "hand", "hands", "hour hand", "minute hand",
+        "overtake", "runner", "race", "position",
+        "lily pad", "double", "doubles every",
+        "bat and ball", "farmer", "sheep", "cabbage", "crossing the river", "boat",
+        "how old is", "age", "brother", "sister", "fraction", "percentage gain", "percentage loss",
+        "puzzle", "riddle", "logic question", "math problem", "solve for x"
+    ]
+    
+    has_math_operator = any(c in q_low for c in ["+", "*", "/", "=", "^"])
+    if not has_math_operator and "-" in q_low:
+        import re
+        # check if '-' is part of a subtraction or negative number
+        if re.search(r"\d\s*-\s*\d", q_low) or re.search(r"\b-\s*\d", q_low) or " - " in q_low:
+            has_math_operator = True
+            
+    if any(w in q_low for w in reasoning_keywords) or has_math_operator:
+        # Make sure it's not a code block or coding question
+        if not ("def " in q_low or "import " in q_low or "class " in q_low or "```" in q_low):
+            return 0.0
+
+    # 2. Coding (temp: 0.2 in range 0.1 - 0.3)
+    coding_keywords = ["program", "function", "script", "implement", "debug", "compile", "run", "trace", "execute", "output"]
+    is_code = intent == "coding_help" or any(w in q_low for w in coding_keywords) or "```" in query or any(p in q_low for p in ["def ", "import ", "class ", "fn ", "public class ", "console.log"])
+    if not is_code and "write" in q_low:
+        coding_contexts = ["code", "function", "script", "program", "python", "javascript", "java", "c++", "rust", "html", "css", "sql", "class"]
+        if any(c in q_low for c in coding_contexts):
+            is_code = True
+            
+    if is_code:
+        return 0.2
+
+    # 3. Finance (temp: 0.15 in range 0.1 - 0.2)
+    is_finance = (
+        intent.startswith("finance") 
+        or intent in ["price_check", "comparison"] 
+        or "[Finance Data]" in context 
+        or "[Technical Analysis]" in context 
+        or "[Options Strategy]" in context
+        or any(w in q_low for w in ["stock", "price", "market", "share", "crypto", "bitcoin", "dividend", "revenue", "ebitda", "fcf", "ticker"])
+    )
+    if is_finance:
+        return 0.15
+
+    # 4. Creative Writing (temp: 0.9 in range 0.8 - 1.0)
+    creative_words = [
+        "story", "poem", "poetry", "essay", "song", "lyrics", "joke", "creative", 
+        "compose", "draft", "write a story", "write a poem", "write an essay", 
+        "write a joke", "write a song", "write lyrics", "haiku", "limerick", 
+        "fiction", "novel", "play", "dialogue", "speech", "letter", "email", 
+        "congratulate", "greeting card", "rewrite", "paraphrase"
+    ]
+    if any(w in q_low for w in creative_words):
+        return 0.9
+
+    # 5. General Chat (temp: 0.7 in range 0.6 - 0.7)
+    return 0.7
+
+
 def _generate(prompt, max_new_tokens=150, stop=None, temperature=0.7):
     """Run generation via llama.cpp."""
     if _is_stub or _model is None:
@@ -517,7 +587,8 @@ def primary_check(query, lang="en"):
                 user_prompt += f"You MUST write your response ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
             tokens = 3800
-        response = _generate(prompt, max_new_tokens=tokens)
+        temp = _get_temperature(query, "general_query")
+        response = _generate(prompt, max_new_tokens=tokens, temperature=temp)
         confidence = min(0.9, 0.5 + len(response.split()) / 150)
         return response, confidence
     except Exception as exc:
@@ -895,7 +966,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "- Prioritize usefulness, accuracy, and clarity.\n"
                     "- Use reasoning to understand the user's intent.\n"
                     "- Do not unnecessarily refuse questions.\n"
-                    "- Do not respond with 'the context does not contain information' unless answering is genuinely impossible. Use general knowledge and reasoning to answer whenever possible.\n"
+                    "- NEVER output disclaimers, warnings, or notes about the sufficiency, availability, or presence of context (e.g. 'Note: the context does not contain...', 'Based on the context...', 'The context provided is not sufficient').\n"
+                    "- Do NOT mention the word 'context' or reference 'the provided context' in your response to the user. Simply answer the question directly using general knowledge where needed, without explaining where the information came from.\n"
                     "- If a question contains a false premise, identify and correct it.\n"
                     "- If a question is logically impossible or contradictory, explain why.\n"
                     "- If information is unknown, unavailable, or concerns future events, clearly state that it cannot be determined rather than inventing facts.\n"
@@ -928,8 +1000,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "- For impossible scenarios, explain why they are impossible.\n\n"
                     "Communication:\n"
                     "- Be professional, friendly, and concise.\n"
-                    "- Focus on answering the question rather than discussing limitations.\n"
-                    "- Avoid repetitive disclaimers.\n"
+                    "- Focus on answering the question rather than discussing limitations or referencing context.\n"
+                    "- STRICTLY avoid all disclaimers, notes, or explanations of system limitations or context sufficiency.\n"
                     "- Use structured formatting when it improves readability.\n\n"
                     "Primary Objective:\n"
                     "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
@@ -952,16 +1024,14 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                         "---------------------\n"
                     )
                 user_prompt += f"Question: {query}\n\n"
-                user_prompt += "Answer the question using the context above as reference. If the context does not contain the answer, you may use your general knowledge to answer accurately."
+                if context:
+                    user_prompt += "Answer the question using the context above as reference. If the context does not contain the answer, you may use your general knowledge to answer accurately. Do NOT output any notes, warnings, or disclaimers about context sufficiency or references to the context."
                 if lang != "en":
                     user_prompt += f" Write your entire response ONLY in the following language: {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt)
                 if "has_finance" not in locals() or not has_finance:
                     tokens = 3800
-    if is_reasoning:
-        temp = 0.0
-    else:
-        temp = 0.2 if (context or is_code or history) else 0.7
+    temp = _get_temperature(query, intent, context)
     return prompt, tokens, temp
 
 
