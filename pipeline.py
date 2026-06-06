@@ -627,7 +627,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # ── 5. Context fusion ─────────────────────────────────────────────────
     chat_ctx = None
     try:
-        chat_ctx = memory.get_chat_context(user_id, session_id, limit=5)
+        chat_ctx = memory.get_chat_context(user_id, session_id, limit=2)
         if chat_ctx:
             last_user_msg = None
             for msg in reversed(chat_ctx):
@@ -889,7 +889,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     # Memory
     chat_ctx = None
     try:
-        chat_ctx = memory.get_chat_context(user_id, session_id, limit=5)
+        chat_ctx = memory.get_chat_context(user_id, session_id, limit=2)
         if chat_ctx:
             last_user_msg = None
             for msg in reversed(chat_ctx):
