@@ -1006,6 +1006,12 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "Primary Objective:\n"
                     "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
                 )
+                is_general = intent in ["general_query", "web_lookup", "news_search", "science_query", ""] or not intent
+                if is_general:
+                    system_prompt = (
+                        "You are Aarkaa AI, a highly intelligent and helpful assistant built by Synthetix Analytics.\n"
+                        "Provide accurate, clear, and direct answers to the user's query."
+                    )
                 user_prompt = ""
                 if context:
                     has_finance = "[Finance Data]" in context
