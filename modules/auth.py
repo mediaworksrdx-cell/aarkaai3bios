@@ -92,7 +92,7 @@ def register_user(email: str, password: str, name: Optional[str] = None) -> dict
     Create a new user. Raises ValueError on duplicate email or weak password.
     Returns the JWT auth payload dict.
     """
-    if len(password) < 6:
+    if len(password) < 8:
         raise ValueError("Password must be at least 6 characters")
 
     session = SessionLocal()
