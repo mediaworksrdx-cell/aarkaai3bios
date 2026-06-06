@@ -121,6 +121,7 @@ class KnowledgeEntry(Base):
     __tablename__ = "knowledge_entries"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(128), nullable=True, index=True)
     topic = Column(String(256), nullable=False)
     content = Column(Text, nullable=False)
     embedding = Column(LargeBinary, nullable=True)  # 384-dim float32 blob

@@ -131,6 +131,10 @@ def _detect_requested_language(query: str, current_detected: str) -> str:
 def _detect_language(text: str) -> str:
     """Detect the language of the input text. Returns ISO 639-1 code."""
     try:
+        words = text.strip().split()
+        if all(ord(c) < 128 for c in text):
+            if len(words) < 4 or len(text) < 20:
+                return "en"
         import langid
         lang, _ = langid.classify(text)
         return lang
@@ -269,15 +273,19 @@ def _has_live_finance_intent(query: str, domain: str, intent: str) -> bool:
     if any(kw in q_low for kw in stock_keywords):
         return True
 
-    # If the domain is finance and it mentions a known uppercase ticker
-    if domain == "finance" or intent.startswith("finance"):
-        # If the query contains any exact uppercase ticker (e.g. AAPL)
-        words = re.findall(r"\b[A-Z]{2,6}\b", query)
-        if words:
-            from modules.finance import _US_TICKERS, _INDIA_TICKERS
-            known_tickers = set(list(_US_TICKERS.values()) + list(_INDIA_TICKERS.values()))
-            if any(w in known_tickers for w in words):
-                return True
+    if domain == "finance" or intent.startswith("finance") or "btc" in q_low or "eth" in q_low or "crypto" in q_low:
+        from modules.finance import _US_TICKERS, _INDIA_TICKERS, _INDEX_TICKERS, _CRYPTO_TICKERS, COMMODITY_TICKERS, FOREX_PAIRS, _TICKER_BLOCKLIST
+        all_known = set()
+        for mapping in [_US_TICKERS, _INDIA_TICKERS, _INDEX_TICKERS, _CRYPTO_TICKERS, COMMODITY_TICKERS, FOREX_PAIRS]:
+            for k, v in mapping.items():
+                if k.lower() not in _TICKER_BLOCKLIST:
+                    all_known.add(k.lower())
+                clean_v = v.split("-")[0].split(".")[0].replace("^", "").lower()
+                if clean_v not in _TICKER_BLOCKLIST:
+                    all_known.add(clean_v)
+        words = re.findall(r"\b[a-zA-Z]{2,15}\b", q_low)
+        if any(w in all_known for w in words):
+            return True
         
         # If the query is very short (e.g. 1-2 words like "Apple stock" or just "Apple")
         # we can default to fetching the price
@@ -425,6 +433,12 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     filter_confidence = filter_result["confidence"]
     intent = filter_result["intent"]
 
+    # Fallback to general query if classifier confidence is low
+    if filter_confidence < 0.45:
+        logger.info("Low filter confidence (%.3f < 0.45) — falling back to general query", filter_confidence)
+        domain = "general"
+        intent = "general_query"
+
     logger.info(
         "Filter → domain=%s  conf=%.3f  intent=%s",
         domain, filter_confidence, intent,
@@ -443,7 +457,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # RAG – check the knowledge base first (skip for simple greetings and reasoning puzzles)
     if not is_greeting and not is_reasoning and mode != "benchmark":
         try:
-            rag_context = rag.get_context(query)
+            rag_context = rag.get_context(query, user_id=user_id)
             if rag_context:
                 context_parts.append(f"[Knowledge Base]\n{rag_context}")
                 sources.append("rag")
@@ -616,10 +630,10 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             )
             agent_ctx = f"[Recent Conversation]\n{chat_lines}"
         final_answer = coordinator.process_task(query, agent_ctx)
-    elif fused_context or is_reasoning:
+    elif fused_context or is_reasoning or chat_ctx:
         final_answer = aarkaa_engine.final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode, history=chat_ctx)
     else:
-        # No external context (e.g. "hello", general chat) – run model directly
+        # No external context and no history (e.g. initial greeting) – run model directly
         final_answer, _ = aarkaa_engine.primary_check(query, lang=detected_lang)
 
     # Combine confidence (average of filter and primary)
@@ -703,7 +717,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     # RAG
     if not is_greeting and not is_reasoning and mode != "benchmark":
         try:
-            rag_context = rag.get_context(query)
+            rag_context = rag.get_context(query, user_id=user_id)
             if rag_context:
                 context_parts.append(f"[Knowledge Base]\n{rag_context}")
                 sources.append("rag")

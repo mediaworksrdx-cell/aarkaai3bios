@@ -32,106 +32,150 @@ def init(embed_fn) -> None:
 def check_and_learn(user_id: str) -> bool:
     """
     Check if auto-learning should trigger and execute if so.
-
-    Returns True if learning was performed.
+    Only runs on conversations that have positive RLHF feedback or corrections.
     """
     from modules import memory, rag
+    from database import SessionLocal, ConversationHistory, RLHFFeedback
 
-    count = memory.get_conversation_count(user_id)
-    if count == 0 or count % AUTO_LEARN_INTERVAL != 0:
-        return False
+    # 1. Get last learned conversation ID from user memory
+    last_id = 0
+    try:
+        memories = memory.get_user_memories(user_id, category="auto_learn_meta")
+        for m in memories:
+            if m["key"] == "last_learned_conv_id":
+                last_id = int(m["value"])
+                break
+    except Exception as exc:
+        logger.error("Failed to read last_learned_conv_id: %s", exc)
 
-    logger.info(
-        "Auto-learn triggered for user %s (conversation #%d)", user_id, count
-    )
+    # 2. Fetch new conversations with positive feedback or corrections
+    session = SessionLocal()
+    try:
+        rows = (
+            session.query(ConversationHistory)
+            .join(RLHFFeedback, ConversationHistory.id == RLHFFeedback.conversation_id)
+            .filter(
+                ConversationHistory.user_id == user_id,
+                ConversationHistory.id > last_id,
+                (RLHFFeedback.rating >= 1) | (RLHFFeedback.correction.isnot(None))
+            )
+            .order_by(ConversationHistory.id.asc())
+            .all()
+        )
+        if not rows:
+            return False
 
-    # 1. Fetch last N conversations
-    conversations = memory.get_recent_conversations(user_id, limit=AUTO_LEARN_INTERVAL)
-    if not conversations:
-        return False
-
-    # 2. Extract knowledge
-    knowledge_items = extract_knowledge(conversations)
-
-    # 3. Store each piece of knowledge
-    for item in knowledge_items:
-        rag.store_knowledge(
-            topic=item["topic"],
-            content=item["content"],
-            source="auto_learn",
+        logger.info(
+            "Auto-learn triggered for user %s on %d new feedback conversations",
+            user_id, len(rows)
         )
 
-    # 4. Update user profile
-    update_profile_from_history(user_id, conversations)
+        conversations = [
+            {
+                "id": r.id,
+                "query": r.query,
+                "response": r.response,
+                "intent": r.intent,
+                "confidence": r.confidence,
+                "source": r.source,
+            }
+            for r in rows
+        ]
 
-    logger.info(
-        "Auto-learn completed: %d knowledge items stored for user %s",
-        len(knowledge_items),
-        user_id,
-    )
-    return True
+        # 3. Extract knowledge as general factual summaries
+        knowledge_items = extract_knowledge(conversations)
+
+        # 4. Store each piece of knowledge as "learned_fact"
+        for item in knowledge_items:
+            rag.store_knowledge(
+                topic=item["topic"],
+                content=item["content"],
+                source="learned_fact",
+                user_id=user_id,
+            )
+
+        # 5. Update user profile
+        update_profile_from_history(user_id, conversations)
+
+        # 6. Save the new last learned ID
+        max_id = max(r.id for r in rows)
+        memory.update_user_memory(
+            user_id=user_id,
+            key="last_learned_conv_id",
+            value=str(max_id),
+            category="auto_learn_meta"
+        )
+
+        logger.info(
+            "Auto-learn completed: %d general facts stored for user %s",
+            len(knowledge_items),
+            user_id,
+        )
+        return True
+    except Exception as exc:
+        logger.error("check_and_learn failed: %s", exc)
+        return False
+    finally:
+        session.close()
 
 
 def extract_knowledge(conversations: list[dict]) -> list[dict]:
     """
     Extract key knowledge from a batch of conversations.
-
-    Uses heuristic extraction:
-    - Identifies main topics discussed
-    - Summarises Q&A pairs into knowledge entries
-    - Groups related conversations
+    Uses AARKAA model to synthesize Q&A pairs into general facts.
     """
+    from modules.aarkaa_engine import generate_raw
+
     knowledge_items: list[dict] = []
 
-    # Group conversations by intent
+    # Group conversations by intent/topic
     intent_groups: dict[str, list[dict]] = {}
     for conv in conversations:
         intent = conv.get("intent", "general")
         intent_groups.setdefault(intent, []).append(conv)
 
-    # Patterns to skip
     greetings = ["hello", "hi", "hey", "greetings", "good morning", "good afternoon", "good evening", "how are you", "who are you"]
-    skip_keywords = ["sorry", "confusion", "placeholder", "stub", "context provided", "don't have info", "no direct info", "unable to answer", "not have information"]
-    meta_keywords = ["speak", "answer in", "translate", "write in", "write response"]
 
     for intent, convs in intent_groups.items():
-        # Skip if group represents simple greetings
-        if intent in ["greeting", "general_query"] and all(c["query"].lower().strip() in greetings for c in convs):
-            continue
-
-        queries = [c["query"] for c in convs]
-        responses = [c["response"] for c in convs]
-
-        # Extract key topics from queries
-        topics = _extract_topics(queries)
-        topic_str = ", ".join(topics[:5]) if topics else intent
-
-        # Combine Q&A into a knowledge document
         qa_pairs = []
-        for q, a in zip(queries, responses):
-            q_low = q.lower()
-            a_low = a.lower()
-
-            # Skip greetings
-            if q_low.strip() in greetings:
+        for c in convs:
+            q = c["query"]
+            a = c["response"]
+            if q.lower().strip() in greetings:
                 continue
-
-            # Skip meta questions about language/system
-            if any(kw in q_low for kw in meta_keywords):
-                continue
-
-            # Skip failed or stub responses
-            if "[stub]" in a_low or any(kw in a_low for kw in skip_keywords):
-                continue
-
             qa_pairs.append(f"Q: {q}\nA: {a}")
 
-        if qa_pairs:
-            content = f"Topic area: {topic_str}\n\n" + "\n\n".join(qa_pairs)
-            knowledge_items.append({
-                "topic": f"Learned: {topic_str}",
-                "content": content[:2000],  # cap length
-            })
+        if not qa_pairs:
+            continue
+
+        qa_text = "\n\n".join(qa_pairs)
+        
+        # Build prompt for LLM to extract clean, general facts
+        system_prompt = (
+            "You are AARKAA, a factual knowledge extraction system.\n"
+            "Your task is to extract clear, general, declarative factual statements or rules from the provided conversation Q&A pairs.\n"
+            "Instructions:\n"
+            "- Summarize the core lessons, facts, or instructions discussed in the Q&A pairs.\n"
+            "- Write only clean, general facts or guidelines.\n"
+            "- Do NOT write it as a dialog, Q&A, or raw transcript. Do NOT include 'Q:' or 'A:' or 'The user asked'.\n"
+            "- Do NOT refer to 'the user' or 'the assistant'.\n"
+            "- Keep it simple, concise, and structured (e.g. bullet points of facts/rules).\n"
+            "- If no new or useful general knowledge can be extracted, output 'NONE'."
+        )
+        prompt = f"<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\nConversation Q&A Pairs:\n{qa_text}<|im_end|>\n<|im_start|>assistant\nExtracted Facts:\n"
+        
+        try:
+            facts = generate_raw(prompt, max_new_tokens=400, stop=["<|im_start|>", "<|im_end|>"])
+            facts = facts.strip()
+            if facts and facts.upper() != "NONE":
+                topics = _extract_topics([qa_text])
+                topic_str = ", ".join(topics[:3]) if topics else intent
+                knowledge_items.append({
+                    "topic": f"Learned: {topic_str}",
+                    "content": facts[:2000],
+                })
+        except Exception as exc:
+            logger.error("Failed to extract facts using generate_raw: %s", exc)
 
     return knowledge_items
 
