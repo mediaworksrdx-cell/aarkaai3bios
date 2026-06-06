@@ -84,11 +84,34 @@ _NEWS_KEYWORDS = [
 ]
 
 _FACTUAL_KEYWORDS = [
-    "stock", "company", "companies", "business", "market", "explain", "list", 
-    "recommend", "analysis", "trend", "latest", "current", "news", "price", 
-    "difference", "how does", "why did", "information", "detail",
+    "stock", "company", "companies", "business", "market",
+    "recommend", "trend", "latest", "current", "news", "price",
+    "difference", "information",
     "ebitda", "fcf", "cash flow", "capex", "ebit", "revenue", "income", "earnings",
     "working capital", "depreciation", "amortization"
+]
+
+# Queries matching these keywords are self-contained — they NEVER need web search.
+# System design, algorithms, CS theory, and problem-solving questions should go
+# straight to the model without a web lookup that adds noise and latency.
+_NO_WEB_SEARCH_KEYWORDS = [
+    # System design / architecture
+    "design a", "system design", "design system", "architecture", "schema",
+    "database design", "api design", "microservice", "load balancer",
+    "caching", "cache", "sharding", "replication", "consistency",
+    "high availability", "fault tolerant", "scalab", "distributed",
+    "message queue", "event driven", "pub sub", "rate limit",
+    # Algorithms / CS problems
+    "algorithm", "data structure", "time complexity", "space complexity",
+    "big o", "big-o", "leetcode", "dynamic programming", "recursion",
+    "binary search", "hash map", "linked list", "sorting", "graph",
+    "log entries", "log entry", "ip address", "frequent", "top k",
+    "heap", "min-heap", "max-heap", "priority queue", "partitioning",
+    "count-min sketch", "mapreduce", "map reduce",
+    # CS / math theory
+    "billion", "million entries", "ram available", "memory constraint",
+    "constraint", "how would you solve", "how to solve", "solve this",
+    "prove", "proof", "theorem", "complexity",
 ]
 
 _FACTUAL_PREFIXES = [
@@ -566,16 +589,21 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         )
     )
 
+    # Queries that are self-contained (algorithms, system design, CS theory)
+    # should NEVER trigger web search — the model knows the answer.
+    is_no_web = any(kw in q_lower for kw in _NO_WEB_SEARCH_KEYWORDS)
+
     needs_web = (
         mode != "benchmark"
         and not is_trick
+        and not is_no_web
         and not has_finance_context
         and not is_greeting
         and intent != "coding_help"
         and intent != "reasoning_puzzle"
         and (
             domain == "web_search"
-            or intent in ("web_lookup", "news_search", "general_query", "science_query")
+            or intent in ("web_lookup", "news_search", "science_query")
             or any(kw in q_lower for kw in _NEWS_KEYWORDS)
             or any(kw in q_lower for kw in _FACTUAL_KEYWORDS)
             or is_factual
@@ -823,16 +851,21 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         )
     )
 
+    # Queries that are self-contained (algorithms, system design, CS theory)
+    # should NEVER trigger web search — the model knows the answer.
+    is_no_web = any(kw in q_lower for kw in _NO_WEB_SEARCH_KEYWORDS)
+
     needs_web = (
         mode != "benchmark"
         and not _is_trick_question(query)
+        and not is_no_web
         and not has_finance_context
         and not is_greeting
         and intent != "coding_help"
         and intent != "reasoning_puzzle"
         and (
             domain == "web_search"
-            or intent in ("web_lookup", "news_search", "general_query", "science_query")
+            or intent in ("web_lookup", "news_search", "science_query")
             or any(kw in q_lower for kw in _NEWS_KEYWORDS)
             or any(kw in q_lower for kw in _FACTUAL_KEYWORDS)
             or is_factual
