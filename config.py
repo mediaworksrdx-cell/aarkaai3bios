@@ -26,6 +26,14 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("AARKAAI_ACCESS_TOKEN_EXPIRE_MINUTES
 API_KEY = os.getenv("AARKAAI_API_KEY", "")  # Empty = no global auth (dev only)
 API_KEY_HEADER = "X-API-Key"
 
+# Guard against insecure default secret key in production
+_DEFAULT_KEY = "dev-secret-key-do-not-use-in-prod-change-me"
+if ENVIRONMENT == "production" and SECRET_KEY == _DEFAULT_KEY:
+    raise RuntimeError(
+        "FATAL: AARKAAI_SECRET_KEY is using the default insecure value in production! "
+        "Set a strong random secret key via the AARKAAI_SECRET_KEY environment variable."
+    )
+
 # Routes that don't require API key authentication (or JWT)
 PUBLIC_ROUTES = {"/", "/health", "/docs", "/openapi.json", "/redoc", "/auth/register", "/auth/login"}
 

@@ -373,8 +373,8 @@ async def health():
 
 
 @app.get("/metrics", tags=["info"])
-async def metrics():
-    """Operational metrics for monitoring."""
+async def metrics(current_user=fastapi.Depends(modules.auth.get_current_user)):
+    """Operational metrics for monitoring (requires auth)."""
     total = _metrics["requests_total"]
     avg_time = (
         round(_metrics["total_processing_time"] / total, 3) if total > 0 else 0
@@ -513,8 +513,11 @@ def get_strategy(
 
 
 @app.post("/admin/knowledge", tags=["admin"])
-def admin_add_knowledge(req: AdminKnowledgeRequest):
-    """Add a new entry to the RAG knowledge base."""
+def admin_add_knowledge(
+    req: AdminKnowledgeRequest,
+    current_user=fastapi.Depends(modules.auth.get_current_user),
+):
+    """Add a new entry to the RAG knowledge base. Requires JWT auth."""
     from modules import rag
     try:
         rag.store_knowledge(topic=req.title, content=req.content, source=req.source)
@@ -524,8 +527,11 @@ def admin_add_knowledge(req: AdminKnowledgeRequest):
 
 
 @app.post("/admin/user-memory", tags=["admin"])
-def admin_set_user_memory(req: AdminUserMemoryRequest):
-    """Set a memory or system prompt for a user."""
+def admin_set_user_memory(
+    req: AdminUserMemoryRequest,
+    current_user=fastapi.Depends(modules.auth.get_current_user),
+):
+    """Set a memory or system prompt for a user. Requires JWT auth."""
     from modules import memory
     try:
         # We store this as a system category memory. The session_id maps to the concept of prompt injecting context
@@ -541,8 +547,11 @@ def admin_set_user_memory(req: AdminUserMemoryRequest):
 
 
 @app.post("/rlhf", tags=["core"])
-def submit_rlhf_feedback(req: RLHFRequest):
-    """Submit RLHF feedback and optionally auto-learn from correction."""
+def submit_rlhf_feedback(
+    req: RLHFRequest,
+    current_user=fastapi.Depends(modules.auth.get_current_user),
+):
+    """Submit RLHF feedback. Requires JWT auth. user_id is derived from token, not body."""
     from modules import memory
     from database import SessionLocal, ConversationHistory
 
@@ -567,8 +576,9 @@ def submit_rlhf_feedback(req: RLHFRequest):
                 session.close()
 
     try:
+        # Always use the token's user_id — never trust the body's user_id
         memory.store_rlhf_feedback(
-            user_id=req.user_id,
+            user_id=current_user.id,
             rating=req.rating,
             conversation_id=db_conv_id,
             correction=req.correction,
@@ -580,8 +590,8 @@ def submit_rlhf_feedback(req: RLHFRequest):
 
 
 @app.get("/admin/stats", tags=["admin"])
-def admin_get_stats():
-    """Get basic database stats."""
+def admin_get_stats(current_user=fastapi.Depends(modules.auth.get_current_user)):
+    """Get basic database stats. Requires JWT auth."""
     from database import (
         SessionLocal,
         ConversationHistory,
