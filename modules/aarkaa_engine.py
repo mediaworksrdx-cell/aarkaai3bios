@@ -597,7 +597,11 @@ def primary_check(query, lang="en"):
                 "You cannot predict the future price of financial products or speculative assets (stocks, cryptocurrencies, commodities, etc.). "
                 "If the user asks for a future price prediction or forecast, you must politely decline, explaining that future market behavior is speculative and unpredictable."
             )
-            user_prompt = f"Answer the following question: {query}\n\n"
+            is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
+            if is_step_by_step:
+                user_prompt = f"Answer the following question by providing a detailed, step-by-step explanation or recipe with clear headings and sequential numbers (Step 1, Step 2, etc.): {query}\n\n"
+            else:
+                user_prompt = f"Answer the following question: {query}\n\n"
             if lang != "en":
                 user_prompt += f"You MUST write your response ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
@@ -1070,7 +1074,11 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     )
                     user_prompt += "Answer the question above. If the reference information does not directly answer the question, IGNORE it and answer from your own knowledge. Do NOT output any notes, warnings, or disclaimers about context sufficiency."
                 else:
-                    user_prompt += "Answer the question above directly and accurately."
+                    is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
+                    if is_step_by_step:
+                        user_prompt += "Answer the question above by providing a detailed, step-by-step explanation or recipe with clear headings and sequential numbers (Step 1, Step 2, etc.). Do not truncate or summarize the steps."
+                    else:
+                        user_prompt += "Answer the question above directly and accurately."
                 if lang != "en":
                     user_prompt += f" Write your entire response ONLY in the following language: {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt)
