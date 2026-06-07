@@ -558,7 +558,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
                 if msg["role"] == "user":
                     last_user_msg = msg["message"]
                     break
-            if last_user_msg and last_user_msg.strip().lower() == query.strip().lower():
+            if last_user_msg and last_user_msg.strip().lower() == query.strip().lower() and len(query) > 15:
                 logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
                 chat_ctx = None
     except Exception as exc:
@@ -828,7 +828,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
                 if msg["role"] == "user":
                     last_user_msg = msg["message"]
                     break
-            if last_user_msg and last_user_msg.strip().lower() == query.strip().lower():
+            if last_user_msg and last_user_msg.strip().lower() == query.strip().lower() and len(query) > 15:
                 logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
                 chat_ctx = None
     except Exception: pass

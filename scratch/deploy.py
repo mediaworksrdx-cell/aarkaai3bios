@@ -27,6 +27,7 @@ FILES_TO_PACK = [
     "modules/technical.py",
     "modules/web_search.py",
     "modules/semantic_filter.py",
+    "modules/rag.py",
     "scratch/remote_db_migrate.py",
 ]
 
