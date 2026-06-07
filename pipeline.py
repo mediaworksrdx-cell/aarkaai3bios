@@ -404,6 +404,80 @@ def _execute_python_code(code: str) -> str:
             pass
 
 
+def _has_keyword_match(query: str, keywords: list[str]) -> bool:
+    """Check if any of the keywords match as exact words/phrases in the query (case-insensitive)."""
+    words = set(re.findall(r"\b\w+\b", query.lower()))
+    for kw in keywords:
+        if " " in kw:
+            if re.search(r"\b" + re.escape(kw) + r"\b", query.lower()):
+                return True
+        elif kw.lower() in words:
+            return True
+    return False
+
+
+def _is_identity_query(query: str) -> bool:
+    """Detect if the query asks about the user's or the assistant's personal identity/profile."""
+    q = query.lower()
+    identity_phrases = ["who am i", "who i am", "who are you", "what is my name", "do you know me", "do you know who i am", "do u know who am i"]
+    return any(p in q for p in identity_phrases)
+
+
+def _should_skip_rag(query: str, intent: str, domain: str) -> bool:
+    """
+    Consolidated RAG bypass logic. Skip RAG when it's not beneficial
+    and can contaminate reasoning (e.g., greetings, puzzles, code, math, meta-conversations, creative writing).
+    """
+    q_low = query.lower().strip()
+    clean_q = re.sub(r"[^\w\s]", "", q_low).strip()
+
+    # 1. Greetings / Conversational Meta Queries / Identity queries
+    greetings = {
+        "hello", "hi", "hey", "greetings", "good morning", "good afternoon",
+        "good evening", "how are you", "who are you", "aarka", "aarkaai",
+        "what is your name", "what can you do", "help me", "who am i", "who i am"
+    }
+    if clean_q in greetings or _is_identity_query(query) or any(meta in q_low for meta in ["who are you", "what is your name", "what can you do"]):
+        return True
+
+    # 2. Reasoning / Math Puzzles
+    if _is_reasoning_query(query) or intent == "reasoning_puzzle":
+        return True
+
+    # 3. Simple math patterns (e.g., "what is 2 + 2", "compute 54 * 23")
+    if re.search(r"\b(calculate|compute|solve|what is)\b", q_low) and re.search(r"\d+\s*[\+\-\*/\^]\s*\d+", q_low):
+        return True
+
+    # 4. Coding / Technology Help
+    if intent == "coding_help" or _is_coding_syntax(query) or domain == "technology":
+        return True
+
+    # 5. Creative writing / Humor
+    creative_keywords = ["write a poem", "tell a joke", "write a story", "make a joke", "tell a story", "compose a song", "write a lyrics"]
+    if any(kw in q_low for kw in creative_keywords):
+        return True
+
+    return False
+
+
+def _is_follow_up(query: str, chat_ctx: list) -> bool:
+    """Detect if the current query is a follow-up to the previous conversation."""
+    if not chat_ctx:
+        return False
+
+    q_low = query.lower()
+    # Check for typical follow-up markers (pronouns or relative adverbs/determiners)
+    follow_up_markers = {
+        "it", "they", "he", "she", "this", "that", "them", "these", "those",
+        "why", "how", "what about", "tell me more", "explain further", "and", "but", "so"
+    }
+    words = set(re.findall(r"\b[a-zA-Z]+\b", q_low))
+    if words.intersection(follow_up_markers):
+        return True
+
+    return False
+
+
 # ─── Main Pipeline ───────────────────────────────────────────────────────────
 
 def process_query(query: str, user_id: str = "default", session_id: str = "default", mode: str = "production") -> PromptResponse:
@@ -474,13 +548,30 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     primary_confidence = filter_confidence
     sources.append("aarkaa-3b")
 
+    # Fetch chat history early for follow-up detection and context budget
+    chat_ctx = None
+    try:
+        chat_ctx = memory.get_chat_context(user_id, session_id, limit=2)
+        if chat_ctx:
+            last_user_msg = None
+            for msg in reversed(chat_ctx):
+                if msg["role"] == "user":
+                    last_user_msg = msg["message"]
+                    break
+            if last_user_msg and last_user_msg.strip().lower() == query.strip().lower():
+                logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
+                chat_ctx = None
+    except Exception as exc:
+        logger.error("Memory context error: %s", exc)
+
     # ── 4. Low confidence – route to external modules ─────────────────────
     context_parts: list[str] = []
 
-    # RAG – check the knowledge base first (skip for simple greetings and reasoning puzzles)
-    if not is_greeting and not is_reasoning and mode != "benchmark":
+    # RAG – check the knowledge base first
+    if not _should_skip_rag(query, intent, domain) and mode != "benchmark":
         try:
-            rag_context = rag.get_context(query, user_id=user_id)
+            top_k = 1 if _is_follow_up(query, chat_ctx) else 3
+            rag_context = rag.get_context(query, top_k=top_k, user_id=user_id, query_domain=domain)
             if rag_context:
                 context_parts.append(f"[Knowledge Base]\n{rag_context}")
                 sources.append("rag")
@@ -599,13 +690,14 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         and not is_no_web
         and not has_finance_context
         and not is_greeting
+        and not _is_identity_query(query)
         and intent != "coding_help"
         and intent != "reasoning_puzzle"
         and (
             domain == "web_search"
             or intent in ("web_lookup", "news_search", "science_query")
-            or any(kw in q_lower for kw in _NEWS_KEYWORDS)
-            or any(kw in q_lower for kw in _FACTUAL_KEYWORDS)
+            or _has_keyword_match(query, _NEWS_KEYWORDS)
+            or _has_keyword_match(query, _FACTUAL_KEYWORDS)
             or is_factual
         )
     )
@@ -625,20 +717,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             logger.info("Web search circuit breaker is OPEN — skipping")
 
     # ── 5. Context fusion ─────────────────────────────────────────────────
-    chat_ctx = None
-    try:
-        chat_ctx = memory.get_chat_context(user_id, session_id, limit=2)
-        if chat_ctx:
-            last_user_msg = None
-            for msg in reversed(chat_ctx):
-                if msg["role"] == "user":
-                    last_user_msg = msg["message"]
-                    break
-            if last_user_msg and last_user_msg.strip().lower() == query.strip().lower():
-                logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
-                chat_ctx = None
-    except Exception as exc:
-        logger.error("Memory context error: %s", exc)
+    # (chat_ctx has already been retrieved early for RAG follow-up check)
 
     fused_context = "\n\n---\n\n".join(context_parts)
 
@@ -739,13 +818,29 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     intent = filter_result["intent"]
     sources.append("aarkaa-3b")
 
+    # Fetch chat history early for follow-up detection and context budget
+    chat_ctx = None
+    try:
+        chat_ctx = memory.get_chat_context(user_id, session_id, limit=2)
+        if chat_ctx:
+            last_user_msg = None
+            for msg in reversed(chat_ctx):
+                if msg["role"] == "user":
+                    last_user_msg = msg["message"]
+                    break
+            if last_user_msg and last_user_msg.strip().lower() == query.strip().lower():
+                logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
+                chat_ctx = None
+    except Exception: pass
+
     # ── 4. Gather Context ─────────────────────────────────────────────────
     context_parts: list[str] = []
     
     # RAG
-    if not is_greeting and not is_reasoning and mode != "benchmark":
+    if not _should_skip_rag(query, intent, domain) and mode != "benchmark":
         try:
-            rag_context = rag.get_context(query, user_id=user_id)
+            top_k = 1 if _is_follow_up(query, chat_ctx) else 3
+            rag_context = rag.get_context(query, top_k=top_k, user_id=user_id, query_domain=domain)
             if rag_context:
                 context_parts.append(f"[Knowledge Base]\n{rag_context}")
                 sources.append("rag")
@@ -861,13 +956,14 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         and not is_no_web
         and not has_finance_context
         and not is_greeting
+        and not _is_identity_query(query)
         and intent != "coding_help"
         and intent != "reasoning_puzzle"
         and (
             domain == "web_search"
             or intent in ("web_lookup", "news_search", "science_query")
-            or any(kw in q_lower for kw in _NEWS_KEYWORDS)
-            or any(kw in q_lower for kw in _FACTUAL_KEYWORDS)
+            or _has_keyword_match(query, _NEWS_KEYWORDS)
+            or _has_keyword_match(query, _FACTUAL_KEYWORDS)
             or is_factual
         )
     )
@@ -887,19 +983,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             logger.info("Web search circuit breaker is OPEN — skipping")
 
     # Memory
-    chat_ctx = None
-    try:
-        chat_ctx = memory.get_chat_context(user_id, session_id, limit=2)
-        if chat_ctx:
-            last_user_msg = None
-            for msg in reversed(chat_ctx):
-                if msg["role"] == "user":
-                    last_user_msg = msg["message"]
-                    break
-            if last_user_msg and last_user_msg.strip().lower() == query.strip().lower():
-                logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
-                chat_ctx = None
-    except Exception: pass
+    # (chat_ctx has already been retrieved early for RAG follow-up check)
 
     fused_context = "\n\n---\n\n".join(context_parts)
 

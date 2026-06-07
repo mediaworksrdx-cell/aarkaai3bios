@@ -202,10 +202,11 @@ _LANG_NAMES = {
 }
 
 _GGUF_CANDIDATES = [
-    Path(MODEL_PATH).parent / "aarkaa-3b-q8.gguf",
+    # f16 preferred (higher quality) → q8 as fallback
     Path(MODEL_PATH).parent / "aarkaa-3b-f16.gguf",
-    Path(MODEL_PATH) / "aarkaa-3b-q8.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-f16.gguf",
+    Path(MODEL_PATH).parent / "aarkaa-3b-q8.gguf",
+    Path(MODEL_PATH) / "aarkaa-3b-q8.gguf",
 ]
 
 
@@ -227,8 +228,7 @@ def init():
     try:
         from llama_cpp import Llama
 
-        logical_cores = os.cpu_count() or 2
-        n_threads = logical_cores if logical_cores <= 4 else logical_cores // 2
+        n_threads = 4
 
         logger.info("Loading AARKAA-3B from %s (threads=%d)", gguf_file, n_threads)
 
@@ -268,14 +268,29 @@ def _build_chatml(system: str, user: str) -> str:
     return f"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n"
 
 
-def _build_chatml_multi(system: str, history: list[dict] | None, user: str) -> str:
-    """Build ChatML format with system message, multi-turn history, and current user prompt."""
+def _build_chatml_multi(system: str, history: list[dict] | None, user: str,
+                       max_history_chars: int = 2000) -> str:
+    """Build ChatML format with system message, multi-turn history, and current user prompt.
+    
+    Truncates history to fit within max_history_chars to prevent context window overflow.
+    Individual assistant messages are capped at 500 chars to leave room for generation.
+    """
     prompt = f"<|im_start|>system\n{system}<|im_end|>\n"
     if history:
+        history_text = ""
         for msg in history:
             role = "user" if msg["role"] == "user" else "assistant"
             content = msg["message"]
-            prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
+            # Cap individual messages (assistant responses can be very long)
+            if role == "assistant" and len(content) > 500:
+                content = content[:500] + "…"
+            elif role == "user" and len(content) > 300:
+                content = content[:300] + "…"
+            entry = f"<|im_start|>{role}\n{content}<|im_end|>\n"
+            if len(history_text) + len(entry) > max_history_chars:
+                break
+            history_text += entry
+        prompt += history_text
     prompt += f"<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n"
     return prompt
 
@@ -605,6 +620,16 @@ def final_response(query, context, intent="", lang="en", mode="production", hist
         result = _build_final_prompt(query, context, intent, lang, mode, history=history)
         prompt, tokens = result[0], result[1]
         temp = result[2] if len(result) > 2 else 0.7
+        
+        # Safety check: if prompt is too long, rebuild without history
+        prompt_len = len(prompt)
+        logger.info("final_response: prompt_len=%d chars, max_tokens=%d, temp=%.2f", prompt_len, tokens, temp)
+        if prompt_len > 6000:
+            logger.warning("Prompt too long (%d chars) — rebuilding without history to prevent context overflow", prompt_len)
+            result = _build_final_prompt(query, context, intent, lang, mode, history=None)
+            prompt, tokens = result[0], result[1]
+            temp = result[2] if len(result) > 2 else 0.7
+        
         return _generate(prompt, max_new_tokens=tokens, temperature=temp)
     except Exception as exc:
         logger.error("final_response failed: %s", exc)
@@ -621,6 +646,17 @@ def stream_final_response(query, context, intent="", lang="en", mode="production
         result = _build_final_prompt(query, context, intent, lang, mode, history=history)
         prompt, tokens = result[0], result[1]
         temp = result[2] if len(result) > 2 else 0.7
+        
+        # Safety check: if prompt is too long, rebuild without history
+        prompt_len = len(prompt)
+        logger.info("stream_final_response: prompt_len=%d chars, max_tokens=%d, temp=%.2f", prompt_len, tokens, temp)
+        if prompt_len > 6000:
+            logger.warning("Prompt too long (%d chars) — rebuilding without history to prevent context overflow", prompt_len)
+            result = _build_final_prompt(query, context, intent, lang, mode, history=None)
+            prompt, tokens = result[0], result[1]
+            temp = result[2] if len(result) > 2 else 0.7
+            logger.info("Rebuilt prompt: %d chars", len(prompt))
+        
         yield from _generate_stream(prompt, max_new_tokens=tokens, temperature=temp)
     except Exception as exc:
         logger.error("stream_final_response failed: %s", exc)
@@ -976,7 +1012,10 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "- Provide step-by-step reasoning only when the user requests it or when solving a complex problem.\n"
                     "- Maintain consistency between reasoning and final answers. Never contradict your own explanation.\n"
                     "- Verify calculations before presenting results.\n"
-                    "- Prefer correctness over confidence.\n\n"
+                    "- Prefer correctness over confidence.\n"
+                    "- If reference context is provided but does not directly answer the user's question, IGNORE the context and answer from your own knowledge.\n"
+                    "- NEVER let reference context override or redirect the conversation topic.\n"
+                    "- If the reference context discusses a different topic than the user's question, disregard it entirely.\n\n"
                     "Finance & Investing:\n"
                     "- Explain concepts clearly and accurately.\n"
                     "- Distinguish between revenue, profit, earnings, cash flow, EBITDA, free cash flow, enterprise value, market capitalization, ROE, ROA, and ROIC.\n"
@@ -1006,32 +1045,32 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "Primary Objective:\n"
                     "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
                 )
-                is_general = intent in ["general_query", "web_lookup", "news_search", "science_query", ""] or not intent
+                is_general = intent in ["general_query", "web_lookup", "news_search", "science_query", "tech_info", "finance_general", "health_query", "history_query", ""] or not intent
                 if is_general:
                     system_prompt = (
                         "You are Aarkaa AI, a highly intelligent and helpful assistant built by Synthetix Analytics.\n"
                         "Provide accurate, clear, and direct answers to the user's query."
                     )
-                user_prompt = ""
+                user_prompt = f"Question: {query}\n\n"
                 if context:
                     has_finance = "[Finance Data]" in context
                     if has_finance:
                         user_prompt += (
-                            "IMPORTANT: The context below contains LIVE, REAL-TIME financial data fetched just now from Yahoo Finance. "
+                            "IMPORTANT: The data below contains LIVE, REAL-TIME financial data fetched just now from Yahoo Finance. "
                             "You MUST use the exact prices, values, and percentages from the [Finance Data] section. "
                             "Do NOT use any prices from your training data or prior knowledge — they are outdated.\n"
-                            f"Provide a VERY CONCISE answer showing ONLY the price, change, and percentage change. Do not add fluff.\n\n"
+                            "Provide a VERY CONCISE answer showing ONLY the price, change, and percentage change. Do not add fluff.\n\n"
                         )
                         tokens = 100
                     user_prompt += (
-                        "Context information:\n"
+                        "Reference Information (use ONLY if directly relevant to the question above):\n"
                         "---------------------\n"
                         + context + "\n"
                         "---------------------\n"
                     )
-                user_prompt += f"Question: {query}\n\n"
-                if context:
-                    user_prompt += "Answer the question using the context above as reference. If the context does not contain the answer, you may use your general knowledge to answer accurately. Do NOT output any notes, warnings, or disclaimers about context sufficiency or references to the context."
+                    user_prompt += "Answer the question above. If the reference information does not directly answer the question, IGNORE it and answer from your own knowledge. Do NOT output any notes, warnings, or disclaimers about context sufficiency."
+                else:
+                    user_prompt += "Answer the question above directly and accurately."
                 if lang != "en":
                     user_prompt += f" Write your entire response ONLY in the following language: {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt)

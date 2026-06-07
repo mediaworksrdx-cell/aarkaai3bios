@@ -58,6 +58,14 @@ MAX_TOKENS = int(os.getenv("AARKAAI_MAX_TOKENS", "3800"))
 EMBEDDING_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIM = 384
 
+# ─── RAG Retrieval ───────────────────────────────────────────────────────────
+RAG_SIMILARITY_THRESHOLD = float(os.getenv("AARKAAI_RAG_SIM_THRESHOLD", "0.50"))
+RAG_RERANKER_THRESHOLD = float(os.getenv("AARKAAI_RAG_RERANK_THRESHOLD", "0.25"))
+RAG_MAX_CONTEXT_CHARS = int(os.getenv("AARKAAI_RAG_MAX_CHARS", "1500"))
+RAG_CANDIDATE_POOL_SIZE = int(os.getenv("AARKAAI_RAG_POOL_SIZE", "10"))
+RAG_KEYWORD_OVERLAP_MIN = float(os.getenv("AARKAAI_RAG_KW_OVERLAP", "0.10"))
+RERANKER_MODEL_NAME = os.getenv("AARKAAI_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+
 # ─── Semantic Filter ─────────────────────────────────────────────────────────
 DOMAIN_LABELS = [
     "general",

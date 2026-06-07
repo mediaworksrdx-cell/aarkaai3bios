@@ -121,7 +121,19 @@ def _init_modules() -> None:
     # 5. RAG Engine
     try:
         from modules import rag
-        rag.init(embed_fn)
+        reranker_fn = None
+        try:
+            from sentence_transformers import CrossEncoder
+            from config import RERANKER_MODEL_NAME
+            
+            logger.info("Loading RAG reranker model: %s", RERANKER_MODEL_NAME)
+            _reranker_model = CrossEncoder(RERANKER_MODEL_NAME)
+            reranker_fn = lambda q, d: float(_reranker_model.predict([(q, d)])[0])
+            logger.info("✓ RAG reranker model loaded successfully")
+        except Exception as r_exc:
+            logger.warning("RAG reranker model load failed (falling back to cosine-only): %s", r_exc)
+
+        rag.init(embed_fn, reranker_fn)
         _module_status["rag"] = "ok"
         logger.info("✓ RAG engine ready (%d entries)", rag.get_entry_count())
     except Exception as exc:
