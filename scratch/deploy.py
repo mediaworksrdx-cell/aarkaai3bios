@@ -5,7 +5,7 @@ import time
 import requests
 
 # ─── Configuration ────────────────────────────────────────────────────────────
-PEM_KEY = r"C:\Users\daarv\.ssh\LightsailDefaultKey-ap-south-1 (2).pem"
+PEM_KEY = r"C:\Users\daarv\Downloads\LightsailDefaultKey-ap-south-1 (2).pem"
 HOST = "43.204.153.162"
 USER = "ubuntu"
 REMOTE_DIR = "/home/ubuntu/aarkaai3b"
@@ -28,7 +28,41 @@ FILES_TO_PACK = [
     "modules/web_search.py",
     "modules/semantic_filter.py",
     "modules/rag.py",
+    "modules/coordinator.py",
+    "modules/tools/__init__.py",
+    "modules/tools/bash.py",
+    "modules/tools/fs.py",
+    "modules/tools/skill_tools.py",
+    "modules/agents/__init__.py",
+    "modules/agents/base.py",
+    "modules/agents/coding.py",
+    "modules/agents/debugging.py",
+    "modules/agents/finance.py",
+    "modules/agents/trading.py",
+    "modules/agents/marketing.py",
+    "modules/agents/research.py",
+    "modules/agents/support.py",
+    "modules/agents/router.py",
+    "modules/agents/verifier.py",
+    "middleware.py",
+    "skills/__init__.py",
+    "skills/skill_registry.py",
+    "skills/pdf/SKILL.md",
+    "skills/docx/SKILL.md",
+    "skills/xlsx/SKILL.md",
+    "skills/pptx/SKILL.md",
+    "skills/file-reading/SKILL.md",
+    "skills/frontend-design/SKILL.md",
+    "skills/skill-router/SKILL.md",
+    "skills/skill-router/skill_registry.py",
+    "skills/html/SKILL.md",
+    "skills/html/docs_generator.py",
     "scratch/remote_db_migrate.py",
+    "scratch/run_local_test.py",
+    "scratch/test_remote_invoice.py",
+    "scratch/test_remote_dynamic_naming.py",
+    "scratch/test_remote_html_render.py",
+    "scratch/test_memory_retention.py",
 ]
 
 # ─── Step 1: Package Files into ZIP ──────────────────────────────────────────
@@ -92,6 +126,14 @@ if [ -f scratch/remote_db_migrate.py ]; then
     rm -f scratch/remote_db_migrate.py
 else
     echo "No migration script, skipping migration."
+fi
+
+# 3.5. Install skill dependencies (idempotent — pip will skip already-installed)
+echo "Installing skill dependencies..."
+if [ -f venv/bin/pip ]; then
+    venv/bin/pip install --quiet python-docx python-pptx openpyxl pdfplumber pypdf reportlab pyyaml xlsxwriter weasyprint 2>&1 | tail -3
+else
+    pip3 install --quiet python-docx python-pptx openpyxl pdfplumber pypdf reportlab pyyaml xlsxwriter weasyprint 2>&1 | tail -3
 fi
 
 # 4. Restart backend service

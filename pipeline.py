@@ -143,20 +143,40 @@ _LANGUAGE_KEYWORDS = {name.lower(): code for code, name in _LANG_NAMES.items()}
 
 def _detect_requested_language(query: str, current_detected: str) -> str:
     q_low = query.lower()
-    trigger_words = ["speak in", "speak to me in", "answer in", "respond in", "write in", "reply in", "talk in", "in "]
-    if any(w in q_low for w in trigger_words):
+    
+    # If the user is questioning the language choice, do not override
+    if any(q_word in q_low for q_word in ["why", "how come", "reason", "explain why"]):
+        if any(act in q_low for act in ["responding", "answering", "speaking", "writing", "replying"]):
+            return current_detected
+
+    trigger_words = [
+        "speak in", "speak to me in", "answer in", "respond in", 
+        "write in", "reply in", "talk in", "explain in", 
+        "translate to", "translate in", "output in", "generate in",
+        "provide in"
+    ]
+    
+    is_triggered = any(w in q_low for w in trigger_words) or q_low.startswith("in ")
+    
+    if is_triggered:
         for lang_keyword, lang_code in _LANGUAGE_KEYWORDS.items():
             if lang_keyword in q_low:
                 return lang_code
     return current_detected
 
 
+
 def _detect_language(text: str) -> str:
     """Detect the language of the input text. Returns ISO 639-1 code."""
     try:
-        words = text.strip().split()
+        words = text.strip().lower().split()
         if all(ord(c) < 128 for c in text):
             if len(words) < 4 or len(text) < 20:
+                return "en"
+            # Prioritize English if common stop words or pronouns are present in ASCII text
+            common_english = {"the", "and", "of", "to", "in", "is", "that", "it", "for", "on", "are", "as", "with", "have", "from", "at", "an", "this", "by", "what", "how", "who", "where", "why", "which"}
+            cleaned_words = {re.sub(r"[^\w]", "", w) for w in words}
+            if cleaned_words & common_english:
                 return "en"
         import langid
         lang, _ = langid.classify(text)
@@ -166,13 +186,19 @@ def _detect_language(text: str) -> str:
 
 
 def _sanitize_query(query: str) -> str:
-    """Clean up the query for safe processing."""
+    """Clean up the query for safe processing and security hardening."""
     # Strip control characters
     query = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", query)
+    
+    # Strip special ChatML/model control tokens to prevent template breakout prompt injection
+    for token in ["<|im_start|>", "<|im_end|>", "<|endoftext|>"]:
+        query = query.replace(token, "")
+        
     # Truncate to max length
     if len(query) > MAX_QUERY_LENGTH:
         query = query[:MAX_QUERY_LENGTH]
     return query.strip()
+
 
 
 _FINANCE_INTENT_KEYWORDS = [
@@ -254,6 +280,57 @@ def _is_trick_question(query: str) -> bool:
     return False
 
 
+def _is_calculation_query(query: str) -> bool:
+    """Detect queries that require mathematical/arithmetic calculation."""
+    q = query.lower()
+    
+    # Currency / stock price conversion queries (which might not contain numbers in the query itself)
+    if "convert" in q or "conversion" in q or "exchange rate" in q or "in inr" in q or "to inr" in q or "in rupee" in q or "in rupees" in q or "usd to inr" in q:
+        if any(w in q for w in ["stock", "price", "usd", "inr", "rupee", "rupees", "rate", "currency"]):
+            return True
+            
+    has_math_words = any(w in q for w in ["calculate", "multiply", "divide", "compute", "solve", "what is", "what's", "find", "cagr", "gst"])
+    has_numbers = len(re.findall(r"\d+", q)) >= 2
+    has_operators = any(op in q for op in ["+", "*", "/", "×", "x", "-", "=", "%", "percent", "gst", "tax", "discount", "interest", "cagr", "growth", "compound"])
+    
+    arithmetic_pattern = r"\d+\s*[\+\-\*/\^x×%]\s*\d+"
+    if re.search(arithmetic_pattern, q) or (has_math_words and has_numbers and has_operators):
+        exclude_keywords = ["sheep", "doctor", "lily pad", "age", "brother", "sister", "farmer"]
+        if any(w in q for w in exclude_keywords):
+            return False
+        return True
+    return False
+
+
+def _needs_skill_routing(query: str) -> bool:
+    """Detect queries that involve file formats or document creation which benefit from skill docs."""
+    q = query.lower()
+    # File format keywords
+    file_keywords = [
+        ".pdf", ".docx", ".xlsx", ".pptx", ".csv",
+        "pdf", "word document", "word doc", "excel", "spreadsheet",
+        "powerpoint", "presentation", "slides", "slide deck",
+    ]
+    # Action + format combinations
+    action_words = [
+        "create", "generate", "make", "build", "write", "produce",
+        "export", "convert", "read", "parse", "extract", "merge",
+        "split", "format", "design",
+    ]
+    has_file_kw = any(kw in q for kw in file_keywords)
+    has_action = any(aw in q for aw in action_words)
+    # Direct triggers (e.g. "create a pdf", "make an excel report")
+    if has_file_kw and has_action:
+        return True
+    # Explicit file extension mentions
+    if re.search(r'\.(pdf|docx|xlsx|pptx|csv)\b', q):
+        return True
+    # UI/frontend design triggers
+    if any(kw in q for kw in ["design a webpage", "build a dashboard", "create a form", "html page", "web page", "landing page"]):
+        return True
+    return False
+
+
 def _has_live_finance_intent(query: str, domain: str, intent: str) -> bool:
     """
     Determine if we should query the live yfinance engine.
@@ -295,6 +372,13 @@ def _has_live_finance_intent(query: str, domain: str, intent: str) -> bool:
     ]
     if any(kw in q_low for kw in stock_keywords):
         return True
+
+    # Check for forex pairs or commodities explicitly
+    from config import FOREX_PAIRS, COMMODITY_TICKERS
+    if any(pair in q_low for pair in FOREX_PAIRS.keys()) or any(comm in q_low for comm in COMMODITY_TICKERS.keys()):
+        trigger_words = ["price", "rate", "value", "cost", "convert", "conversion", "what is", "how much", "today", "live"]
+        if any(tw in q_low for tw in trigger_words):
+            return True
 
     if domain == "finance" or intent.startswith("finance") or "btc" in q_low or "eth" in q_low or "crypto" in q_low:
         from modules.finance import _US_TICKERS, _INDIA_TICKERS, _INDEX_TICKERS, _CRYPTO_TICKERS, COMMODITY_TICKERS, FOREX_PAIRS, _TICKER_BLOCKLIST
@@ -478,6 +562,22 @@ def _is_follow_up(query: str, chat_ctx: list) -> bool:
     return False
 
 
+def _build_agent_ctx(chat_ctx, context_parts, sources) -> str:
+    parts = []
+    if "finance" in sources:
+        for part in context_parts:
+            if "[Finance Data]" in part:
+                parts.append(part)
+                break
+    if chat_ctx:
+        chat_lines = "\n".join(
+            f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:1500]}"
+            for m in chat_ctx
+        )
+        parts.append(f"[Recent Conversation]\n{chat_lines}")
+    return "\n\n".join(parts).strip()
+
+
 # ─── Main Pipeline ───────────────────────────────────────────────────────────
 
 def process_query(query: str, user_id: str = "default", session_id: str = "default", mode: str = "production") -> PromptResponse:
@@ -531,7 +631,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     intent = filter_result["intent"]
 
     # Fallback to general query if classifier confidence is low
-    if filter_confidence < 0.45:
+    if filter_confidence < 0.45 and intent not in ["persuasion", "debate", "comparison", "roleplay"]:
         logger.info("Low filter confidence (%.3f < 0.45) — falling back to general query", filter_confidence)
         domain = "general"
         intent = "general_query"
@@ -551,7 +651,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # Fetch chat history early for follow-up detection and context budget
     chat_ctx = None
     try:
-        chat_ctx = memory.get_chat_context(user_id, session_id, limit=2)
+        chat_ctx = memory.get_chat_context(user_id, session_id, limit=10)
         if chat_ctx:
             last_user_msg = None
             for msg in reversed(chat_ctx):
@@ -677,12 +777,16 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             any(w in query.lower() for w in agent_triggers)
             or bool(re.search(r"\brun\b", query.lower()))
             or (intent == "coding_help" and any(p in query.lower() for p in ["run", "execute", "trace", "test"]))
+            or _is_calculation_query(query)
+            or _needs_skill_routing(query)
         )
     )
 
     # Queries that are self-contained (algorithms, system design, CS theory)
     # should NEVER trigger web search — the model knows the answer.
     is_no_web = any(kw in q_lower for kw in _NO_WEB_SEARCH_KEYWORDS)
+
+    is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
 
     needs_web = (
         mode != "benchmark"
@@ -699,6 +803,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             or _has_keyword_match(query, _NEWS_KEYWORDS)
             or _has_keyword_match(query, _FACTUAL_KEYWORDS)
             or is_factual
+            or (domain in ("general", "science", "health", "history") and "rag" not in sources)
         )
     )
 
@@ -725,20 +830,20 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # Only trigger the slow autonomous agent (ReAct loop) if the user explicitly asks to run, execute, or manage files.
     is_coding = intent == "coding_help" or any(w in query.lower() for w in ["script", "code", "python", "implement", "create a file"])
 
+    user_facts = ""
+    try:
+        user_facts = memory.get_user_facts_prompt(user_id)
+    except Exception as exc:
+        logger.error("Error loading user facts: %s", exc)
+
     if needs_agent:
         from modules import coordinator
         # DANGER: Do NOT pass Web or RAG context to the autonomous agent to prevent 4096 context window explosions.
-        # The agent has its own WebSearchTool if it needs information. Only pass the chat history.
-        agent_ctx = ""
-        if chat_ctx:
-            chat_lines = "\n".join(
-                f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:1500]}"
-                for m in chat_ctx
-            )
-            agent_ctx = f"[Recent Conversation]\n{chat_lines}"
+        # The agent has its own WebSearchTool if it needs information. Only pass chat history + live finance context.
+        agent_ctx = _build_agent_ctx(chat_ctx, context_parts, sources)
         final_answer = coordinator.process_task(query, agent_ctx)
     elif fused_context or is_reasoning or chat_ctx:
-        final_answer = aarkaa_engine.final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode, history=chat_ctx)
+        final_answer = aarkaa_engine.final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode, history=chat_ctx, user_facts=user_facts)
     else:
         # No external context and no history (e.g. initial greeting) – run model directly
         final_answer, _ = aarkaa_engine.primary_check(query, lang=detected_lang)
@@ -816,12 +921,23 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     domain = filter_result["domain"]
     filter_confidence = filter_result["confidence"]
     intent = filter_result["intent"]
+
+    # Fallback to general query if classifier confidence is low
+    if filter_confidence < 0.45 and intent not in ["persuasion", "debate", "comparison", "roleplay"]:
+        logger.info("Low filter confidence (%.3f < 0.45) — falling back to general query", filter_confidence)
+        domain = "general"
+        intent = "general_query"
+
+    logger.info(
+        "Filter → domain=%s  conf=%.3f  intent=%s",
+        domain, filter_confidence, intent,
+    )
     sources.append("aarkaa-3b")
 
     # Fetch chat history early for follow-up detection and context budget
     chat_ctx = None
     try:
-        chat_ctx = memory.get_chat_context(user_id, session_id, limit=2)
+        chat_ctx = memory.get_chat_context(user_id, session_id, limit=10)
         if chat_ctx:
             last_user_msg = None
             for msg in reversed(chat_ctx):
@@ -943,12 +1059,16 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             any(w in query.lower() for w in agent_triggers)
             or bool(re.search(r"\brun\b", query.lower()))
             or (intent == "coding_help" and any(p in query.lower() for p in ["run", "execute", "trace", "test"]))
+            or _is_calculation_query(query)
+            or _needs_skill_routing(query)
         )
     )
 
     # Queries that are self-contained (algorithms, system design, CS theory)
     # should NEVER trigger web search — the model knows the answer.
     is_no_web = any(kw in q_lower for kw in _NO_WEB_SEARCH_KEYWORDS)
+
+    is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
 
     needs_web = (
         mode != "benchmark"
@@ -965,6 +1085,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             or _has_keyword_match(query, _NEWS_KEYWORDS)
             or _has_keyword_match(query, _FACTUAL_KEYWORDS)
             or is_factual
+            or (domain in ("general", "science", "health", "history") and "rag" not in sources)
         )
     )
 
@@ -998,17 +1119,24 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         "detected_language": detected_lang
     }
 
+    user_facts = ""
+    try:
+        user_facts = memory.get_user_facts_prompt(user_id)
+    except Exception as exc:
+        logger.error("Error loading user facts in stream: %s", exc)
+
     if needs_agent:
         from modules import coordinator
         import asyncio
-        agent_ctx = ""
-        if chat_ctx:
-            chat_lines = "\n".join(
-                f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:1500]}"
-                for m in chat_ctx
-            )
-            agent_ctx = f"[Recent Conversation]\n{chat_lines}"
-        final_answer = coordinator.process_task(query, agent_ctx)
+        agent_ctx = _build_agent_ctx(chat_ctx, context_parts, sources)
+        
+        final_answer = ""
+        for event_type, data in coordinator.stream_task(query, agent_ctx):
+            if event_type == "status":
+                yield {"type": "status", "status": data}
+            elif event_type == "final":
+                final_answer = data
+                
         chunk_size = 8
         for i in range(0, len(final_answer), chunk_size):
             token = final_answer[i:i+chunk_size]
@@ -1017,7 +1145,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             await asyncio.sleep(0.01)
     else:
         # Stream the tokens
-        for token in aarkaa_engine.stream_final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode, history=chat_ctx):
+        for token in aarkaa_engine.stream_final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode, history=chat_ctx, user_facts=user_facts):
             full_response += token
             yield {"type": "content", "token": token}
 
@@ -1046,7 +1174,7 @@ def _post_process(
     memory_mod,
     auto_learn_mod,
 ) -> None:
-    """Store conversation and trigger auto-learn if needed."""
+    """Store conversation, extract user facts, and trigger auto-learn if needed."""
     try:
         memory_mod.store_conversation(
             user_id=user_id,
@@ -1058,8 +1186,9 @@ def _post_process(
             source=source,
         )
         memory_mod.update_user_profile(user_id=user_id, increment_count=True)
+        memory_mod.extract_user_facts(user_id=user_id, query=query)
     except Exception as exc:
-        logger.error("Post-process store failed: %s", exc)
+        logger.error("Post-process store/fact extraction failed: %s", exc)
 
     try:
         auto_learn_mod.check_and_learn(user_id)

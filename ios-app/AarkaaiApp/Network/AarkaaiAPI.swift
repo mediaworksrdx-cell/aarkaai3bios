@@ -55,6 +55,11 @@ class AarkaaiAPI {
                         return
                     }
                     
+                    if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                        continuation.finish(throwing: APIError.unauthorized)
+                        return
+                    }
+                    
                     if httpResponse.statusCode != 200 {
                         continuation.finish(throwing: APIError.serverError("Status \(httpResponse.statusCode)"))
                         return

@@ -116,21 +116,53 @@ def get_web_context(query: str, max_results: int = 5, lang: str = "en", filter_l
     """
     parts: list[str] = []
 
-    # Wikipedia first (authoritative, in user's language if possible)
-    wiki = search_wikipedia(query, lang=lang)
-    if wiki:
-        parts.append(wiki)
-
-    # DuckDuckGo for broader results
+    # 1. Search DuckDuckGo first to find the most relevant pages and Wikipedia links
     ddg_results = search_ddg(query, max_results=max_results)
+
+    # 2. Extract Wikipedia page title if present in DDG results
+    wiki_title = None
+    wiki_lang = lang
+    if ddg_results:
+        from urllib.parse import urlparse, unquote
+        for r in ddg_results:
+            url = r.get("url", "")
+            parsed = urlparse(url)
+            if "wikipedia.org" in parsed.netloc:
+                # e.g., https://en.wikipedia.org/wiki/Trisha_Krishnan
+                path_parts = parsed.path.split("/wiki/")
+                if len(path_parts) > 1:
+                    wiki_title = unquote(path_parts[1]).split("#")[0].replace("_", " ")
+                    netloc_parts = parsed.netloc.split(".")
+                    if netloc_parts and len(netloc_parts[0]) == 2:
+                        wiki_lang = netloc_parts[0]
+                    break
+
+    # 3. Fetch Wikipedia summary
+    wiki_context = None
+    if wiki_title:
+        logger.info("Found Wikipedia link in search results: %s (lang=%s)", wiki_title, wiki_lang)
+        wiki_context = search_wikipedia(wiki_title, lang=wiki_lang)
+
+    # Fallback to searching with the query if no Wikipedia link was found in DDG results
+    if not wiki_context:
+        wiki_context = search_wikipedia(query, lang=lang)
+
+    if wiki_context:
+        parts.append(wiki_context)
+
+    # 4. Format DuckDuckGo results
     if ddg_results:
         filtered_results = []
         for r in ddg_results:
+            # Skip live stock tickers if requested
             if filter_live and (_is_live_tracker_snippet(r["snippet"]) or _is_live_tracker_snippet(r["title"])):
                 logger.info("Filtered out live tracker snippet from web search: %s", r["title"])
                 continue
+            # Also skip the Wikipedia result we already summarized to avoid duplication
+            if "wikipedia.org" in r.get("url", ""):
+                continue
             filtered_results.append(r)
-            
+
         if filtered_results:
             ddg_text = "\n".join(
                 f"• [{r['title']}]({r['url']}): {r['snippet']}"
@@ -139,3 +171,4 @@ def get_web_context(query: str, max_results: int = 5, lang: str = "en", filter_l
             parts.append(f"[Web Search Results]\n{ddg_text}")
 
     return "\n\n---\n\n".join(parts) if parts else ""
+
