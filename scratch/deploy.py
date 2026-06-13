@@ -19,6 +19,7 @@ FILES_TO_PACK = [
     "register_visitor.py",
     "schemas.py",
     "generate_market_research_report.py",
+    "generate_chennai_startups.py",
     "modules/aarkaa_engine.py",
     "modules/auto_learn.py",
     "modules/finance.py",
