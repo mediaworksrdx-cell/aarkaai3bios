@@ -48,7 +48,7 @@ IMPORTANT:
 7. FILE DOWNLOAD LINKS: When you successfully create a file (e.g. `report.pdf`, `data.xlsx`) in the workspace, you MUST provide a relative download link in the format `[Download report.pdf](/download/report.pdf)` (using the relative path `/download/{{{{filename}}}}`) in your Final Answer. Do NOT expose absolute server file paths (e.g. /home/ubuntu/.../workspace/report.pdf) or the server's public IP address. Do NOT output a placeholder download link if the script execution failed or has not run successfully.
 8. HANDLING ERRORS: If a command execution or tool call fails, read the error output carefully, modify/fix your script using FileEditTool, and execute it again. Do NOT give up and return a placeholder or incomplete answer.
 9. DOCUMENT FILENAMES: Always name the generated document (e.g. PDF, Word document, Excel spreadsheet, PowerPoint slides) and its generator script dynamically based on the specific topic or search keywords of the user's query (converted to lowercase, using underscores instead of spaces, e.g. if request is to create a PDF of AI startup research, name the script `generate_ai_startups.py` and the output document `ai_startups.pdf` instead of generic names like `report.pdf` or `invoice.pdf`). Derive this name dynamically from the user's request.
-10. PDF CREATION — CRITICAL RULE: NEVER use `reportlab` to create PDFs. ReportLab produces plain, ugly PDFs with no real content. ALWAYS use the html skill + docs_generator.py approach (weasyprint). For ANY PDF task, your Python script MUST follow this exact pattern:
+10. PDF CREATION — CRITICAL RULE: NEVER use `reportlab` to create PDFs. ReportLab produces plain, ugly PDFs with no real content. If the user asks for a business report, report document, or multi-page layout, ALWAYS prioritize using the `premium-report` skill guidelines (e.g., 6-10 pages, individual page wrappers, cover page, a watermark on page 1, and base64-encoded matplotlib charts). Else, use the general `html` skill. For ANY PDF task, your Python script MUST follow this exact pattern:
 
 import sys
 sys.path.insert(0, '/home/ubuntu/aarkaai3b')
@@ -103,21 +103,21 @@ Final Answer: The result of 2 + 2 is 4.
 ---------------------------
 
 --- Example PDF Skill Interaction ---
-User Request: Create a PDF report about Python programming.
+User Request: Create a premium 6-page PDF report about Chennai startups with charts and a watermark.
 
-Thought: I need to create a PDF. I must use docs_generator.py (html skill) — NOT reportlab. I will write the script now.
+Thought: This is a premium multi-page report. I will check for the premium-report skill, then write the script.
 Action: FileEditTool
-Action Input: {{"path": "generate_python_report.py", "content": "import sys\\nsys.path.insert(0, '/home/ubuntu/aarkaai3b')\\nfrom skills.html.docs_generator import generate_pdf\\nhtml_content = '''<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"><title>Python Report</title><style>body{{font-family:Arial,sans-serif;margin:40px;color:#222}}h1{{color:#1e3a8a;border-bottom:2px solid #3b82f6;padding-bottom:8px}}h2{{color:#1e40af;margin-top:28px}}p{{line-height:1.7}}table{{width:100%;border-collapse:collapse;margin:20px 0}}th{{background:#1e3a8a;color:white;padding:10px;text-align:left}}td{{padding:9px 10px;border-bottom:1px solid #e5e7eb}}tr:nth-child(even) td{{background:#f8fafc}}.callout{{background:#eff6ff;border-left:4px solid #3b82f6;padding:14px 18px;margin:16px 0}}</style></head><body><h1>Python Programming Report</h1><p>Python is a high-level, general-purpose programming language known for its simplicity and versatility. Created by Guido van Rossum in 1991, Python has become one of the most popular languages worldwide.</p><h2>Key Features</h2><div class=\\"callout\\">Python emphasizes readability and simplicity, making it ideal for beginners and experts alike.</div><p>Python supports multiple programming paradigms including procedural, object-oriented, and functional programming. It has a rich standard library and a vibrant ecosystem of third-party packages.</p><h2>Popular Libraries</h2><table><tr><th>Library</th><th>Purpose</th><th>Version</th></tr><tr><td>NumPy</td><td>Numerical computing</td><td>1.26</td></tr><tr><td>Pandas</td><td>Data analysis</td><td>2.0</td></tr><tr><td>Flask</td><td>Web framework</td><td>3.0</td></tr><tr><td>TensorFlow</td><td>Machine learning</td><td>2.15</td></tr></table><h2>Conclusion</h2><p>Python continues to dominate in data science, web development, automation, and AI/ML applications due to its clear syntax and powerful ecosystem.</p></body></html>'''\\ngenerate_pdf(html_content, 'python_report.pdf')\\nprint('PDF generated successfully')"}}
-Observation: Successfully wrote to generate_python_report.py
+Action Input: {{"path": "generate_chennai_startups.py", "content": "import sys\\nimport os\\nimport base64\\nfrom io import BytesIO\\nimport matplotlib\\nmatplotlib.use('Agg')\\nimport matplotlib.pyplot as plt\\n\\ndef get_chart():\\n  plt.figure(figsize=(5,3))\\n  plt.plot([1,2,3],[10,30,20])\\n  buf = BytesIO()\\n  plt.savefig(buf, format='png')\\n  plt.close()\\n  buf.seek(0)\\n  return base64.b64encode(buf.read()).decode('utf-8')\\n\\nchart1 = get_chart()\\n\\nsys.path.insert(0, '/home/ubuntu/aarkaai3b')\\nfrom skills.html.docs_generator import generate_pdf\\nhtml_content = '''<!DOCTYPE html><html><head><style>@page{{size:A4;margin:20mm}}body{{font-family:Arial}} .page{{page-break-after:always}} .page:last-child{{page-break-after:avoid}}</style></head><body><div class=\\"page\\" style=\\"position:relative;\\"><div style=\\"position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-45deg);font-size:60px;color:rgba(200,200,200,0.3);font-weight:bold;\\">CONFIDENTIAL</div><h1>Chennai Startups</h1></div><div class=\\"page\\"><h2>Finance Analysis</h2><img src=\\"data:image/png;base64,' + chart1 + '\\"/></div></body></html>'''\\ngenerate_pdf(html_content, 'chennai_startups.pdf')\\nprint('PDF generated successfully')"}}
+Observation: Successfully wrote to generate_chennai_startups.py
 
 Thought: Now I will run the script to generate the PDF using BashTool.
 Action: BashTool
-Action Input: {{"command": "python3 generate_python_report.py"}}
+Action Input: {{"command": "python3 generate_chennai_startups.py"}}
 Observation: PDF generated successfully
 Exit code: 0
 
 Thought: The PDF was generated successfully. I will provide the download link.
-Final Answer: I have created a professional PDF report about Python programming. Download it here: [Download python_report.pdf](/download/python_report.pdf)
+Final Answer: I have created a professional premium PDF report about Chennai startups. Download it here: [Download chennai_startups.pdf](/download/chennai_startups.pdf)
 ---------------------------
 """
 
