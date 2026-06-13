@@ -49,12 +49,26 @@ class BashTool(Tool):
         work_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            # Normalize 'python' to 'python3' on Linux servers where 'python' may not exist
-            cmd_normalized = cmd.replace("python -", "python3 -").replace("python -c", "python3 -c")
-            if cmd.strip().startswith("python ") and not cmd.strip().startswith("python3"):
-                cmd_normalized = "python3" + cmd[len("python"):]
-            else:
-                cmd_normalized = cmd
+            import sys
+            import re
+            import os
+            
+            py_exe = sys.executable
+            cmd_normalized = re.sub(r'^python3?\b(?!-)', lambda m: py_exe, cmd)
+            cmd_normalized = re.sub(r'(?<=[&|; ])python3?\b(?!-)', lambda m: py_exe, cmd_normalized)
+            
+            bin_dir = os.path.dirname(py_exe)
+            pip_exe = os.path.join(bin_dir, "pip")
+            if not os.path.exists(pip_exe):
+                pip_exe = os.path.join(bin_dir, "pip3")
+            if not os.path.exists(pip_exe):
+                pip_exe = os.path.join(bin_dir, "Scripts", "pip.exe")
+            if not os.path.exists(pip_exe):
+                pip_exe = os.path.join(bin_dir, "Scripts", "pip3.exe")
+                
+            if os.path.exists(pip_exe):
+                cmd_normalized = re.sub(r'^pip3?\b(?!-)', lambda m: pip_exe, cmd_normalized)
+                cmd_normalized = re.sub(r'(?<=[&|; ])pip3?\b(?!-)', lambda m: pip_exe, cmd_normalized)
 
             result = subprocess.run(
                 cmd_normalized,

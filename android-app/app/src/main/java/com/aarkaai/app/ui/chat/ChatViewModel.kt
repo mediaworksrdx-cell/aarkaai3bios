@@ -120,11 +120,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                val tokenHeader = if (bearerToken.startsWith("Bearer ")) bearerToken else "Bearer $bearerToken"
-                val response = RetrofitClient.api.sendPrompt(
-                    token = tokenHeader,
-                    request = PromptRequest(query = query)
-                )
+                var tokenHeader = if (bearerToken.startsWith("Bearer ")) bearerToken else "Bearer $bearerToken"
+                val response = try {
+                    RetrofitClient.api.sendPrompt(
+                        token = tokenHeader,
+                        request = PromptRequest(query = query)
+                    )
+                } catch (e: retrofit2.HttpException) {
+                    if (e.code() == 401 || e.code() == 403) {
+                        val newToken = refreshGuestToken()
+                        if (newToken != null) {
+                            tokenHeader = if (newToken.startsWith("Bearer ")) newToken else "Bearer $newToken"
+                            RetrofitClient.api.sendPrompt(
+                                token = tokenHeader,
+                                request = PromptRequest(query = query)
+                            )
+                        } else {
+                            throw e
+                        }
+                    } else {
+                        throw e
+                    }
+                }
 
                 replaceLoading(
                     ChatMessage(
@@ -149,6 +166,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private suspend fun refreshGuestToken(): String? {
+        val guestEmail = "visitor@aarkaai.com"
+        val guestPassword = "VisitorSecurePassword123!"
+        val guestName = "Web Visitor"
+        return try {
+            val res = RetrofitClient.api.login(com.aarkaai.app.network.AuthRequest(email = guestEmail, password = guestPassword))
+            tokenManager.saveAuth(res.access_token, res.user_id, res.name)
+            bearerToken = res.access_token
+            res.access_token
+        } catch (loginEx: Exception) {
+            try {
+                val res = RetrofitClient.api.register(
+                    com.aarkaai.app.network.AuthRequest(email = guestEmail, password = guestPassword, name = guestName)
+                )
+                tokenManager.saveAuth(res.access_token, res.user_id, res.name)
+                bearerToken = res.access_token
+                res.access_token
+            } catch (regEx: Exception) {
+                null
+            }
+        }
+    }
+
     // ── RLHF Feedback ──────────────────────────────────────────────
     fun submitRlhf(messageId: String, rating: Int) {
         // Update the UI immediately
@@ -167,14 +207,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // Send to backend asynchronously
         viewModelScope.launch {
             try {
-                val tokenHeader = if (bearerToken.startsWith("Bearer ")) bearerToken else "Bearer $bearerToken"
-                RetrofitClient.api.submitRlhf(
-                    token = tokenHeader,
-                    request = RlhfRequest(
-                        user_id = "android_user",  // Will be overridden by JWT on backend
-                        rating = rating
+                var tokenHeader = if (bearerToken.startsWith("Bearer ")) bearerToken else "Bearer $bearerToken"
+                try {
+                    RetrofitClient.api.submitRlhf(
+                        token = tokenHeader,
+                        request = RlhfRequest(
+                            user_id = "android_user",  // Will be overridden by JWT on backend
+                            rating = rating
+                        )
                     )
-                )
+                } catch (e: retrofit2.HttpException) {
+                    if (e.code() == 401 || e.code() == 403) {
+                        val newToken = refreshGuestToken()
+                        if (newToken != null) {
+                            tokenHeader = if (newToken.startsWith("Bearer ")) newToken else "Bearer $newToken"
+                            RetrofitClient.api.submitRlhf(
+                                token = tokenHeader,
+                                request = RlhfRequest(
+                                    user_id = "android_user",
+                                    rating = rating
+                                )
+                            )
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 // Silently fail — feedback is best-effort
             }

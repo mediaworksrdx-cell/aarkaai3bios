@@ -80,18 +80,34 @@ class ChatViewModel: ObservableObject {
         
         do {
             let req = PromptRequest(query: query, session_id: activeConversationId.uuidString)
-            let token = appSession.currentUserToken ?? ""
+            var token = appSession.currentUserToken ?? ""
             
             // Initial AI message (empty)
             let aiMessage = Message(text: "", isUser: false, isLoading: false)
             replaceMessage(id: loadingId, with: aiMessage)
             
-            let stream = AarkaaiAPI.shared.streamPrompt(token: token, request: req)
+            var stream = AarkaaiAPI.shared.streamPrompt(token: token, request: req)
             
-            for try await chunk in stream {
-                aiMessage.text += chunk
-                // Force UI update for the conversation
-                objectWillChange.send()
+            do {
+                for try await chunk in stream {
+                    aiMessage.text += chunk
+                    objectWillChange.send()
+                }
+            } catch let apiErr as APIError {
+                if case .unauthorized = apiErr {
+                    // Try refreshing token and retrying once
+                    await appSession.loginOrRegisterGuest()
+                    token = appSession.currentUserToken ?? ""
+                    aiMessage.text = "" // Reset text for retry
+                    stream = AarkaaiAPI.shared.streamPrompt(token: token, request: req)
+                    
+                    for try await chunk in stream {
+                        aiMessage.text += chunk
+                        objectWillChange.send()
+                    }
+                } else {
+                    throw apiErr
+                }
             }
             
         } catch {
@@ -111,7 +127,16 @@ class ChatViewModel: ObservableObject {
         
         do {
             let req = RLHFRequest(user_id: appSession.currentUserId ?? "ios_user", rating: rating)
-            _ = try await AarkaaiAPI.shared.submitRLHF(token: appSession.currentUserToken ?? "", request: req)
+            do {
+                _ = try await AarkaaiAPI.shared.submitRLHF(token: appSession.currentUserToken ?? "", request: req)
+            } catch let apiErr as APIError {
+                if case .unauthorized = apiErr {
+                    await appSession.loginOrRegisterGuest()
+                    _ = try await AarkaaiAPI.shared.submitRLHF(token: appSession.currentUserToken ?? "", request: req)
+                } else {
+                    throw apiErr
+                }
+            }
         } catch {
             print("RLHF fail: \(error)")
         }

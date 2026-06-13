@@ -42,7 +42,54 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     isCheckingToken = false
                 )
             } else {
-                uiState = uiState.copy(isCheckingToken = false)
+                // No stored token — automatically register/login as guest
+                loginOrRegisterGuest()
+            }
+        }
+    }
+
+    private suspend fun loginOrRegisterGuest() {
+        uiState = uiState.copy(isLoading = true, error = null)
+        val guestEmail = "visitor@aarkaai.com"
+        val guestPassword = "VisitorSecurePassword123!"
+        val guestName = "Web Visitor"
+
+        try {
+            // Try logging in
+            val res = RetrofitClient.api.login(AuthRequest(email = guestEmail, password = guestPassword))
+            tokenManager.saveAuth(res.access_token, res.user_id, res.name)
+            uiState = uiState.copy(
+                isLoading = false,
+                token = res.access_token,
+                userId = res.user_id,
+                userName = res.name,
+                isLoggedIn = true,
+                isCheckingToken = false,
+                error = null
+            )
+        } catch (loginEx: Exception) {
+            // Login failed — try registering
+            try {
+                val res = RetrofitClient.api.register(
+                    AuthRequest(email = guestEmail, password = guestPassword, name = guestName)
+                )
+                tokenManager.saveAuth(res.access_token, res.user_id, res.name)
+                uiState = uiState.copy(
+                    isLoading = false,
+                    token = res.access_token,
+                    userId = res.user_id,
+                    userName = res.name,
+                    isLoggedIn = true,
+                    isCheckingToken = false,
+                    error = null
+                )
+            } catch (regEx: Exception) {
+                // Both failed (maybe backend is down) — proceed to auth screen as fallback
+                uiState = uiState.copy(
+                    isLoading = false,
+                    isCheckingToken = false,
+                    error = "Failed to auto-authenticate with backend."
+                )
             }
         }
     }

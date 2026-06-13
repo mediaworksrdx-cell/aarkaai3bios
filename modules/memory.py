@@ -292,3 +292,57 @@ def store_rlhf_feedback(
         logger.error("store_rlhf_feedback failed: %s", exc)
     finally:
         session.close()
+
+
+# ─── User Fact Extraction ────────────────────────────────────────────────────
+
+def extract_user_facts(user_id: str, query: str) -> None:
+    """Extract and upsert user facts from the query using pattern matching."""
+    import re
+    query_clean = query.strip()
+    
+    # Common patterns: key -> list of patterns (regexes) with capture groups
+    patterns = {
+        "name": [
+            r"(?i)\bmy name is\s+([A-Za-z]+)",
+            r"(?i)\bcall me\s+([A-Za-z]+)",
+            r"(?i)\bi am\s+([A-Za-z]+)(?:\s+and\s+i|\s+from|\s+working|$)"
+        ],
+        "location": [
+            r"(?i)\bi live in\s+([A-Za-z\s]+)",
+            r"(?i)\bi am from\s+([A-Za-z\s]+)"
+        ],
+        "occupation": [
+            r"(?i)\bi work as a\s+([A-Za-z\s]+)",
+            r"(?i)\bi work as an\s+([A-Za-z\s]+)",
+            r"(?i)\bi am a\s+(developer|engineer|programmer|student|teacher|doctor|designer|analyst)\b"
+        ]
+    }
+    
+    for category, regex_list in patterns.items():
+        for pattern in regex_list:
+            match = re.search(pattern, query_clean)
+            if match:
+                value = match.group(1).strip()
+                # Clean up any trailing punctuation or unwanted words
+                value = re.sub(r"[.,\/#!$%\^&\*;:{}=\-_`~()]+$", "", value).strip()
+                if value:
+                    logger.info("Extracted user memory fact: %s -> %s", category, value)
+                    update_user_memory(user_id, key=f"user_{category}", value=value, category="user_fact")
+                    break
+
+
+def get_user_facts_prompt(user_id: str) -> str:
+    """Retrieve user facts and format them as a string block for prompt injection."""
+    memories = get_user_memories(user_id, category="user_fact")
+    if not memories:
+        return ""
+    
+    lines = ["[User Profile / Known Facts]"]
+    for mem in memories:
+        # e.g. user_name -> Name
+        label = mem["key"].replace("user_", "").capitalize()
+        lines.append(f"{label}: {mem['value']}")
+    
+    return "\n".join(lines)
+

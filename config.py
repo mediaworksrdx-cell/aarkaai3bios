@@ -35,7 +35,7 @@ if ENVIRONMENT == "production" and SECRET_KEY == _DEFAULT_KEY:
     )
 
 # Routes that don't require API key authentication (or JWT)
-PUBLIC_ROUTES = {"/", "/health", "/docs", "/openapi.json", "/redoc", "/auth/register", "/auth/login"}
+PUBLIC_ROUTES = {"/", "/health", "/docs", "/openapi.json", "/redoc", "/auth/register", "/auth/login", "/download"}
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 _origins_env = os.getenv("AARKAAI_ALLOWED_ORIGINS", "")
@@ -124,6 +124,7 @@ FOREX_PAIRS = {
     "eurinr": "EURINR=X", "eur/inr": "EURINR=X", "euro rupee": "EURINR=X",
     "gbpinr": "GBPINR=X", "gbp/inr": "GBPINR=X", "pound rupee": "GBPINR=X",
     "jpyinr": "JPYINR=X", "jpy/inr": "JPYINR=X", "yen rupee": "JPYINR=X",
+    "aedinr": "AEDINR=X", "aed/inr": "AEDINR=X", "aed to inr": "AEDINR=X", "aed": "AEDINR=X", "dirham": "AEDINR=X",
     # Cross pairs
     "eurgbp": "EURGBP=X", "eur/gbp": "EURGBP=X",
     "eurjpy": "EURJPY=X", "eur/jpy": "EURJPY=X",

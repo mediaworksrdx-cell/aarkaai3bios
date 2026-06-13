@@ -269,28 +269,33 @@ def _build_chatml(system: str, user: str) -> str:
 
 
 def _build_chatml_multi(system: str, history: list[dict] | None, user: str,
-                       max_history_chars: int = 2000) -> str:
+                       max_history_chars: int = 3000, user_facts: str = "") -> str:
     """Build ChatML format with system message, multi-turn history, and current user prompt.
     
-    Truncates history to fit within max_history_chars to prevent context window overflow.
-    Individual assistant messages are capped at 500 chars to leave room for generation.
+    Truncates history starting from the OLDEST messages to fit within max_history_chars.
+    Does NOT append ellipsis '…' to avoid model copy-cat behavior leading to early halts.
     """
-    prompt = f"<|im_start|>system\n{system}<|im_end|>\n"
+    sys_block = system
+    if user_facts:
+        sys_block = f"{system}\n\n{user_facts}"
+    prompt = f"<|im_start|>system\n{sys_block}<|im_end|>\n"
     if history:
-        history_text = ""
-        for msg in history:
+        entries = []
+        current_len = 0
+        # Iterate backwards (newest first) to ensure the latest conversation turns are kept
+        for msg in reversed(history):
             role = "user" if msg["role"] == "user" else "assistant"
             content = msg["message"]
-            # Cap individual messages (assistant responses can be very long)
-            if role == "assistant" and len(content) > 500:
-                content = content[:500] + "…"
-            elif role == "user" and len(content) > 300:
-                content = content[:300] + "…"
+            # Cleanly limit extremely long individual messages without adding ellipsis
+            if len(content) > 2000:
+                content = content[:2000]
             entry = f"<|im_start|>{role}\n{content}<|im_end|>\n"
-            if len(history_text) + len(entry) > max_history_chars:
+            if current_len + len(entry) > max_history_chars:
                 break
-            history_text += entry
-        prompt += history_text
+            entries.append(entry)
+            current_len += len(entry)
+        # Restore chronological order for the final prompt context
+        prompt += "".join(reversed(entries))
     prompt += f"<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n"
     return prompt
 
@@ -407,23 +412,98 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7):
             yield token
 
 
+def _truncate_agent_prompt(prompt_str: str, model_instance) -> str:
+    """If the agent prompt exceeds 5500 tokens, truncate older ReAct turns from the history to fit context."""
+    tokens = model_instance.tokenize(prompt_str.encode("utf-8"), special=True)
+    if len(tokens) <= 5500:
+        return prompt_str
+    
+    logger.info("Agent prompt length is %d tokens (exceeds 5500). Truncating history...", len(tokens))
+    
+    # Split by Thought: to identify individual turns
+    parts = prompt_str.split("\nThought: ")
+    if len(parts) <= 3:
+        # Cannot truncate much if there are few turns, just return as is
+        return prompt_str
+        
+    # The first part contains the system prompt, guidelines, examples, and Request: <query>
+    system_part = parts[0]
+    
+    # We want to keep the system part, and the last 2 turns
+    last_turns = parts[-2:]
+    
+    truncated_prompt = system_part + "\n\n...[older execution steps truncated for length]...\n\n" + "\nThought: ".join(last_turns)
+    
+    # Verify the new length
+    new_tokens = model_instance.tokenize(truncated_prompt.encode("utf-8"), special=True)
+    logger.info("Truncated prompt to %d tokens.", len(new_tokens))
+    return truncated_prompt
+
+
 def generate_raw(prompt, max_new_tokens=300, stop=None):
-    """Raw generation for the agent loop (no truncation)."""
+    """Raw generation for the agent loop (no truncation) with safe streaming stop word checks."""
     if _is_stub or _model is None:
         return 'Final Answer: I am running in stub mode.'
     
     if stop is None:
         stop = []
 
-    output = _model(
-        prompt,
-        max_tokens=max_new_tokens,
+    native_stop = ["<|im_end|>", "<|im_start|>", "<|endoftext|>"]
+    
+    # Truncate prompt if it is too long to prevent context overflow
+    prompt = _truncate_agent_prompt(prompt, _model)
+    
+    # Tokenize prompt to get exact prompt token count and pass tokens directly
+    prompt_tokens = _model.tokenize(prompt.encode("utf-8"), special=True)
+    prompt_len = len(prompt_tokens)
+    
+    # Context limit is 8192. Set max_tokens to fill remaining context window completely (leaving a small 100-token safety buffer)
+    max_tokens = 8192 - prompt_len - 100
+    if max_tokens <= 0:
+        max_tokens = 1
+        
+    stream = _model(
+        prompt_tokens,
+        max_tokens=max_tokens,
         temperature=0.2,
         top_p=0.9,
-        stop=stop,
         repeat_penalty=1.1,
+        stop=native_stop,
+        stream=True
     )
-    return output["choices"][0]["text"].strip()
+    
+    generated_text = ""
+    for chunk in stream:
+        token = chunk["choices"][0]["text"]
+        if token:
+            generated_text += token
+            # Check for custom stop sequences streamingly
+            for stop_word in stop:
+                if stop_word in generated_text:
+                    idx = generated_text.index(stop_word)
+                    return generated_text[:idx].strip()
+            
+            # Auto-stop after Action Input line is completed to prevent hallucination
+            if "action input:" in generated_text.lower():
+                ai_idx = generated_text.lower().index("action input:")
+                json_part = generated_text[ai_idx:]
+                import json
+                start_idx = json_part.find("{")
+                if start_idx != -1:
+                    # Search backwards for a valid JSON object
+                    for i in range(len(json_part) - 1, start_idx, -1):
+                        if json_part[i] == "}":
+                            try:
+                                json.loads(json_part[start_idx:i+1])
+                                # If it successfully parses as valid JSON, and a newline exists after the object
+                                if "\n" in json_part[i+1:]:
+                                    return generated_text[:ai_idx + i + 1].strip()
+                            except json.JSONDecodeError:
+                                pass
+
+            if _has_repetition(generated_text):
+                break
+    return generated_text.strip()
 
 
 def _is_list_header(text, pos):
@@ -454,6 +534,33 @@ def _clean_response(text):
     text = text.replace("[end of web search results]", "").strip()
     text = text.replace("[End of web search results]", "").strip()
 
+    # Programmatically strip common email/letter salutations and sign-offs
+    lines = text.split('\n')
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+
+    greetings_to_remove = ["dear reader", "dear user", "hello reader", "hello user", "dear friend"]
+    if lines:
+        import re
+        first_line_clean = re.sub(r'[^\w\s]', '', lines[0].lower()).strip()
+        if any(first_line_clean.startswith(g) for g in greetings_to_remove):
+            lines.pop(0)
+
+    signoffs_to_remove = ["sincerely", "best regards", "regards", "yours truly"]
+    if lines:
+        import re
+        last_line_clean = re.sub(r'[^\w\s]', '', lines[-1].lower()).strip()
+        if any(last_line_clean.startswith(s) for s in signoffs_to_remove):
+            lines.pop()
+            if lines:
+                next_last_line = re.sub(r'[^\w\s]', '', lines[-1].lower()).strip()
+                if "your name" in next_last_line or "aarkaa" in next_last_line:
+                    lines.pop()
+
+    text = '\n'.join(lines).strip()
+
     # Do not truncate if text contains code blocks to avoid corrupting code syntax.
     if "```" in text:
         # If the code block is unclosed, close it cleanly
@@ -469,7 +576,25 @@ def _clean_response(text):
     if text[-1] in ".!?" and not (text[-1] == "." and len(text) > 1 and text[-2].isdigit()):
         return text
 
-    # Otherwise, find the latest complete sentence ending in the second half of the text
+    # For step-by-step content (has numbered steps like "Step 1:", "1.", "2."),
+    # preserve all complete steps instead of truncating aggressively
+    has_numbered_steps = bool(re.search(r'\n\s*(?:Step\s+)?\d+[\.\):]', text))
+    
+    if has_numbered_steps:
+        # Find the last complete step (ends with sentence-ending punctuation before next step or end)
+        step_matches = list(re.finditer(r'\n\s*(?:Step\s+)?\d+[\.\):]', text))
+        if len(step_matches) >= 2:
+            # Check if the last step appears incomplete (no sentence-ending punctuation at the very end)
+            last_step_start = step_matches[-1].start()
+            last_step_text = text[last_step_start:]
+            # If the last step has proper ending punctuation, keep everything
+            if last_step_text.rstrip()[-1] in '.!?':
+                return text
+            # Otherwise, truncate to end of second-to-last step
+            return text[:last_step_start].rstrip()
+        return text + "."
+
+    # Otherwise, find the latest complete sentence ending
     best_pos = -1
     for end_char in [". ", "! ", "? ", ".\n", "!\n", "?\n"]:
         pos = text.rfind(end_char)
@@ -481,7 +606,7 @@ def _clean_response(text):
             best_pos = pos
             break
             
-    if best_pos > len(text) * 0.5:
+    if best_pos > len(text) * 0.3:
         return text[:best_pos + 1]
             
     return text + "."
@@ -532,6 +657,7 @@ def primary_check(query, lang="en"):
             "your security", "are you safe", "how are you built",
             "aarka ai capabilit", "aarkaa capabilit", "explain aarka",
             "who are you", "what is aarka", "what is aarkaai",
+            "your name", "what is your name", "who is aarka"
         ]
         is_self = any(kw in q_lower for kw in _self_keywords)
 
@@ -592,15 +718,35 @@ def primary_check(query, lang="en"):
             prompt = _build_chatml(system_prompt, user_prompt)
             tokens = MAX_TOKENS
         else:
-            system_prompt = (
-                "You are AARKAA, a helpful and precise AI assistant. "
-                "You cannot predict the future price of financial products or speculative assets (stocks, cryptocurrencies, commodities, etc.). "
-                "If the user asks for a future price prediction or forecast, you must politely decline, explaining that future market behavior is speculative and unpredictable."
-            )
             is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
-            if is_step_by_step:
+            is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
+                all(w in query.lower() for w in ["gpu", "schedul", "queu", "cost", "isolation"])
+            )
+            
+            if is_design_query:
+                system_prompt = (
+                    "You are AARKAA, a principal systems architect. "
+                    "Provide a comprehensive, production-grade technical design architecture. "
+                    "Detail every requested component in depth with clear headers, technical details, and structured analysis."
+                )
+                user_prompt = (
+                    f"Design and explain the following architecture request: {query}\n\n"
+                    "IMPORTANT: Provide a detailed, comprehensive architectural layout. "
+                    "Explain each requirement/component thoroughly in its own section. "
+                    "Do NOT write conversational filler. Do NOT stop early or truncate the explanation."
+                )
+            elif is_step_by_step:
+                system_prompt = (
+                    "You are AARKAA, a helpful and precise AI assistant. "
+                    "You cannot predict the future price of financial products or speculative assets (stocks, cryptocurrencies, commodities, etc.). "
+                    "If the user asks for a future price prediction or forecast, you must politely decline, explaining that future market behavior is speculative and unpredictable."
+                )
                 user_prompt = f"Answer the following question by providing a detailed, step-by-step explanation or recipe with clear headings and sequential numbers (Step 1, Step 2, etc.): {query}\n\n"
             else:
+                system_prompt = (
+                    "You are AARKAA, a helpful and precise AI assistant. "
+                    "You cannot predict the price of financial assets. If the user asks for future forecasts, decline."
+                )
                 user_prompt = f"Answer the following question: {query}\n\n"
             if lang != "en":
                 user_prompt += f"You MUST write your response ONLY in the following language: {lang_name}."
@@ -615,39 +761,107 @@ def primary_check(query, lang="en"):
         return _stub_response(query), 0.3
 
 
-def final_response(query, context, intent="", lang="en", mode="production", history=None):
+def self_check_response(query: str, response: str, intent: str) -> bool:
+    """Audit the generated response against user intent using the local model."""
+    if _is_stub or _model is None:
+        return True
+
+    if intent not in ["persuasion", "debate", "comparison"]:
+        return True
+
+    criteria = ""
+    if intent == "persuasion":
+        criteria = "The user requested persuasion (convince them). Did the response focus on persuasion/argument, or did it write a how-to guide/instructions/steps?"
+    elif intent == "debate":
+        criteria = "The user requested a debate argument. Did the response debate the position, or did it write a how-to guide/instructions/steps?"
+    elif intent == "comparison":
+        criteria = "The user requested a comparison. Did the response compare the concepts, or did it write a how-to guide/instructions/steps?"
+
+    audit_prompt = (
+        "<|im_start|>system\n"
+        "You are Aarkaa AI, a strict response quality auditor. "
+        "Your task is to determine if a generated response matches the user's intent or mistakenly outputs a how-to/instructional guide instead.\n"
+        "Respond with exactly 'PASS' or 'FAIL'. Do NOT write any other words or explanations.<|im_end|>\n"
+        f"<|im_start|>user\n"
+        f"User Request: {query}\n"
+        f"Generated Response: {response}\n\n"
+        f"Auditing Criteria: {criteria}\n"
+        "Does the response match the intent (PASS) or is it a how-to/step guide (FAIL)?<|im_end|>\n"
+        "<|im_start|>assistant\n"
+    )
+
+    try:
+        output = _model(
+            audit_prompt,
+            max_tokens=5,
+            temperature=0.0,
+            stop=["<|im_end|>", "<|im_start|>"]
+        )
+        decision = output["choices"][0]["text"].strip().upper()
+        logger.info("Self-Check Auditor decision: %s for intent: %s", decision, intent)
+        return "FAIL" not in decision
+    except Exception as exc:
+        logger.warning("Self-check failed to evaluate: %s", exc)
+        return True
+
+
+def final_response(query, context, intent="", lang="en", mode="production", history=None, user_facts=""):
     """Full reasoning pass with fused context from external modules."""
     if _is_stub:
         return _stub_response(query, context)
 
-    try:
-        result = _build_final_prompt(query, context, intent, lang, mode, history=history)
-        prompt, tokens = result[0], result[1]
-        temp = result[2] if len(result) > 2 else 0.7
-        
-        # Safety check: if prompt is too long, rebuild without history
-        prompt_len = len(prompt)
-        logger.info("final_response: prompt_len=%d chars, max_tokens=%d, temp=%.2f", prompt_len, tokens, temp)
-        if prompt_len > 6000:
-            logger.warning("Prompt too long (%d chars) — rebuilding without history to prevent context overflow", prompt_len)
-            result = _build_final_prompt(query, context, intent, lang, mode, history=None)
+    feedback = ""
+    answer = ""
+    for attempt in range(2):
+        try:
+            result = _build_final_prompt(query, context, intent, lang, mode, history=history, user_facts=user_facts)
             prompt, tokens = result[0], result[1]
             temp = result[2] if len(result) > 2 else 0.7
-        
-        return _generate(prompt, max_new_tokens=tokens, temperature=temp)
-    except Exception as exc:
-        logger.error("final_response failed: %s", exc)
-        return _stub_response(query, context)
+            
+            if feedback:
+                # Append corrective instruction feedback to the user role block
+                prompt_parts = prompt.split("<|im_start|>user\n")
+                if len(prompt_parts) > 1:
+                    user_block = prompt_parts[-1]
+                    user_block_parts = user_block.split("<|im_end|>\n<|im_start|>assistant\n")
+                    if len(user_block_parts) > 0:
+                        user_block_parts[0] += f"\n\nCorrection Note: {feedback}"
+                        prompt_parts[-1] = "<|im_end|>\n<|im_start|>assistant\n".join(user_block_parts)
+                        prompt = "<|im_start|>user\n".join(prompt_parts)
+            
+            prompt_len = len(prompt)
+            logger.info("final_response (attempt %d): prompt_len=%d chars, max_tokens=%d, temp=%.2f", attempt + 1, prompt_len, tokens, temp)
+            if prompt_len > 6000:
+                logger.warning("Prompt too long (%d chars) — rebuilding without history to prevent context overflow", prompt_len)
+                result = _build_final_prompt(query, context, intent, lang, mode, history=None, user_facts=user_facts)
+                prompt, tokens = result[0], result[1]
+                temp = result[2] if len(result) > 2 else 0.7
+            
+            answer = _generate(prompt, max_new_tokens=tokens, temperature=temp)
+            
+            # Audit the response
+            if self_check_response(query, answer, intent):
+                return answer
+            
+            logger.warning("Self-check failed on attempt %d for intent %s. Retrying...", attempt + 1, intent)
+            feedback = "Your previous attempt was a how-to guide / list of steps. Please rewrite to be a direct persuasive argument/debate as requested. Do NOT list steps."
+            
+        except Exception as exc:
+            logger.error("final_response failed on attempt %d: %s", attempt + 1, exc)
+            if attempt == 1:
+                return _stub_response(query, context)
+                
+    return answer
 
 
-def stream_final_response(query, context, intent="", lang="en", mode="production", history=None):
+def stream_final_response(query, context, intent="", lang="en", mode="production", history=None, user_facts=""):
     """Stream tokens for the final response pass."""
     if _is_stub:
         yield _stub_response(query, context)
         return
 
     try:
-        result = _build_final_prompt(query, context, intent, lang, mode, history=history)
+        result = _build_final_prompt(query, context, intent, lang, mode, history=history, user_facts=user_facts)
         prompt, tokens = result[0], result[1]
         temp = result[2] if len(result) > 2 else 0.7
         
@@ -656,7 +870,7 @@ def stream_final_response(query, context, intent="", lang="en", mode="production
         logger.info("stream_final_response: prompt_len=%d chars, max_tokens=%d, temp=%.2f", prompt_len, tokens, temp)
         if prompt_len > 6000:
             logger.warning("Prompt too long (%d chars) — rebuilding without history to prevent context overflow", prompt_len)
-            result = _build_final_prompt(query, context, intent, lang, mode, history=None)
+            result = _build_final_prompt(query, context, intent, lang, mode, history=None, user_facts=user_facts)
             prompt, tokens = result[0], result[1]
             temp = result[2] if len(result) > 2 else 0.7
             logger.info("Rebuilt prompt: %d chars", len(prompt))
@@ -722,7 +936,7 @@ def _filter_history_reasoning(query: str, history: list[dict] | None) -> list[di
     return filtered_history if filtered_history else None
 
 
-def _build_final_prompt(query, context, intent="", lang="en", mode="production", history=None):
+def _build_final_prompt(query, context, intent="", lang="en", mode="production", history=None, user_facts=""):
     history = _filter_history_repeats(query, history)
     if intent == "reasoning_puzzle":
         history = _filter_history_reasoning(query, history)
@@ -739,8 +953,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
         user_prompt = "The previous response was cut off due to token limits. Complete the previous response starting from exactly where it was truncated."
         if context:
             user_prompt += "\n\nContext:\n" + context
-        prompt = _build_chatml_multi(system_prompt, history, user_prompt)
-        tokens = 1500
+        prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
+        tokens = 3000
         return prompt, tokens, 0.7
 
     is_reasoning = (intent == "reasoning_puzzle")
@@ -887,10 +1101,66 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
         lang_name = _LANG_NAMES.get(lang, "English")
         if lang != "en":
             user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
-        prompt = _build_chatml_multi(system_prompt, history, user_prompt)
+        prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT: %s", prompt)
         tokens = MAX_TOKENS
         return prompt, tokens, 0.0  # temperature 0.0 for deterministic, precise reasoning
+
+    is_rhetorical = intent in ["persuasion", "debate", "comparison", "roleplay"]
+    if is_rhetorical:
+        lang_name = _LANG_NAMES.get(lang, "English")
+        if intent == "persuasion":
+            system_prompt = (
+                "You are Aarkaa AI, a highly persuasive, eloquent, and rhetorical assistant. "
+                "Your goal is to convince the reader using compelling reasoning, emotional appeal, and strong arguments."
+            )
+            user_prompt = (
+                f"Question/Topic: {query}\n\n"
+                "Instruction:\n"
+                "Generate a highly persuasive argument to convince the reader. "
+                "IMPORTANT: You MUST write a persuasive argument. Do NOT write a how-to guide, steps, instructions, or list of tips. "
+                "Focus entirely on persuasion.\n"
+                "Do NOT format the response as a letter or email. Do NOT include greetings (like 'Dear reader') or signatures (like 'Sincerely'). Output the argument directly."
+            )
+        elif intent == "debate":
+            system_prompt = (
+                "You are Aarkaa AI, a logical, sharp, and structured debating assistant. "
+                "Present a strong, critical argument debating the given topic."
+            )
+            user_prompt = (
+                f"Question/Topic: {query}\n\n"
+                "Instruction:\n"
+                "Provide a structured debate argument. Focus on debating the merits and counter-arguments. "
+                "Do NOT write a how-to guide, steps, or instructions.\n"
+                "Do NOT format the response as a letter or email. Do NOT include greetings (like 'Dear reader') or signatures (like 'Sincerely')."
+            )
+        elif intent == "comparison":
+            system_prompt = (
+                "You are Aarkaa AI, a detailed, objective, and analytical comparison assistant. "
+                "Compare the given topics or analyze their differences."
+            )
+            user_prompt = (
+                f"Question/Topic: {query}\n\n"
+                "Instruction:\n"
+                "Provide a detailed, objective comparison of the concepts. Highlight pros, cons, differences, or similarities. "
+                "Do NOT write a general guide or instructions."
+            )
+        else:  # roleplay
+            system_prompt = (
+                "You are Aarkaa AI. Engage in the requested roleplay or persona."
+            )
+            user_prompt = (
+                f"Request: {query}\n\n"
+                "Instruction:\n"
+                "Adopt the requested persona fully and respond in character."
+            )
+        if lang != "en":
+            user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
+        prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
+        logger.info("AARKAA_ENGINE_PROMPT (rhetorical):\n%s", prompt)
+        tokens = MAX_TOKENS
+        temp = 0.75 if intent in ["persuasion", "roleplay"] else 0.4
+        return prompt, tokens, temp
 
     is_code = intent == "coding_help" or any(
         w in query.lower()
@@ -934,7 +1204,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             user_prompt += "Provide working code with a clear explanation."
             if lang != "en":
                 user_prompt += f" You MUST write your response ONLY in the following language: {lang_name}."
-        prompt = _build_chatml_multi(system_prompt, history, user_prompt)
+        prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT (is_code):\n%s", prompt)
         tokens = MAX_TOKENS
     else:
@@ -950,7 +1220,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             user_prompt = f"Respond naturally and warmly to the user: {query}\n\n"
             if lang != "en":
                 user_prompt += f"You MUST respond ONLY in the following language: {lang_name}."
-            prompt = _build_chatml_multi(system_prompt, history, user_prompt)
+            prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
             tokens = 500
         else:
             _self_keywords = [
@@ -959,11 +1229,27 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 "how do you work", "your architecture", "what are you",
                 "your security", "are you safe", "how are you built",
                 "aarka ai capabilit", "aarkaa capabilit", "explain aarka",
-                "who are you"
+                "who are you", "what is aarka", "what is aarkaai",
+                "your name", "what is your name", "who is aarka"
             ]
             is_self_question = any(kw in query.lower() for kw in _self_keywords)
+            
+            # Simple identity check (e.g. "what is your name", "who are you")
+            is_simple_identity = any(kw in query.lower() for kw in ["your name", "who are you", "who is aarka", "what is your name", "what is aarka", "what is aarkaai"])
 
-            if is_self_question:
+            if is_self_question and is_simple_identity:
+                system_prompt = (
+                    "You are AARKAA (Autonomous Adaptive Reasoning Kernel for Augmented AI), "
+                    "a friendly and precise AI assistant built by Synthetix Analytics.\n"
+                    "State clearly: 'My name is Aarkaa. I am an AI assistant built by Synthetix Analytics.' "
+                    "Then offer to help the user."
+                )
+                user_prompt = f"Respond to the user naturally: {query}\n\n"
+                if lang != "en":
+                    user_prompt += f"You MUST respond ONLY in the following language: {lang_name}."
+                prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
+                tokens = 250
+            elif is_self_question:
                 system_prompt = (
                     "You are AARKAA (Autonomous Adaptive Reasoning Kernel for Augmented AI), "
                     "a production-grade AI assistant built by Synthetix Analytics.\n\n"
@@ -995,7 +1281,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 )
                 if lang != "en":
                     user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
-                prompt = _build_chatml_multi(system_prompt, history, user_prompt)
+                prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
                 tokens = MAX_TOKENS
             else:
                 system_prompt = (
@@ -1051,10 +1337,27 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 )
                 is_general = intent in ["general_query", "web_lookup", "news_search", "science_query", "tech_info", "finance_general", "health_query", "history_query", ""] or not intent
                 if is_general:
-                    system_prompt = (
-                        "You are Aarkaa AI, a highly intelligent and helpful assistant built by Synthetix Analytics.\n"
-                        "Provide accurate, clear, and direct answers to the user's query."
+                    is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
+                    is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
+                        all(w in query.lower() for w in ["gpu", "schedul", "queu", "cost", "isolation"])
                     )
+                    
+                    if is_design_query:
+                        system_prompt = (
+                            "You are Aarkaa AI, a principal systems architect built by Synthetix Analytics.\n"
+                            "Provide a comprehensive, production-grade technical design architecture. "
+                            "Detail every requested component in depth with clear headers, technical details, and structured analysis."
+                        )
+                    elif is_step_by_step:
+                        system_prompt = (
+                            "You are Aarkaa AI, a highly intelligent and helpful assistant built by Synthetix Analytics.\n"
+                            "Provide comprehensive, detailed, and complete step-by-step guides or recipes."
+                        )
+                    else:
+                        system_prompt = (
+                            "You are Aarkaa AI, a highly intelligent and helpful assistant built by Synthetix Analytics.\n"
+                            "Provide accurate, clear, and comprehensive answers to the user's query."
+                        )
                 user_prompt = f"Question: {query}\n\n"
                 if context:
                     has_finance = "[Finance Data]" in context
@@ -1066,22 +1369,37 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                             "Provide a VERY CONCISE answer showing ONLY the price, change, and percentage change. Do not add fluff.\n\n"
                         )
                         tokens = 100
+                    # Cap context length to prevent prompt overflow for step-by-step queries
+                    ctx_to_inject = context
+                    if len(context) > 3000 and (is_step_by_step or is_design_query):
+                        ctx_to_inject = context[:3000] + "\n... (trimmed for brevity)"
                     user_prompt += (
                         "Reference Information (use ONLY if directly relevant to the question above):\n"
                         "---------------------\n"
-                        + context + "\n"
+                        + ctx_to_inject + "\n"
                         "---------------------\n"
                     )
-                    user_prompt += "Answer the question above. If the reference information does not directly answer the question, IGNORE it and answer from your own knowledge. Do NOT output any notes, warnings, or disclaimers about context sufficiency."
+                    user_prompt += "Answer the question above in a detailed and comprehensive manner. If the reference information does not directly answer the question, IGNORE it and answer from your own knowledge. Do NOT output any notes, warnings, or disclaimers about context sufficiency."
                 else:
-                    is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
-                    if is_step_by_step:
-                        user_prompt += "Answer the question above by providing a detailed, step-by-step explanation or recipe with clear headings and sequential numbers (Step 1, Step 2, etc.). Do not truncate or summarize the steps."
+                    if is_general and is_design_query:
+                        user_prompt += (
+                            "Answer the question above by designing a detailed, comprehensive architectural layout. "
+                            "Explain each requirement/component thoroughly in its own section. "
+                            "Do NOT stop early or truncate the explanation."
+                        )
                     else:
-                        user_prompt += "Answer the question above directly and accurately."
+                        user_prompt += "Answer the question above directly, comprehensively, and accurately."
+                # Always add step-by-step formatting instruction for recipe/guide queries
+                if is_step_by_step:
+                    user_prompt += (
+                        "\n\nIMPORTANT FORMATTING: You MUST provide a COMPLETE, detailed, step-by-step response. "
+                        "List ALL ingredients first, then provide EVERY cooking/preparation step numbered sequentially "
+                        "(Step 1, Step 2, Step 3, etc.) until the recipe or guide is FULLY complete. "
+                        "Do NOT stop early. Do NOT truncate or summarize."
+                    )
                 if lang != "en":
                     user_prompt += f" Write your entire response ONLY in the following language: {lang_name}."
-                prompt = _build_chatml_multi(system_prompt, history, user_prompt)
+                prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
                 if "has_finance" not in locals() or not has_finance:
                     tokens = MAX_TOKENS
     temp = _get_temperature(query, intent, context)

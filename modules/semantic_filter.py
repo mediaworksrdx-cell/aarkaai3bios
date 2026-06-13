@@ -382,6 +382,16 @@ def _refine_intent(query: str, domain: str) -> str:
     """Determine sub-intent within a domain."""
     q = query.lower()
 
+    # Detect cross-domain rhetorical intents early
+    if any(w in q for w in ["convince", "persuade", "cajole"]):
+        return "persuasion"
+    if any(w in q for w in ["debate", "argue for", "argue against"]):
+        return "debate"
+    if any(w in q for w in ["compare", "versus", "vs", "difference between"]):
+        return "comparison"
+    if any(w in q for w in ["roleplay", "pretend you are", "act as"]):
+        return "roleplay"
+
     if domain == "finance":
         if any(w in q for w in ["price", "quote", "value", "how much"]):
             return "price_check"

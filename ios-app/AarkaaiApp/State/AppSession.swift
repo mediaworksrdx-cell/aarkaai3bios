@@ -19,8 +19,34 @@ class AppSession: ObservableObject {
             self.currentUserId = AuthManager.shared.getUserId()
             self.currentUserName = AuthManager.shared.getUserName()
             self.isLoggedIn = true
+            self.isCheckingAuth = false
+        } else {
+            Task {
+                await loginOrRegisterGuest()
+            }
         }
-        self.isCheckingAuth = false
+    }
+
+    func loginOrRegisterGuest() async {
+        let guestEmail = "visitor@aarkaai.com"
+        let guestPassword = "VisitorSecurePassword123!"
+        let guestName = "Web Visitor"
+        
+        do {
+            let req = AuthRequest(email: guestEmail, password: guestPassword)
+            let response = try await AarkaaiAPI.shared.login(request: req)
+            self.setAuth(response: response)
+            self.isCheckingAuth = false
+        } catch {
+            do {
+                let req = AuthRequest(email: guestEmail, password: guestPassword, name: guestName)
+                let response = try await AarkaaiAPI.shared.register(request: req)
+                self.setAuth(response: response)
+                self.isCheckingAuth = false
+            } catch {
+                self.isCheckingAuth = false
+            }
+        }
     }
     
     func setAuth(response: AuthResponse) {

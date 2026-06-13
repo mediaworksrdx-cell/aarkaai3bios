@@ -44,7 +44,9 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Skip public routes
-        if request.url.path in PUBLIC_ROUTES:
+        path = request.url.path
+        is_public = path in PUBLIC_ROUTES or any(path.startswith(r + "/") for r in PUBLIC_ROUTES if r != "/")
+        if is_public:
             return await call_next(request)
 
         # Skip OPTIONS preflight

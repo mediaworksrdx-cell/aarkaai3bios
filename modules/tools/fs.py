@@ -82,6 +82,39 @@ class FileEditTool(Tool):
         if not path_str or content is None:
             return "Error: 'path' and 'content' arguments are required."
 
+        # ── Intercept reportlab PDF attempts ─────────────────────────────────
+        # The small LLM sometimes uses reportlab which produces empty/plain PDFs.
+        # Force it to use the html skill + docs_generator.py instead.
+        if path_str.endswith(".py") and "reportlab" in content:
+            return (
+                "Error: NEVER use reportlab to create PDFs — it produces plain, empty PDFs with no styling or content. "
+                "You MUST use the html skill + docs_generator.py (weasyprint) instead. "
+                "Your script must follow this exact pattern:\n\n"
+                "import sys\n"
+                "sys.path.insert(0, '/home/ubuntu/aarkaai3b')\n"
+                "from skills.html.docs_generator import generate_pdf\n\n"
+                "html_content = '''<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Title</title>"
+                "<style>body{font-family:Arial,sans-serif;margin:40px;color:#222}"
+                "h1{color:#1e3a8a;border-bottom:2px solid #3b82f6;padding-bottom:8px}"
+                "h2{color:#1e40af;margin-top:28px}p{line-height:1.7}"
+                "table{width:100%;border-collapse:collapse;margin:20px 0}"
+                "th{background:#1e3a8a;color:white;padding:10px;text-align:left}"
+                "td{padding:9px 10px;border-bottom:1px solid #e5e7eb}"
+                "tr:nth-child(even) td{background:#f8fafc}"
+                ".callout{background:#eff6ff;border-left:4px solid #3b82f6;padding:14px 18px;margin:16px 0}"
+                "</style></head><body>"
+                "<h1>YOUR TITLE HERE</h1>"
+                "<p>REAL content paragraphs here...</p>"
+                "<h2>Section</h2><p>More content...</p>"
+                "<div class=\"callout\">Key insight here.</div>"
+                "<table><tr><th>Col A</th><th>Col B</th></tr>"
+                "<tr><td>Data</td><td>Data</td></tr></table>"
+                "</body></html>'''\n\n"
+                "generate_pdf(html_content, 'YOUR_OUTPUT.pdf')\n"
+                "print('PDF generated successfully')\n\n"
+                "Rewrite your script using docs_generator.py with REAL detailed HTML content about the user's topic."
+            )
+
         try:
             resolved = _resolve_safe_path(path_str)
         except ValueError as e:
@@ -93,3 +126,4 @@ class FileEditTool(Tool):
             return f"Successfully wrote to {resolved.relative_to(SAFE_WORK_DIR.resolve())}"
         except Exception as exc:
             return f"Error writing file: {exc}"
+
