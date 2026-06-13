@@ -59,6 +59,7 @@ FILES_TO_PACK = [
     "skills/skill-router/skill_registry.py",
     "skills/html/SKILL.md",
     "skills/html/docs_generator.py",
+    "skills/premium-report/SKILL.md",
     "scratch/remote_db_migrate.py",
     "scratch/run_local_test.py",
     "scratch/test_remote_invoice.py",
