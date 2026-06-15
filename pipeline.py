@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from typing import Optional
 
@@ -144,6 +145,16 @@ _LANGUAGE_KEYWORDS = {name.lower(): code for code, name in _LANG_NAMES.items()}
 def _detect_requested_language(query: str, current_detected: str) -> str:
     q_low = query.lower()
     
+    # Specific model/dataset alignments
+    if any(k in q_low for k in ["hindi alpaca", "hindi-alpaca", "samanantar"]):
+        return "hi"
+    if any(k in q_low for k in ["tamil alpaca", "tamil-alpaca"]):
+        return "ta"
+    if "aya" in q_low:
+        if "tamil" in q_low:
+            return "ta"
+        return "hi"
+
     # If the user is questioning the language choice, do not override
     if any(q_word in q_low for q_word in ["why", "how come", "reason", "explain why"]):
         if any(act in q_low for act in ["responding", "answering", "speaking", "writing", "replying"]):
@@ -173,8 +184,13 @@ def _detect_language(text: str) -> str:
         if all(ord(c) < 128 for c in text):
             if len(words) < 4 or len(text) < 20:
                 return "en"
-            # Prioritize English if common stop words or pronouns are present in ASCII text
-            common_english = {"the", "and", "of", "to", "in", "is", "that", "it", "for", "on", "are", "as", "with", "have", "from", "at", "an", "this", "by", "what", "how", "who", "where", "why", "which"}
+            # Prioritize English if common stop words, pronouns, or common query terms are present in ASCII text
+            common_english = {
+                "the", "and", "of", "to", "in", "is", "that", "it", "for", "on", "are", "as", "with", 
+                "have", "from", "at", "an", "this", "by", "what", "how", "who", "where", "why", "which",
+                "give", "me", "about", "create", "show", "tell", "write", "please", "information", 
+                "ai", "technology", "agent", "pdf", "docx", "xlsx", "pptx", "report", "file", "make"
+            }
             cleaned_words = {re.sub(r"[^\w]", "", w) for w in words}
             if cleaned_words & common_english:
                 return "en"
@@ -305,6 +321,11 @@ def _is_calculation_query(query: str) -> bool:
 def _needs_skill_routing(query: str) -> bool:
     """Detect queries that involve file formats or document creation which benefit from skill docs."""
     q = query.lower()
+    # Skill creation/management triggers
+    skill_management_words = ["create skill", "update skill", "delete skill", "manage skill", "skill creator", "new skill", "test skill"]
+    if any(sw in q for sw in skill_management_words):
+        return True
+
     # File format keywords
     file_keywords = [
         ".pdf", ".docx", ".xlsx", ".pptx", ".csv",
@@ -329,6 +350,7 @@ def _needs_skill_routing(query: str) -> bool:
     if any(kw in q for kw in ["design a webpage", "build a dashboard", "create a form", "html page", "web page", "landing page"]):
         return True
     return False
+
 
 
 def _has_live_finance_intent(query: str, domain: str, intent: str) -> bool:
@@ -570,12 +592,68 @@ def _build_agent_ctx(chat_ctx, context_parts, sources) -> str:
                 parts.append(part)
                 break
     if chat_ctx:
+        # Sanitize chat history: remove Action/Observation outputs to prevent agent confusion in the ReAct loop
+        sanitized_messages = []
+        for m in chat_ctx:
+            msg = m.get('message', '')
+            if not msg:
+                continue
+            lines = []
+            for line in msg.split("\n"):
+                line_strip = line.strip()
+                # Remove lines starting with ReAct loop syntax keys in history
+                if (line_strip.lower().startswith("action:") or 
+                    line_strip.lower().startswith("action input:") or 
+                    line_strip.lower().startswith("observation:")):
+                    continue
+                lines.append(line)
+            clean_msg = "\n".join(lines).strip()
+            if clean_msg:
+                sanitized_messages.append({
+                    "role": m["role"],
+                    "message": clean_msg
+                })
+
         chat_lines = "\n".join(
             f"{'User' if m['role'] == 'user' else 'AARKAA'}: {m['message'][:1500]}"
-            for m in chat_ctx
+            for m in sanitized_messages
         )
         parts.append(f"[Recent Conversation]\n{chat_lines}")
     return "\n\n".join(parts).strip()
+
+
+def _write_previous_message_file(chat_ctx):
+    if chat_ctx:
+        last_assistant_msg = None
+        for m in reversed(chat_ctx):
+            if m.get('role') == 'assistant':
+                msg = m.get('message', '')
+                if not msg:
+                    continue
+                # Skip messages containing PDF download links, tool actions, or short retry instructions
+                if "[Download " in msg or "/download/" in msg:
+                    continue
+                if "Action:" in msg or "Action Input:" in msg or "Observation:" in msg:
+                    continue
+                # Skip messages containing tool names or error signatures
+                if any(t in msg for t in ["FileReadTool", "BashTool", "FileEditTool", "GetSkillTool", "ListSkillsTool"]):
+                    continue
+                if "does not exist in the workspace" in msg or "not found" in msg.lower() or "error:" in msg.lower():
+                    continue
+                # Skip messages under 300 characters matching error/retry keywords
+                if len(msg.strip()) < 300 and any(w in msg.lower() for w in ["error", "fail", "already", "restart", "invalid", "exception", "failed"]):
+                    continue
+                last_assistant_msg = msg
+                break
+        if last_assistant_msg:
+            try:
+                from config import SAFE_WORK_DIR
+                work_dir = SAFE_WORK_DIR
+                work_dir.mkdir(parents=True, exist_ok=True)
+                with open(work_dir / "previous_message.txt", "w", encoding="utf-8") as f:
+                    f.write(last_assistant_msg)
+            except Exception as exc:
+                logger.error("Error writing previous_message.txt: %s", exc)
 
 
 # ─── Main Pipeline ───────────────────────────────────────────────────────────
@@ -659,8 +737,9 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
                     last_user_msg = msg["message"]
                     break
             if last_user_msg and last_user_msg.strip().lower() == query.strip().lower() and len(query) > 15:
-                logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
-                chat_ctx = None
+                if not any(w in query.lower() for w in ["pdf", "document", "previous", "report"]):
+                    logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
+                    chat_ctx = None
     except Exception as exc:
         logger.error("Memory context error: %s", exc)
 
@@ -838,6 +917,8 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
 
     if needs_agent:
         from modules import coordinator
+        # Proactively save previous message to previous_message.txt in case the agent reads it
+        _write_previous_message_file(chat_ctx)
         # DANGER: Do NOT pass Web or RAG context to the autonomous agent to prevent 4096 context window explosions.
         # The agent has its own WebSearchTool if it needs information. Only pass chat history + live finance context.
         agent_ctx = _build_agent_ctx(chat_ctx, context_parts, sources)
@@ -851,7 +932,15 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # Combine confidence (average of filter and primary)
     combined_confidence = (filter_confidence + primary_confidence) / 2
 
-    # ── 7–8. Store + auto-learn ───────────────────────────────────────────
+    # ── 7. In-depth Verification Pass ─────────────────────────────────────
+    try:
+        from modules.agents.verifier import verify_response
+        logger.info("Running verifier agent on final answer...")
+        final_answer = verify_response(query, final_answer)
+    except Exception as exc:
+        logger.error("Failed to run verifier agent on final answer: %s", exc)
+
+    # ── 8. Store + auto-learn (post-process) ──────────────────────────────
     main_source = sources[-1] if len(sources) > 1 else "aarkaa-3b"
     _post_process(
         user_id, session_id, query, final_answer,
@@ -945,8 +1034,9 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
                     last_user_msg = msg["message"]
                     break
             if last_user_msg and last_user_msg.strip().lower() == query.strip().lower() and len(query) > 15:
-                logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
-                chat_ctx = None
+                if not any(w in query.lower() for w in ["pdf", "document", "previous", "report"]):
+                    logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
+                    chat_ctx = None
     except Exception: pass
 
     # ── 4. Gather Context ─────────────────────────────────────────────────
@@ -1128,6 +1218,8 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     if needs_agent:
         from modules import coordinator
         import asyncio
+        # Proactively save previous message to previous_message.txt in case the agent reads it
+        _write_previous_message_file(chat_ctx)
         agent_ctx = _build_agent_ctx(chat_ctx, context_parts, sources)
         
         final_answer = ""
@@ -1149,18 +1241,34 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             full_response += token
             yield {"type": "content", "token": token}
 
-    # ── 7–8. Store + auto-learn (post-process) ───────────────────────────
+    # ── 7. Yield final stats IMMEDIATELY so the client can close the stream ─
     elapsed = round(time.perf_counter() - start, 3)
-    combined_confidence = (filter_confidence + 0.5) / 2
-    
-    _post_process(
-        user_id, session_id, query, full_response,
-        intent, combined_confidence, sources[-1],
-        memory, auto_learn,
-    )
-
-    # Yield final stats
     yield {"type": "final", "processing_time": elapsed}
+
+    # ── 8. Verification + post-process in background (non-blocking) ───────
+    # The verifier runs a full LLM inference pass (~30-60s on CPU) which
+    # previously blocked the SSE stream. Moving it to a background thread
+    # lets the client finish immediately while we improve the stored history.
+    combined_confidence = (filter_confidence + 0.5) / 2
+
+    def _background_verify_and_store():
+        verified_response = full_response
+        try:
+            from modules.agents.verifier import verify_response
+            logger.info("Running verifier agent on streamed response for database history...")
+            verified_response = verify_response(query, full_response)
+        except Exception as exc:
+            logger.error("Failed to run verifier agent on streamed response: %s", exc)
+
+        _post_process(
+            user_id, session_id, query, verified_response,
+            intent, combined_confidence, sources[-1],
+            memory, auto_learn,
+        )
+        logger.info("Background verify+store completed for query: %.60s...", query)
+
+    bg_thread = threading.Thread(target=_background_verify_and_store, daemon=True)
+    bg_thread.start()
 
 
 def _post_process(
