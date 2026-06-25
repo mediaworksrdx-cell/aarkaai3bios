@@ -5,10 +5,10 @@ import time
 import requests
 
 # ─── Configuration ────────────────────────────────────────────────────────────
-PEM_KEY = r"C:\Users\daarv\.ssh\id_ed25519"
-HOST = "194.68.245.29"
-PORT = 22168
-USER = "root"
+PEM_KEY = r"C:\Users\daarv\Downloads\aarkaai3b.pem"
+HOST = "3.223.192.194"
+PORT = 22
+USER = "ec2-user"
 REMOTE_DIR = "/workspace/aarkaai3b"
 ZIP_NAME = "aarkaai_update.zip"
 
@@ -34,6 +34,8 @@ FILES_TO_PACK = [
     "modules/semantic_filter.py",
     "modules/rag.py",
     "modules/coordinator.py",
+    "modules/gamma_domains.py",
+    "modules/gamma_charts.py",
     "modules/tools/__init__.py",
     "modules/tools/base.py",
     "modules/tools/bash.py",
