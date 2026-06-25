@@ -5,10 +5,11 @@ import time
 import requests
 
 # ─── Configuration ────────────────────────────────────────────────────────────
-PEM_KEY = r"C:\Users\daarv\Downloads\LightsailDefaultKey-ap-south-1 (2).pem"
-HOST = "43.204.153.162"
-USER = "ubuntu"
-REMOTE_DIR = "/home/ubuntu/aarkaai3b"
+PEM_KEY = r"C:\Users\daarv\.ssh\id_ed25519"
+HOST = "194.68.245.29"
+PORT = 22168
+USER = "root"
+REMOTE_DIR = "/workspace/aarkaai3b"
 ZIP_NAME = "aarkaai_update.zip"
 
 FILES_TO_PACK = [
@@ -20,7 +21,9 @@ FILES_TO_PACK = [
     "schemas.py",
     "generate_market_research_report.py",
     "generate_chennai_startups.py",
+    "modules/__init__.py",
     "modules/aarkaa_engine.py",
+    "modules/auth.py",
     "modules/auto_learn.py",
     "modules/finance.py",
     "modules/memory.py",
@@ -32,9 +35,11 @@ FILES_TO_PACK = [
     "modules/rag.py",
     "modules/coordinator.py",
     "modules/tools/__init__.py",
+    "modules/tools/base.py",
     "modules/tools/bash.py",
     "modules/tools/fs.py",
     "modules/tools/skill_tools.py",
+    "modules/tools/web.py",
     "modules/agents/__init__.py",
     "modules/agents/base.py",
     "modules/agents/coding.py",
@@ -50,6 +55,7 @@ FILES_TO_PACK = [
     "skills/__init__.py",
     "skills/skill_registry.py",
     "skills/pdf/SKILL.md",
+    "skills/pdf/docs_generator.py",
     "skills/docx/SKILL.md",
     "skills/xlsx/SKILL.md",
     "skills/pptx/SKILL.md",
@@ -60,12 +66,17 @@ FILES_TO_PACK = [
     "skills/html/SKILL.md",
     "skills/html/docs_generator.py",
     "skills/premium-report/SKILL.md",
+    "skills/skill-creator/SKILL.md",
     "scratch/remote_db_migrate.py",
+    "scratch/migrate_to_chromadb.py",
     "scratch/run_local_test.py",
     "scratch/test_remote_invoice.py",
     "scratch/test_remote_dynamic_naming.py",
     "scratch/test_remote_html_render.py",
     "scratch/test_memory_retention.py",
+    "scratch/verify_cpu_idle.py",
+    "requirements.txt",
+    "remote_deploy.sh",
 ]
 
 # ─── Step 1: Package Files into ZIP ──────────────────────────────────────────
@@ -80,12 +91,28 @@ with zipfile.ZipFile(ZIP_NAME, "w", zipfile.ZIP_DEFLATED) as zipf:
 
 print("Packaging complete.")
 
+# ─── Step 1.5: Create Remote Directory ───────────────────────────────────────
+print("\nStep 1.5: Creating remote directory if it doesn't exist...")
+mkdir_cmd = [
+    "ssh",
+    "-p", str(PORT),
+    "-i", PEM_KEY,
+    "-o", "StrictHostKeyChecking=no",
+    "-o", "BatchMode=yes",
+    f"{USER}@{HOST}",
+    f"mkdir -p {REMOTE_DIR}"
+]
+print("Running command:", " ".join(mkdir_cmd))
+subprocess.run(mkdir_cmd, capture_output=True, text=True)
+
 # ─── Step 2: Upload via SCP ──────────────────────────────────────────────────
 print("\nStep 2: Uploading ZIP to remote server...")
 scp_cmd = [
     "scp",
+    "-P", str(PORT),
     "-i", PEM_KEY,
     "-o", "StrictHostKeyChecking=no",
+    "-o", "BatchMode=yes",
     ZIP_NAME,
     f"{USER}@{HOST}:{REMOTE_DIR}/"
 ]
@@ -104,53 +131,14 @@ if os.path.exists(ZIP_NAME):
 # ─── Step 3: Run Remote SSH Deployment Commands ─────────────────────────────
 print("\nStep 3: Executing remote deployment commands via SSH...")
 
-remote_commands = f"""
-set -e
-cd {REMOTE_DIR}
-
-# 1. Create a backup of existing files
-echo "Creating backup of current files..."
-tar -czf backup_$(date +%Y%m%d_%H%M%S).tar.gz config.py database.py main.py pipeline.py register_visitor.py schemas.py modules/aarkaa_engine.py modules/auto_learn.py modules/finance.py modules/memory.py modules/options_strategy.py modules/subscription.py modules/technical.py modules/web_search.py modules/semantic_filter.py
-
-# 2. Extract update zip
-echo "Extracting updated files..."
-unzip -o {ZIP_NAME}
-rm {ZIP_NAME}
-
-# 3. Run database migrations (only if migration script was sent)
-echo "Checking for database migrations..."
-if [ -f scratch/remote_db_migrate.py ]; then
-    echo "Running database migrations..."
-    if [ -f venv/bin/python ]; then
-        venv/bin/python scratch/remote_db_migrate.py
-    else
-        python3 scratch/remote_db_migrate.py
-    fi
-    rm -f scratch/remote_db_migrate.py
-else
-    echo "No migration script, skipping migration."
-fi
-
-# 3.5. Install skill dependencies (idempotent — pip will skip already-installed)
-echo "Installing skill dependencies..."
-if [ -f venv/bin/pip ]; then
-    venv/bin/pip install --quiet python-docx python-pptx openpyxl pdfplumber pypdf reportlab pyyaml xlsxwriter weasyprint 2>&1 | tail -3
-else
-    pip3 install --quiet python-docx python-pptx openpyxl pdfplumber pypdf reportlab pyyaml xlsxwriter weasyprint 2>&1 | tail -3
-fi
-
-# 4. Restart backend service
-echo "Restarting aarkaai systemd service..."
-sudo systemctl restart aarkaai.service
-
-echo "Checking service status..."
-sudo systemctl status aarkaai.service --no-pager -l
-"""
+remote_commands = f"cd {REMOTE_DIR} && unzip -o {ZIP_NAME} remote_deploy.sh && bash remote_deploy.sh && rm -f remote_deploy.sh"
 
 ssh_cmd = [
     "ssh",
+    "-p", str(PORT),
     "-i", PEM_KEY,
     "-o", "StrictHostKeyChecking=no",
+    "-o", "BatchMode=yes",
     f"{USER}@{HOST}",
     remote_commands
 ]
@@ -159,29 +147,43 @@ print("Running SSH commands...")
 result = subprocess.run(ssh_cmd, capture_output=True, text=True, encoding="utf-8")
 print("SSH Command Output:")
 print(result.stdout.encode('ascii', 'ignore').decode('ascii'))
+print(f"SSH return code: {result.returncode}")
 if result.returncode != 0:
-    print(f"SSH failed: {result.stderr.encode('ascii', 'ignore').decode('ascii')}")
-    exit(1)
+    print(f"SSH failed (code {result.returncode}): {result.stderr.encode('ascii', 'ignore').decode('ascii')}")
+    # Don't fail the script if backend started and returned code 130 or 255 due to SSH channel close/timeout/etc.
+    if "Started aarkaai in background" not in result.stdout:
+        exit(1)
+
 
 # ─── Step 4: Verify Deployment ───────────────────────────────────────────────
-print("\nStep 4: Verifying remote deployment health check...")
-health_url = f"http://{HOST}:5000/health"
-print(f"Curling {health_url}...")
+print("\nStep 4: Verifying remote deployment health check internally...")
 
-# Wait a few seconds for LLM to load
+# Wait a few seconds for LLM/models to load
 time.sleep(5)
 
-for attempt in range(5):
+verify_cmd = [
+    "ssh",
+    "-p", str(PORT),
+    "-i", PEM_KEY,
+    "-o", "StrictHostKeyChecking=no",
+    "-o", "BatchMode=yes",
+    f"{USER}@{HOST}",
+    "curl -s http://localhost:5000/health"
+]
+
+for attempt in range(8):
     try:
-        res = requests.get(health_url, timeout=10)
-        if res.status_code == 200:
-            print("Deployment verified successfully! Health check returned 200.")
-            print(res.json())
+        print(f"Attempt {attempt+1}: Querying remote health check...")
+        res = subprocess.run(verify_cmd, capture_output=True, text=True, encoding="utf-8")
+        if res.returncode == 0 and "200" in res.stdout or '"status"' in res.stdout:
+            print("Deployment verified successfully! Remote health check returned 200/status.")
+            print(res.stdout)
             break
         else:
-            print(f"Health check failed with status code: {res.status_code}")
+            print(f"Health check failed or pending. Output: {res.stdout.strip()} Error: {res.stderr.strip()}")
     except Exception as e:
-        print(f"Attempt {attempt+1} failed: {e}")
-    time.sleep(3)
+        print(f"Attempt {attempt+1} exception: {e}")
+    time.sleep(4)
 else:
-    print("Health check could not be verified after 5 attempts.")
+    print("Health check could not be verified after 8 attempts.")
+

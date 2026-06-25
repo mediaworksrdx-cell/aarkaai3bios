@@ -13,6 +13,15 @@ Endpoints:
 """
 from __future__ import annotations
 
+import os
+
+# Prevent OpenMP and MKL thread conflicts that cause segmentation faults
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 # Import llama_cpp first to avoid DLL loading conflicts on Windows when torch/sentence-transformers are imported first
 try:
     import llama_cpp
@@ -20,7 +29,6 @@ except ImportError:
     pass
 
 import logging
-import os
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -95,7 +103,7 @@ def _init_modules() -> None:
         from sentence_transformers import SentenceTransformer
         from config import EMBEDDING_MODEL_NAME
 
-        _st_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+        _st_model = SentenceTransformer(EMBEDDING_MODEL_NAME, device="cpu")
         embed_fn = lambda text: _st_model.encode(text, normalize_embeddings=True)  # noqa: E731
         _module_status["embeddings"] = "ok"
         logger.info("✓ Embedding model loaded (%s)", EMBEDDING_MODEL_NAME)
@@ -429,6 +437,32 @@ def download_file(filename: str):
 
     # Check if the file exists and is indeed a file
     if not file_path.is_file():
+        # Fallback: check for files in the same directory that might match the request
+        # (e.g. requested 'chennai_startups.pdf' but actual is 'chennai_tech_startups.pdf')
+        try:
+            import re
+            req_words = [w for w in re.split(r'[^a-zA-Z0-9]', Path(filename).stem.lower()) if len(w) > 2]
+            req_suffix = Path(filename).suffix.lower()
+            
+            best_match = None
+            best_score = 0
+            
+            for child in safe_dir.iterdir():
+                if child.is_file() and child.suffix.lower() == req_suffix:
+                    child_words = [w for w in re.split(r'[^a-zA-Z0-9]', child.stem.lower()) if len(w) > 2]
+                    overlap = set(req_words) & set(child_words)
+                    score = len(overlap)
+                    if score > best_score:
+                        best_score = score
+                        best_match = child
+                        
+            if best_match and best_score >= 1:
+                file_path = best_match
+                filename = best_match.name
+        except Exception:
+            pass
+
+    if not file_path.is_file():
         raise HTTPException(
             status_code=404,
             detail=f"File '{filename}' not found."
@@ -440,6 +474,56 @@ def download_file(filename: str):
         filename=filename,
         media_type="application/octet-stream"
     )
+
+
+@app.post("/upload", tags=["core"])
+async def upload_file(file: fastapi.UploadFile = fastapi.File(...)):
+    """
+    Upload a document/file to AARKAAI's sandboxed SAFE_WORK_DIR (workspace).
+    """
+    from pathlib import Path
+    from config import SAFE_WORK_DIR
+    import shutil
+
+    # Sanitize the filename to prevent traversal attacks
+    filename = Path(file.filename).name
+    if not filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    safe_dir = Path(SAFE_WORK_DIR).resolve()
+    target_path = safe_dir / filename
+
+    try:
+        with open(target_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as exc:
+        logger.error("Failed to save uploaded file: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(exc)}")
+
+    return {
+        "status": "success",
+        "filename": filename,
+        "path": f"/download/{filename}",
+    }
+
+
+@app.get("/subscription", tags=["premium"])
+def get_user_subscription(current_user=fastapi.Depends(modules.auth.get_current_user)):
+    """Get the current user's subscription details."""
+    from modules.subscription import get_subscription_info
+    return get_subscription_info(current_user.id)
+
+
+@app.post("/subscription/upgrade", tags=["premium"])
+def upgrade_user_subscription(current_user=fastapi.Depends(modules.auth.get_current_user)):
+    """Upgrade the current user to premium tier."""
+    from modules.subscription import upgrade_user
+    try:
+        upgrade_user(current_user.id, months=1)
+        return {"status": "success", "message": "User upgraded to premium."}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
 
 
 @app.get("/metrics", tags=["info"])
@@ -657,6 +741,105 @@ def submit_rlhf_feedback(
     except Exception as exc:
         logger.error("RLHF error: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+from pydantic import BaseModel
+
+class SkillModel(BaseModel):
+    name: str
+    content: str
+
+@app.get("/skills", tags=["skills"])
+def api_list_skills(current_user=fastapi.Depends(modules.auth.get_current_user)):
+    """List all available skills (names and descriptions)."""
+    from modules.tools.skill_tools import get_registry
+    registry = get_registry()
+    if not registry:
+        raise HTTPException(status_code=500, detail="Skill registry not initialized.")
+    return registry.list_skills()
+
+@app.post("/skills", tags=["skills"])
+def api_create_skill(req: SkillModel, current_user=fastapi.Depends(modules.auth.get_current_user)):
+    """Create a new custom skill."""
+    from modules.tools.skill_tools import get_registry
+    registry = get_registry()
+    if not registry:
+        raise HTTPException(status_code=500, detail="Skill registry not initialized.")
+    user_id = str(current_user.id)
+    result = registry.create_skill(req.name, req.content, user_id=user_id)
+    if result.startswith("Error"):
+        raise HTTPException(status_code=400, detail=result)
+    return {"status": "success", "message": result}
+
+@app.get("/skills/{name}", tags=["skills"])
+def api_get_skill(name: str, current_user=fastapi.Depends(modules.auth.get_current_user)):
+    """Fetch the full content of a skill."""
+    from modules.tools.skill_tools import get_registry
+    registry = get_registry()
+    if not registry:
+        raise HTTPException(status_code=500, detail="Skill registry not initialized.")
+    content = registry.get_skill(name)
+    if content.startswith("Error"):
+        raise HTTPException(status_code=404, detail=content)
+    return {"name": name, "content": content}
+
+@app.put("/skills/{name}", tags=["skills"])
+def api_update_skill(name: str, req: SkillModel, current_user=fastapi.Depends(modules.auth.get_current_user)):
+    """Update an existing custom skill."""
+    from modules.tools.skill_tools import get_registry
+    registry = get_registry()
+    if not registry:
+        raise HTTPException(status_code=500, detail="Skill registry not initialized.")
+    user_id = str(current_user.id)
+    result = registry.update_skill(name, req.content, user_id=user_id)
+    if result.startswith("Error"):
+        raise HTTPException(status_code=400, detail=result)
+    return {"status": "success", "message": result}
+
+class TestRequestModel(BaseModel):
+    prompt: str
+
+@app.post("/skills/{name}/test", tags=["skills"])
+def api_test_skill(name: str, req: TestRequestModel, current_user=fastapi.Depends(modules.auth.get_current_user)):
+    """Run a test prompt using a specific skill."""
+    from modules.tools.skill_tools import get_registry
+    registry = get_registry()
+    if not registry:
+        raise HTTPException(status_code=500, detail="Skill registry not initialized.")
+    
+    skill_content = registry.get_skill(name)
+    if skill_content.startswith("Error:"):
+        raise HTTPException(status_code=404, detail=skill_content)
+    
+    from modules.coordinator import stream_task
+    import json
+    
+    context = f"You are testing the custom user skill '{name}'. Below are the guidelines/code templates from the skill:\n\n{skill_content}"
+    
+    async def event_generator():
+        try:
+            # stream_task yields status/final data chunks
+            for event_type, data in stream_task(req.prompt, context=context):
+                yield f"data: {json.dumps({'type': event_type, 'data': data})}\n\n"
+        except Exception as exc:
+            logger.error("Skill test execution error: %s", exc, exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.delete("/skills/{name}", tags=["skills"])
+def api_delete_skill(name: str, current_user=fastapi.Depends(modules.auth.get_current_user)):
+    """Delete a custom skill."""
+    from modules.tools.skill_tools import get_registry
+    registry = get_registry()
+    if not registry:
+        raise HTTPException(status_code=500, detail="Skill registry not initialized.")
+    user_id = str(current_user.id)
+    result = registry.delete_skill(name, user_id=user_id)
+    if result.startswith("Error"):
+        raise HTTPException(status_code=400, detail=result)
+    return {"status": "success", "message": result}
 
 
 @app.get("/admin/stats", tags=["admin"])

@@ -70,6 +70,9 @@ class BashTool(Tool):
                 cmd_normalized = re.sub(r'^pip3?\b(?!-)', lambda m: pip_exe, cmd_normalized)
                 cmd_normalized = re.sub(r'(?<=[&|; ])pip3?\b(?!-)', lambda m: pip_exe, cmd_normalized)
 
+            sub_env = os.environ.copy()
+            sub_env["PYTHONPATH"] = str(work_dir.parent)
+
             result = subprocess.run(
                 cmd_normalized,
                 shell=True,  # Keep shell=True for complex commands (pipes, redirects)
@@ -79,6 +82,7 @@ class BashTool(Tool):
                 text=True,
                 timeout=BASH_TIMEOUT,
                 cwd=str(work_dir),
+                env=sub_env,
             )
             output = ""
             if result.stdout:
