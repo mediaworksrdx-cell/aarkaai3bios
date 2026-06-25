@@ -123,14 +123,38 @@ TEMPLATES = {
 
 def get_detailed_section(topic: str, section_title: str, prompt_hint: str) -> str:
     """
-    Use the local llama.cpp model to generate a rich, high-density paragraph (at least 6 detailed sentences)
-    for a specific section, ensuring excellent detail without overloading.
+    Use the local llama.cpp model to generate a rich, high-density paragraph tailored to the specific
+    domain of the topic.
     """
     from modules import aarkaa_engine
+    from modules.gamma_domains import detect_domain, DOMAIN_REGISTRY
+    
+    domain = detect_domain(topic)
+    
+    # Tailor LLM System Prompts by Domain
+    prompts = {
+        "vc": "You are a Senior Venture Capital Partner writing a high-density ecosystem intelligence report. Use VC metrics like ARR, runway, CAC, LTV, dilution, valuation multiple, and seed/Series-A dynamics. ",
+        "equity": "You are a lead Wall Street Equity Research Analyst writing an institutional stock research report. Use financial metrics like P/E ratio, PEG, EBITDA margins, Free Cash Flow, discounted cash flows, and valuation multiples. ",
+        "options": "You are a Quantitative Options Strategist writing a derivative risk and yield report. Use terms like Option Greeks (Delta, Gamma, Theta, Vega), implied volatility skew, margin requirements, max pain, and hedging. ",
+        "ml": "You are a Principal AI Scientist writing a deep technical machine learning and architecture report. Use terms like parameters, quantization (INT4/FP8), perplexity, latency, FLOPS, fine-tuning, and model architectures. ",
+        "crypto": "You are a Quantitative Cryptocurrency Researcher writing a protocol and ledger security report. Use terms like consensus protocols, gas fees, staking yields, validator nodes, smart contract logic, and Layer-2 rollups. ",
+        "macro": "You are an IMF Chief Economist writing a global macroeconomic and monetary policy report. Use terms like GDP growth, core inflation, yield curve inversion, Fed funds rate, interest rates, and trade balance. ",
+        "healthcare": "You are a Digital Health Chief Medical Officer writing a clinical systems optimization report. Use terms like bed utilization, patient readmission, EHR integration, telehealth throughput, and clinical staffing. ",
+        "cybersecurity": "You are an Enterprise Chief Information Security Officer (CISO) writing a zero-trust network risk report. Use terms like intrusion block rates, mean time to detection (MTTD), patch latency, phishing resilience, and NIST compliance. ",
+        "esg": "You are a Chief Sustainability Officer writing a corporate ESG and climate technology report. Use terms like carbon abatement, ESG rating scores, renewable generation mix, EU taxonomy compliance, and green capex. ",
+        "realestate": "You are a Managing Director of a commercial REIT writing a real estate valuation report. Use terms like portfolio occupancy, net asset value (NAV), cap rate yields, weighted average lease term (WALT), and LTV. ",
+        "manufacturing": "You are a VP of Industrial Operations writing an advanced manufacturing and automation report. Use terms like Overall Equipment Effectiveness (OEE), cycle times, Six Sigma quality yields, predictive maintenance, and robotic integration. ",
+        "supplychain": "You are a Chief Logistics Officer writing a global supply chain resilience report. Use terms like logistics velocity, inventory turns, supplier SLA compliance, on-time delivery, and freight cost consolidation. ",
+        "pharma": "You are a VP of Clinical R&D writing a pharmaceutical drug development report. Use terms like clinical trial phases, FDA fast-track approval rates, molecular screening, pathology, and patent expiry risk. ",
+        "energy": "You are a Smart Grid Infrastructure Director writing an energy grid load optimization report. Use terms like grid capacity (GW), renewable generation mix, grid-scale battery storage (GWh), generation cost per MWh, and DERMS. ",
+        "corporate": "You are a McKinsey Senior Partner writing a high-density corporate strategy report. Use structured framework terms like MECE, porter's five forces, value chains, and synergy levers. "
+    }
+    
+    system_prompt = prompts.get(domain, prompts["corporate"])
     
     prompt = (
         f"<|im_start|>system\n"
-        f"You are a professional research analyst writing a high-density, authoritative business report.\n"
+        f"{system_prompt}"
         f"Generate a single, comprehensive, highly detailed paragraph of exactly 6 to 8 long, professional sentences "
         f"about '{section_title}' in the context of the report topic '{topic}'.\n"
         f"Focus on practical details, market dynamics, concrete examples, and strategic implications.\n"
@@ -142,6 +166,7 @@ def get_detailed_section(topic: str, section_title: str, prompt_hint: str) -> st
         f"Context to cover: {prompt_hint}\n"
         f"Detailed Paragraph:<|im_end|>\n"
         f"<|im_start|>assistant\n"
+        f"Detailed Paragraph:"
     )
     try:
         response = aarkaa_engine.generate_raw(prompt=prompt, max_new_tokens=400)
@@ -151,101 +176,25 @@ def get_detailed_section(topic: str, section_title: str, prompt_hint: str) -> st
             raise ValueError("Generated text is too short")
         return clean_text
     except Exception as e:
-        logger.warning(f"LLM section generation failed: {e}. Using high-density professional fallback.")
+        logger.warning(f"LLM section generation failed: {e}. Using domain-specific high-density fallback.")
         
-        # High-density, professional fallback templates to ensure at least 300-400 words per page
-        fallbacks = {
-            "Executive Summary & Framework": (
-                f"The comprehensive evaluation of the {topic} sector reveals a profound paradigm shift, driven by "
-                f"accelerating technology adoption vectors, evolving consumer demand, and restructuring regulatory frameworks. "
-                f"To remain competitive in this fast-moving landscape, market participants must aggressively adapt their core "
-                f"operational architectures, integrate scalable digital resources, and optimize capital allocation strategies. "
-                f"A robust analytical framework is essential for navigating these multi-dimensional changes, allowing firms "
-                f"to identify untapped value drivers while simultaneously mitigating systemic integration risks. "
-                f"Furthermore, the integration of intelligent agent systems and automated reasoning tools is transitioning "
-                f"from a luxury to a critical operational necessity. Organizations that fail to establish a resilient, "
-                f"data-driven foundation face immediate obsolescence as competitors leverage high-velocity decision cycles "
-                f"and automated scaling models. Ultimately, our core thesis posits that long-term enterprise value is directly "
-                f"proportional to the agility of a firm's digital infrastructure and its capacity for continuous, automated "
-                f"optimization. By aligning organizational workflows with state-of-the-art computational tools, forward-looking "
-                f"enterprises can secure an insurmountable competitive moat, optimize resource distribution pipelines, and "
-                f"ensure sustained capital efficiency across all major business lines."
-            ),
-            "Market Analysis & Sector Segmentation": (
-                f"A rigorous, multi-layered market analysis of the {topic} ecosystem highlights substantial structural "
-                f"transformations across all primary, secondary, and tertiary sector segments. Current macroeconomic indicators "
-                f"suggest a significant reallocation of institutional capital away from legacy frameworks and toward highly "
-                f"agile, software-defined platforms. This shift is characterized by a growing polarization between first-mover "
-                f"innovators who capture exponential market share and late-stage adopters struggling with technical debt. "
-                f"Sector segmentation reveals that high-value niches are expanding rapidly, driven by localized demand signals "
-                f"and specialized product offerings that address precise customer pain points. Concurrently, competitive dynamics "
-                f"are intensifying as cross-industry partnerships and platform integration redefine traditional value chains. "
-                f"Understanding these shifting dynamics requires a granular examination of asset allocation trends, consumer "
-                f"behavioral shifts, and supply-side constraints. Industry leaders are increasingly utilizing advanced machine "
-                f"learning models to perform real-time predictive analytics on market trajectories, thereby optimizing inventory, "
-                f"pricing, and customer acquisition channels. Moving forward, the capability to quickly interpret complex "
-                f"market signals and translate them into actionable, localized strategies will differentiate highly successful "
-                f"operators from their less-agile peers, laying the groundwork for sustainable ecosystem leadership."
-            ),
-            "Quantitative Performance & Revenue Velocity": (
-                f"Analyzing the quantitative performance metrics of the {topic} sector demonstrates a clear correlation "
-                f"between technological integration and compounding revenue velocity. Key financial indicators, including "
-                f"annual recurring revenue, net revenue retention, and customer lifetime value, showcase strong upward trends "
-                f"among organizations that have fully embraced digital transformation. This financial outperformance is "
-                f"primarily driven by operational leverage, where software-defined scaling allows for exponential growth "
-                f"without a corresponding linear increase in overhead expenses. Quarter-on-quarter performance benchmarks "
-                f"reveal that top-quartile firms are experiencing accelerated growth rates, fueled by high-velocity customer "
-                f"acquisition and successful expansion into adjacent geographic markets. Conversely, firms relying on manual "
-                f"processes are encountering severe margin compression due to rising labor costs and operational inefficiencies. "
-                f"Capital efficiency remains a critical metric, with leading enterprises achieving optimal ratios by automating "
-                f"routine transaction pipelines, deploying dynamic pricing algorithms, and utilizing predictive maintenance. "
-                f"As market saturation increases, maintaining high revenue velocity will require continuous product innovation, "
-                f"disciplined cost controls, and strategic mergers and acquisitions designed to capture incremental market share "
-                f"and maximize shareholder returns."
-            ),
-            "Operational Efficiency & Infrastructure": (
-                f"The operational infrastructure supporting the {topic} sector is undergoing a massive reconfiguration, "
-                f"centered on maximizing throughput, minimizing latency, and ensuring continuous platform availability. "
-                f"Modern logistics pipelines are highly distributed, requiring sophisticated coordination mechanisms to manage "
-                f"real-time data flows, physical supply chains, and computational resource allocation. By transitioning to "
-                f"serverless architectures, edge computing nodes, and automated containerization, enterprises can significantly "
-                f"reduce their operational footprint while improving scalability. Furthermore, the deployment of intelligent "
-                f"monitoring tools and automated self-healing protocols allows organizations to detect and resolve system "
-                f"bottlenecks before they impact end-users. Operational efficiency benchmarks indicate that firms utilizing "
-                f"continuous integration and automated deployment pipelines achieve substantially higher release frequencies "
-                f"and lower failure rates compared to traditional operators. This operational excellence translates directly "
-                f"into enhanced customer satisfaction, lower churn rates, and superior unit economics. Long-term operational "
-                f"resilience will depend on the continuous refinement of these automated frameworks, ensuring that infrastructure "
-                f"can dynamically adapt to shifting workloads, traffic spikes, and evolving security compliance mandates."
-            ),
-            "Risk Analysis, Vulnerability & Strategic Outlook": (
-                f"A comprehensive risk assessment of the {topic} landscape identifies several critical vulnerability vectors "
-                f"that organizations must proactively address to safeguard their market position. Chief among these risks are "
-                f"shifting regulatory compliance standards, cybersecurity threats targeting distributed nodes, and potential "
-                f"disruptions in global supply chains. Implementing a robust, multi-layered defensive posture is essential "
-                f"for mitigating these threats, combining real-time threat detection, rigorous data encryption, and redundant "
-                f"operational pathing. Concurrently, strategic planning must account for rapid technological obsolescence, "
-                f"ensuring that product roadmaps remain flexible and aligned with long-term ecosystem trends. Our strategic "
-                f"outlook suggests that the coming decade will be characterized by intense consolidation, with dominant platforms "
-                f"absorbing smaller niche players to build comprehensive, end-to-end service suites. Organizations that "
-                f"prioritize security, regulatory alignment, and proactive risk management will be well-positioned to navigate "
-                f"this volatility, transforming potential threats into unique competitive advantages. By maintaining a disciplined "
-                f"approach to capital preservation and strategic investment, enterprises can ensure long-term viability and "
-                f"deliver sustained value to all stakeholders."
-            )
-        }
-        return fallbacks.get(section_title, (
-            f"The thorough exploration of {section_title} within the {topic} ecosystem highlights a series of complex, "
-            f"interdependent factors that are reshaping the industry landscape. To maintain a competitive edge, organizations "
-            f"must continuously evaluate their strategic objectives, operational capabilities, and technological infrastructure. "
-            f"By fostering a culture of continuous learning, agile adaptation, and data-driven decision-making, enterprises "
-            f"can successfully navigate market uncertainties and capture emerging growth opportunities. Ultimately, the path "
-            f"to sustainable success lies in the seamless integration of advanced computational tools, robust risk management "
-            f"frameworks, and a relentless focus on delivering superior value to customers, partners, and stakeholders alike. "
-            f"Through disciplined execution and strategic foresight, modern enterprises can build highly resilient operational "
-            f"models that thrive in even the most volatile and competitive global markets, securing long-term leadership "
-            f"and driving substantial economic impact across the entire value chain."
-        ))
+        # Select correct domain dictionary, fallback to corporate
+        domain_dict = DOMAIN_REGISTRY.get(domain, DOMAIN_REGISTRY["corporate"])
+        fallback_text = domain_dict["fallbacks"].get(section_title)
+        if not fallback_text:
+            fallback_text = DOMAIN_REGISTRY["corporate"]["fallbacks"].get(section_title, (
+                f"The thorough exploration of {section_title} within the {topic} ecosystem highlights a series of complex, "
+                f"interdependent factors that are reshaping the industry landscape. To maintain a competitive edge, organizations "
+                f"must continuously evaluate their strategic objectives, operational capabilities, and technological infrastructure. "
+                f"By fostering a culture of continuous learning, agile adaptation, and data-driven decision-making, enterprises "
+                f"can successfully navigate market uncertainties and capture emerging growth opportunities. Ultimately, the path "
+                f"to sustainable success lies in the seamless integration of advanced computational tools, robust risk management "
+                f"frameworks, and a relentless focus on delivering superior value to customers, partners, and stakeholders alike. "
+                f"Through disciplined execution and strategic foresight, modern enterprises can build highly resilient operational "
+                f"models that thrive in even the most volatile and competitive global markets, securing long-term leadership "
+                f"and driving substantial economic impact across the entire value chain."
+            ))
+        return fallback_text
 
 def render_chart_html(chart_data: dict, class_name: str = "chart-img") -> str:
     """
@@ -262,8 +211,14 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     Orchestrate the full 6-page Gamma-style PDF generation, using the selected template style.
     """
     logger.info(f"Starting Gamma PDF generation for topic: {topic} using template: {template}")
+    from modules.gamma_domains import detect_domain, DOMAIN_REGISTRY
     
-    # Resolve template styles
+    domain = detect_domain(topic)
+    domain_profile = DOMAIN_REGISTRY[domain]
+    
+    # Auto-resolve template based on domain if the default "indigo" or an invalid template is passed
+    if template == "indigo" and domain_profile["template"] != "indigo":
+        template = domain_profile["template"]
     t = TEMPLATES.get(template.lower(), TEMPLATES["indigo"])
     
     # Get SAFE_WORK_DIR for writing separate chart files
@@ -277,12 +232,12 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     cover_img = get_aarkavision_image_resource(cover_prompt, "cover_illustration", charts_dir)
     
     # ── Generate 5 premium matplotlib data charts ────────────────────────────
-    logger.info("Generating 5 premium matplotlib charts...")
-    chart1 = generate_bar_chart(topic, charts_dir)       # Revenue growth bars
-    chart2 = generate_line_chart(topic, charts_dir)       # Multi-line KPI trends
-    chart3 = generate_donut_chart(topic, charts_dir)      # Sector allocation donut
-    chart4 = generate_hbar_chart(topic, charts_dir)       # Efficiency benchmarks
-    chart5 = generate_area_chart(topic, charts_dir)       # Risk exposure area
+    logger.info(f"Generating 5 premium matplotlib charts for domain {domain}...")
+    chart1 = generate_bar_chart(topic, charts_dir, domain=domain)       # Revenue growth bars
+    chart2 = generate_line_chart(topic, charts_dir, domain=domain)      # Multi-line KPI trends
+    chart3 = generate_donut_chart(topic, charts_dir, domain=domain)     # Sector allocation donut
+    chart4 = generate_hbar_chart(topic, charts_dir, domain=domain)      # Efficiency benchmarks
+    chart5 = generate_area_chart(topic, charts_dir, domain=domain)      # Risk exposure area
 
     # ── Generate or use pre-generated 5 high-density section paragraphs ──────
     if sections and len(sections) == 5:
@@ -296,9 +251,48 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
         sec4 = get_detailed_section(topic, "Operational Efficiency & Architecture", "Infrastructure layout, logistical pipelines, efficiency metrics, and cost-to-output optimization.")
         sec5 = get_detailed_section(topic, "Risk Analysis, Vulnerability & Strategic Outlook", "Defensive positioning, regulatory compliance, risk distribution, and long-term ecosystem forecasts.")
 
+    # ── Resolve Registry-Driven Variables for HTML Injection ─────────────────
+    c_kpis = domain_profile["cover_kpis"]
+    d_kpis = domain_profile["dashboard_kpis"]
+    
+    # Brand logos
+    brand_html = []
+    for b in domain_profile["brand_logos"]:
+        if b["type"] == "rect":
+            icon_svg = f'<rect x="0" y="0" width="12" height="12" fill="{b["color"]}" rx="2"/>'
+        elif b["type"] == "diamond":
+            icon_svg = f'<polygon points="6,0 12,6 6,12 0,6" fill="{b["color"]}"/>'
+        else:
+            icon_svg = f'<polygon points="6,0 11,3 11,9 6,12 1,9 1,3" fill="{b["color"]}"/>'
+        brand_html.append(f"""
+        <div style="display: flex; align-items: center; gap: 3px; float: left; margin-right: 8px; margin-bottom: 4px;">
+            <svg width="12" height="12" viewBox="0 0 12 12" style="max-height:12px; display:inline-block; vertical-align:middle;">{icon_svg}</svg>
+            <span style="font-size: 8px; font-weight: 900; color: #475569; vertical-align:middle;">{b["name"]}</span>
+        </div>
+        """)
+    brand_logos_rendered = "".join(brand_html)
+    
+    # Timeline
+    t_m = domain_profile["timeline"]
+    
+    # Table rendering
+    table_headers = "".join([f'<th style="padding: 3px; border: 1px solid #E2E8F0;">{h}</th>' for h in domain_profile["table"]["headers"]])
+    table_rows = []
+    for row in domain_profile["table"]["rows"]:
+        row_html = []
+        for idx, cell in enumerate(row):
+            align = "text-align: left; font-weight: bold;" if idx == 0 else ""
+            bg = "background: #D1FAE5; color: #065F46; font-weight: bold;" if any(w in cell.lower() for w in ["high", "buy", "elite", "approved", "leader"]) else (
+                "background: #FEF3C7; color: #92400E;" if "med" in cell.lower() else (
+                    "background: #FEE2E2; color: #991B1B; font-weight: bold;" if any(w in cell.lower() for w in ["low", "slow"]) else ""
+                )
+            )
+            row_html.append(f'<td style="padding: 3px; border: 1px solid #E2E8F0; {align} {bg}">{cell}</td>')
+        table_rows.append(f'<tr>{"".join(row_html)}</tr>')
+    table_rows_rendered = "".join(table_rows)
+
     # HTML template with dynamic styling from selected template and large typography (body size 16px)
     html_content = f"""<!DOCTYPE html>
-<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -334,7 +328,7 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
         size: A4;
         margin: 16mm 14mm 14mm 14mm;
         @top-left {{
-            content: "AARKAA INTELLIGENCE  |  REPORT ID: ARK-2026-CHN-098";
+            content: "AARKAA INTELLIGENCE  |  {domain_profile["name"].upper()}";
             font-family: system-ui, sans-serif;
             font-size: 8px;
             font-weight: 700;
@@ -342,7 +336,7 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
             letter-spacing: 1px;
         }}
         @top-right {{
-            content: "CONFIDENTIAL BUSINESS REPORT  |  v3.1.0";
+            content: "CONFIDENTIAL RESEARCH REPORT  |  v3.2.0";
             font-family: system-ui, sans-serif;
             font-size: 8px;
             font-weight: 700;
@@ -430,12 +424,6 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
         padding: 2.5px 8px;
         border-radius: 9999px;
         margin-bottom: 10px;
-    }}
-    .badge-icon {{
-        margin-right: 4px;
-        width: 10px;
-        height: 10px;
-        fill: currentColor;
     }}
     
     .callout {{
@@ -623,16 +611,16 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
 
         <div style="display: flex; gap: 16px; margin-bottom: 16px; max-width: 600px;">
             <div style="flex: 1; background: #F8FAFC; border-left: 3px solid {t["primary_color"]}; padding: 6px 12px; border-radius: 0 6px 6px 0;">
-                <span style="font-size: 9px; font-weight: 700; color: #64748B; text-transform: uppercase;">Est. Market Size</span>
-                <div style="font-size: 18px; font-weight: 800; color: #0F172A;">$1.85 Billion</div>
+                <span style="font-size: 9px; font-weight: 700; color: #64748B; text-transform: uppercase;">{c_kpis[0]["label"]}</span>
+                <div style="font-size: 18px; font-weight: 800; color: #0F172A;">{c_kpis[0]["val"]}</div>
             </div>
             <div style="flex: 1; background: #F8FAFC; border-left: 3px solid {t["secondary_color"]}; padding: 6px 12px; border-radius: 0 6px 6px 0;">
-                <span style="font-size: 9px; font-weight: 700; color: #64748B; text-transform: uppercase;">Ecosystem CAGR</span>
-                <div style="font-size: 18px; font-weight: 800; color: #0F172A;">+22.4% YoY</div>
+                <span style="font-size: 9px; font-weight: 700; color: #64748B; text-transform: uppercase;">{c_kpis[1]["label"]}</span>
+                <div style="font-size: 18px; font-weight: 800; color: #0F172A;">{c_kpis[1]["val"]}</div>
             </div>
             <div style="flex: 1; background: #F8FAFC; border-left: 3px solid #8B5CF6; padding: 6px 12px; border-radius: 0 6px 6px 0;">
-                <span style="font-size: 9px; font-weight: 700; color: #64748B; text-transform: uppercase;">Startup density</span>
-                <div style="font-size: 18px; font-weight: 800; color: #0F172A;">240+ Active</div>
+                <span style="font-size: 9px; font-weight: 700; color: #64748B; text-transform: uppercase;">{c_kpis[2]["label"]}</span>
+                <div style="font-size: 18px; font-weight: 800; color: #0F172A;">{c_kpis[2]["val"]}</div>
             </div>
         </div>
 
@@ -648,11 +636,11 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
         </div>
         <div>
             <strong style="color: #0F172A; display: block; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 1px;">METADATA</strong>
-            ID: ARK-2026-CHN-098  •  v3.1.0
+            ID: ARK-2026-CHN-098  •  v3.2.0
         </div>
         <div>
             <strong style="color: #0F172A; display: block; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 1px;">GENERATED ON</strong>
-            June 25, 2026  •  20:36
+            June 26, 2026  •  03:55
         </div>
     </div>
 </div>
@@ -671,24 +659,24 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     
     <div class="kpi-container">
         <div class="kpi-card">
-            <div class="kpi-label">Market Velocity</div>
-            <div class="kpi-val">$1.85B</div>
-            <div class="kpi-change">▲ +22.4% CAGR</div>
+            <div class="kpi-label">{d_kpis[0]["label"]}</div>
+            <div class="kpi-val">{d_kpis[0]["val"]}</div>
+            <div class="kpi-change">{d_kpis[0]["change"]}</div>
         </div>
         <div class="kpi-card">
-            <div class="kpi-label">Ecosystem Funding</div>
-            <div class="kpi-val">$480M</div>
-            <div class="kpi-change">▲ +18.7% YoY</div>
+            <div class="kpi-label">{d_kpis[1]["label"]}</div>
+            <div class="kpi-val">{d_kpis[1]["val"]}</div>
+            <div class="kpi-change">{d_kpis[1]["change"]}</div>
         </div>
         <div class="kpi-card">
-            <div class="kpi-label">Ecosystem Density</div>
-            <div class="kpi-val">242 Co.</div>
-            <div class="kpi-change">▲ +35 Net New</div>
+            <div class="kpi-label">{d_kpis[2]["label"]}</div>
+            <div class="kpi-val">{d_kpis[2]["val"]}</div>
+            <div class="kpi-change">{d_kpis[2]["change"]}</div>
         </div>
         <div class="kpi-card">
-            <div class="kpi-label">Risk/Opp. Score</div>
-            <div class="kpi-val">84 / 34</div>
-            <div class="kpi-change" style="color: #8B5CF6;">Strong Buy</div>
+            <div class="kpi-label">{d_kpis[3]["label"]}</div>
+            <div class="kpi-val">{d_kpis[3]["val"]}</div>
+            <div class="kpi-change" style="color: #8B5CF6;">{d_kpis[3]["change"]}</div>
         </div>
     </div>
 
@@ -703,11 +691,11 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
                 <div style="font-size: 12px; color: #334155; line-height: 1.5;">
                     <div style="margin-bottom: 4px; display: flex; align-items: flex-start; gap: 6px;">
                         <span style="color: #10B981; font-weight: 900;">[✔]</span>
-                        <span>Optimize compute infrastructure by consolidating model pipelines into Guindy/OMR hubs.</span>
+                        <span>Deploy optimized target workflows and automated system protocols.</span>
                     </div>
                     <div style="margin-bottom: 4px; display: flex; align-items: flex-start; gap: 6px;">
                         <span style="color: #10B981; font-weight: 900;">[✔]</span>
-                        <span>Leverage local B2B SaaS frameworks to capture global enterprise market expansion.</span>
+                        <span>Consolidate operational resources into primary geographic corridors.</span>
                     </div>
                 </div>
             </div>
@@ -718,19 +706,19 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
                 <div class="swot-grid">
                     <div class="swot-box">
                         <div class="swot-header swot-s">S</div>
-                        <p class="swot-desc">Strong tech talent pool; lower cost base.</p>
+                        <p class="swot-desc">{domain_profile["swot"]["s"]}</p>
                     </div>
                     <div class="swot-box">
                         <div class="swot-header swot-w">W</div>
-                        <p class="swot-desc">Access to early stage capital constraints.</p>
+                        <p class="swot-desc">{domain_profile["swot"]["w"]}</p>
                     </div>
                     <div class="swot-box">
                         <div class="swot-header swot-o">O</div>
-                        <p class="swot-desc">Enterprise AI scaling globally.</p>
+                        <p class="swot-desc">{domain_profile["swot"]["o"]}</p>
                     </div>
                     <div class="swot-box">
                         <div class="swot-header swot-t">T</div>
-                        <p class="swot-desc">Global macroeconomic cooling winds.</p>
+                        <p class="swot-desc">{domain_profile["swot"]["t"]}</p>
                     </div>
                 </div>
             </div>
@@ -747,16 +735,16 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
                             <path d="M 10 50 A 40 40 0 0 1 80 25" fill="none" stroke="#EF4444" stroke-width="10" stroke-linecap="round"/>
                             <circle cx="50" cy="50" r="4" fill="#0F172A"/>
                             <line x1="50" y1="50" x2="75" y2="25" stroke="#0F172A" stroke-width="3" stroke-linecap="round"/>
-                            <text x="50" y="45" font-family="sans-serif" font-size="11" font-weight: 900" fill="#0F172A" text-anchor="middle">84%</text>
+                            <text x="50" y="45" font-family="sans-serif" font-size="11" font-weight="900" fill="#0F172A" text-anchor="middle">84%</text>
                         </svg>
                         <span style="font-size: 8px; color: #EF4444; font-weight: bold; display: block; margin-top: 2px;">MEDIUM-HIGH</span>
                     </div>
                     <div style="flex: 1.2;">
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3px; font-size: 7.5px; font-weight: bold; text-align: center; text-transform: uppercase;">
-                            <div style="background: #D1FAE5; color: #065F46; padding: 3px; border-radius: 2px;">Enterprise<br>High</div>
-                            <div style="background: #D1FAE5; color: #065F46; padding: 3px; border-radius: 2px;">SaaS<br>High</div>
-                            <div style="background: #FEF3C7; color: #92400E; padding: 3px; border-radius: 2px;">FinTech<br>Med</div>
-                            <div style="background: #FEE2E2; color: #991B1B; padding: 3px; border-radius: 2px;">Web3<br>Low</div>
+                            <div style="background: #D1FAE5; color: #065F46; padding: 3px; border-radius: 2px;">Global<br>High</div>
+                            <div style="background: #D1FAE5; color: #065F46; padding: 3px; border-radius: 2px;">Vertical<br>High</div>
+                            <div style="background: #FEF3C7; color: #92400E; padding: 3px; border-radius: 2px;">Strategic<br>Med</div>
+                            <div style="background: #FEE2E2; color: #991B1B; padding: 3px; border-radius: 2px;">Operational<br>Low</div>
                         </div>
                     </div>
                 </div>
@@ -775,11 +763,11 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     <div class="watermark">ANALYSIS</div>
     <div class="badge">
         <svg class="badge-icon" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
-        Market Segmentation
+        Ecosystem Analysis
     </div>
     <h2>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{t["primary_color"]}" stroke-width="2" style="max-height:20px; display:inline-block; vertical-align:middle; margin-right:6px;"><path d="M21.21 15.89A10 10 0 1 1 8 2.83M22 12A10 10 0 0 0 12 2v10z"/></svg>
-        3. Key Metrics, 4. Market Overview &amp; 5. Startup Landscape
+        3. Key Metrics, 4. Market Overview &amp; 5. Industrial Landscape
     </h2>
     <div class="card" style="margin-bottom: 8px;">
         <p>{sec2}</p>
@@ -788,23 +776,23 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     <div class="row" style="margin-top: 2px; margin-bottom: 6px;">
         <div class="col-6">
             <div class="card card-amber" style="margin-bottom: 0; padding: 8px 12px;">
-                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">3. KPI Performance Trends</div>
+                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">3. Trend &amp; Velocity Performance</div>
                 <div class="chart-container">
                     {render_chart_html(chart2)}
                 </div>
                 <div style="font-size: 8px; color: #64748B; margin-top: 2px; text-align: left; border-top: 1px solid #F1F5F9; padding-top: 2px;">
-                    * Trend: Compounding user adoption across Enterprise AI nodes. Source: Aarkaa Database.
+                    * Trend: Compounding user and performance metrics over time. Source: Aarkaa Database.
                 </div>
             </div>
         </div>
         <div class="col-6">
             <div class="card card-purple" style="margin-bottom: 0; padding: 8px 12px;">
-                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">4. Sector Asset Allocation</div>
+                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">4. Resource &amp; Asset Allocation</div>
                 <div class="chart-container">
                     {render_chart_html(chart3)}
                 </div>
                 <div style="font-size: 8px; color: #64748B; margin-top: 2px; text-align: left; border-top: 1px solid #F1F5F9; padding-top: 2px;">
-                    * Allocation reflects institutional capital concentration in core software-defined assets.
+                    * Allocation reflects institutional concentration and resource placement across major segments.
                 </div>
             </div>
         </div>
@@ -813,26 +801,16 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     <div class="row" style="margin-bottom: 4px;">
         <div class="col-7">
             <div class="ai-insight" style="margin: 0; height: 100%;">
-                <div class="ai-insight-title">5. AI Segment Analysis</div>
+                <div class="ai-insight-title">5. Segment Depth Analysis</div>
                 <p class="ai-insight-text" style="font-size: 12px; line-height: 1.4;">
-                    Enterprise AI dominates asset allocation (33.8%), followed closely by Healthcare AI (18.9%). The synergy between deep tech infrastructure and specialized verticals continues to attract top-tier capital, establishing a robust growth corridor along OMR.
+                    Primary verticals dominate asset allocation, followed closely by secondary integration points. The synergy between core deep infrastructure and specialized verticals continues to attract top-tier capital, establishing a robust growth corridor.
                 </p>
             </div>
         </div>
         <div class="col-5">
             <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
-                <strong style="font-size: 9px; color: #0F172A; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 3px; text-align: center;">5. Chennai Tech Hub Geographic Map</strong>
-                <svg width="100%" height="80" viewBox="0 0 200 120" style="max-height: 80px; background: #F8FAFC; border-radius: 4px;">
-                    <path d="M 150 0 C 155 40, 160 80, 170 120" fill="none" stroke="#93C5FD" stroke-width="2"/>
-                    <text x="172" y="60" font-family="sans-serif" font-size="8" fill="#3B82F6" transform="rotate(82, 172, 60)" opacity="0.6">Bay of Bengal</text>
-                    <path d="M 50 20 L 90 50 L 120 90" fill="none" stroke="#E2E8F0" stroke-width="1.5" stroke-dasharray="3,3"/>
-                    <circle cx="50" cy="20" r="5" fill="#EF4444" opacity="0.8"/>
-                    <text x="58" y="23" font-family="sans-serif" font-size="8" font-weight="bold" fill="#0F172A">Ambattur (SaaS)</text>
-                    <circle cx="90" cy="50" r="5" fill="#10B981" opacity="0.8"/>
-                    <text x="98" y="53" font-family="sans-serif" font-size="8" font-weight="bold" fill="#0F172A">Guindy (DeepTech)</text>
-                    <circle cx="120" cy="90" r="5" fill="#3B82F6" opacity="0.8"/>
-                    <text x="50" y="93" font-family="sans-serif" font-size="8" font-weight="bold" fill="#0F172A">OMR Corridor (AI)</text>
-                </svg>
+                <strong style="font-size: 9px; color: #0F172A; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 3px; text-align: center;">5. {domain_profile["name"]} Technical Model</strong>
+                {domain_profile["visual_svg"]}
             </div>
         </div>
     </div>
@@ -848,69 +826,49 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     <div class="watermark">VELOCITY</div>
     <div class="badge">
         <svg class="badge-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-        Financial Performance
+        Performance Metrics
     </div>
     <h2>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{t["primary_color"]}" stroke-width="2" style="max-height:20px; display:inline-block; vertical-align:middle; margin-right:6px;"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-        6. Sector, 7. Funding Analysis &amp; 12. Financial Outlook
+        6. Sector, 7. Financial Expansion &amp; 12. Future Outlook
     </h2>
     <div class="card" style="margin-bottom: 8px;">
         <p>{sec3}</p>
     </div>
     
     <div class="callout" style="margin: 6px 0; padding: 8px 12px; font-size: 13.5px;">
-        "Compounding quarterly revenue growth acts as the ultimate validator of product-market fit and platform scalability in high-velocity competitive environments."
+        "Compounding quarterly performance growth acts as the ultimate validator of operational efficiency and platform scalability in high-velocity competitive environments."
     </div>
     
     <div class="row">
         <div class="col-8">
             <div class="card card-amber" style="margin-bottom: 0; padding: 10px 14px;">
-                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">7. Funding Analysis &amp; 12. Financial Outlook ($ Millions)</div>
+                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">7. Segment Financials &amp; 12. Future Outlook</div>
                 <div class="chart-container">
                     {render_chart_html(chart1)}
                 </div>
                 <div style="font-size: 8px; color: #64748B; margin-top: 3px; border-top: 1px solid #F1F5F9; padding-top: 2px;">
-                    * Projections based on compounding growth curves of top-25 ecosystem SaaS platforms.
+                    * Projections based on compounding growth curves of top-25 ecosystem platforms.
                 </div>
             </div>
         </div>
         <div class="col-4">
             <div class="card card-green" style="height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 10px 12px; margin-bottom: 0;">
                 <div>
-                    <strong style="font-size: 10.5px; color: {t["h1_color"]}; display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Growth Metrics</strong>
+                    <strong style="font-size: 10.5px; color: {t["h1_color"]}; display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Key Metrics</strong>
                     <div style="margin-bottom: 6px;">
-                        <span style="font-size: 8px; color: #64748B; display: block; text-transform: uppercase;">Median ARR</span>
-                        <span style="font-size: 18px; font-weight: 800; color: #0F172A;">$8.4 Million</span>
+                        <span style="font-size: 8px; color: #64748B; display: block; text-transform: uppercase;">Primary KPI</span>
+                        <span style="font-size: 18px; font-weight: 800; color: #0F172A;">{d_kpis[0]["val"]}</span>
                     </div>
                     <div style="margin-bottom: 6px;">
-                        <span style="font-size: 8px; color: #64748B; display: block; text-transform: uppercase;">Net Retention</span>
-                        <span style="font-size: 18px; font-weight: 800; color: #10B981;">118.5% YoY</span>
+                        <span style="font-size: 8px; color: #64748B; display: block; text-transform: uppercase;">Secondary KPI</span>
+                        <span style="font-size: 18px; font-weight: 800; color: #10B981;">{d_kpis[1]["val"]}</span>
                     </div>
                 </div>
                 <div>
-                    <span style="font-size: 8px; color: #64748B; display: block; text-transform: uppercase; margin-bottom: 3px; font-weight: bold;">Top Ecosystem Players</span>
-                    <div style="display: flex; gap: 4px; flex-wrap: wrap; justify-content: space-between; background: #F8FAFC; padding: 4px; border-radius: 4px; border: 1px solid #E2E8F0;">
-                        <div style="display: flex; align-items: center; gap: 2px;">
-                            <svg width="10" height="10" viewBox="0 0 16 16" style="max-height:10px;">
-                                <rect x="0" y="0" width="7" height="7" fill="#F43F5E" rx="1"/>
-                                <rect x="9" y="0" width="7" height="7" fill="#3B82F6" rx="1"/>
-                                <rect x="0" y="9" width="7" height="7" fill="#10B981" rx="1"/>
-                                <rect x="9" y="9" width="7" height="7" fill="#F59E0B" rx="1"/>
-                            </svg>
-                            <span style="font-size: 7px; font-weight: 900; color: #475569;">ZOHO</span>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 2px;">
-                            <svg width="10" height="10" viewBox="0 0 16 16" style="max-height:10px;">
-                                <path d="M8 0 L16 8 L8 16 L0 8 Z" fill="#10B981"/>
-                            </svg>
-                            <span style="font-size: 7px; font-weight: 900; color: #475569;">FRESH</span>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 2px;">
-                            <svg width="10" height="10" viewBox="0 0 16 16" style="max-height:10px;">
-                                <polygon points="8,0 15,4 15,12 8,16 1,12 1,4" fill="#F57C00"/>
-                            </svg>
-                            <span style="font-size: 7px; font-weight: 900; color: #475569;">BEE</span>
-                        </div>
+                    <span style="font-size: 8px; color: #64748B; display: block; text-transform: uppercase; margin-bottom: 3px; font-weight: bold;">Top Sector Players</span>
+                    <div style="display: flex; gap: 4px; flex-wrap: wrap; justify-content: space-between; background: #F8FAFC; padding: 4px; border-radius: 4px; border: 1px solid #E2E8F0; width: 100%;">
+                        {brand_logos_rendered}
                     </div>
                 </div>
             </div>
@@ -941,34 +899,20 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     <div class="row">
         <div class="col-8">
             <div class="card card-green" style="margin-bottom: 0; padding: 10px 14px;">
-                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">8. Operational Readiness Benchmarks (0-100 Score)</div>
+                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">8. Performance Benchmarking Uptime</div>
                 <div class="chart-container">
                     {render_chart_html(chart4)}
                 </div>
                 <div style="margin-top: 6px;">
-                    <strong style="font-size: 9px; color: #0F172A; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 3px;">8. Competitive Growth &amp; Resource Density Heatmap</strong>
+                    <strong style="font-size: 9px; color: #0F172A; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 3px;">8. Segment Competitive Growth Heatmap</strong>
                     <table style="width: 100%; border-collapse: collapse; font-size: 9px; text-align: center;">
                         <thead>
                             <tr style="background: #F1F5F9; font-weight: bold;">
-                                <th style="padding: 3px; border: 1px solid #E2E8F0; text-align: left;">Segment</th>
-                                <th style="padding: 3px; border: 1px solid #E2E8F0;">Growth Rate</th>
-                                <th style="padding: 3px; border: 1px solid #E2E8F0;">Funding Density</th>
-                                <th style="padding: 3px; border: 1px solid #E2E8F0;">Talent Pool</th>
+                                {table_headers}
                             </tr>
                         </thead>
                         <tbody>
-                            <tr>
-                                <td style="padding: 3px; border: 1px solid #E2E8F0; text-align: left; font-weight: bold;">Enterprise AI</td>
-                                <td style="padding: 3px; border: 1px solid #E2E8F0; background: #FEE2E2; color: #991B1B; font-weight: bold;">95% (High)</td>
-                                <td style="padding: 3px; border: 1px solid #E2E8F0; background: #FEE2E2; color: #991B1B; font-weight: bold;">92% (High)</td>
-                                <td style="padding: 3px; border: 1px solid #E2E8F0; background: #FEF3C7; color: #92400E;">78% (Med)</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 3px; border: 1px solid #E2E8F0; text-align: left; font-weight: bold;">Fintech SaaS</td>
-                                <td style="padding: 3px; border: 1px solid #E2E8F0; background: #FEF3C7; color: #92400E;">88% (Med)</td>
-                                <td style="padding: 3px; border: 1px solid #E2E8F0; background: #FEF3C7; color: #92400E;">75% (Med)</td>
-                                <td style="padding: 3px; border: 1px solid #E2E8F0; background: #D1FAE5; color: #065F46; font-weight: bold;">90% (High)</td>
-                            </tr>
+                            {table_rows_rendered}
                         </tbody>
                     </table>
                 </div>
@@ -977,14 +921,14 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
         <div class="col-4">
             <div class="card card-amber" style="height: 100%; padding: 12px 14px; display: flex; flex-direction: column; justify-content: space-between; margin-bottom: 0;">
                 <div>
-                    <strong style="font-size: 11px; color: {t["h1_color"]}; display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Infrastructure Milestones</strong>
+                    <strong style="font-size: 11px; color: {t["h1_color"]}; display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Strategic Milestones</strong>
                     <div style="border-left: 2px solid {t["primary_color"]}; padding-left: 10px; position: relative; margin-left: 4px;">
                         <div style="position: absolute; left: -5px; top: 2px; width: 8px; height: 8px; border-radius: 50%; background: {t["primary_color"]};"></div>
-                        <strong style="font-size: 11px; color: #0F172A; display: block;">H1 2026: Consolidation</strong>
-                        <span style="font-size: 10px; color: #64748B; display: block; margin-bottom: 8px;">Unified cloud provisioning completed.</span>
-                        <div style="position: absolute; left: -5px; top: 40px; width: 8px; height: 8px; border-radius: 50%; background: {t["secondary_color"]};"></div>
-                        <strong style="font-size: 11px; color: #0F172A; display: block;">H2 2026: Automation</strong>
-                        <span style="font-size: 10px; color: #64748B; display: block;">Auto-scaling pipelines active across all nodes.</span>
+                        <strong style="font-size: 11px; color: #0F172A; display: block;">{t_m[0]["time"]}</strong>
+                        <span style="font-size: 10px; color: #64748B; display: block; margin-bottom: 8px;">{t_m[0]["desc"]}</span>
+                        <div style="position: absolute; left: -5px; top: 50px; width: 8px; height: 8px; border-radius: 50%; background: {t["secondary_color"]};"></div>
+                        <strong style="font-size: 11px; color: #0F172A; display: block;">{t_m[1]["time"]}</strong>
+                        <span style="font-size: 10px; color: #64748B; display: block;">{t_m[1]["desc"]}</span>
                     </div>
                 </div>
                 <div style="background: rgba(245, 158, 11, 0.05); border-left: 2.5px solid #F59E0B; padding: 6px 10px; border-radius: 0 4px 4px 0; font-size: 11px; color: #78350F; line-height: 1.35; margin-top: 8px;">
@@ -1018,7 +962,7 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     <div class="row" style="margin-top: 4px;">
         <div class="col-8">
             <div class="card card-red" style="margin-bottom: 0;">
-                <div style="font-size: 12px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">10. Risk Exposure Profile &amp; Cumulative Risk Index</div>
+                <div style="font-size: 12px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">10. Cumulative Risk Profiles &amp; Skews</div>
                 <div class="chart-container">
                     {render_chart_html(chart5)}
                 </div>
@@ -1034,7 +978,7 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
                     <div style="font-size: 11.5px; color: #334155; line-height: 1.55;">
                         <div style="margin-bottom: 8px; display: flex; align-items: flex-start; gap: 6px;">
                             <span style="color: #10B981; font-weight: 900;">[✔]</span>
-                            <span>Enterprise AI SaaS continues to show highest yield efficiency (95%).</span>
+                            <span>Highest yield performance seen across prime segments.</span>
                         </div>
                         <div style="margin-bottom: 8px; display: flex; align-items: flex-start; gap: 6px;">
                             <span style="color: #10B981; font-weight: 900;">[✔]</span>
@@ -1090,3 +1034,4 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     generate_pdf(html_content, str(output_path), inject_print_css=True)
     logger.info(f"Gamma PDF compiled successfully at {output_path}")
     return str(output_path)
+

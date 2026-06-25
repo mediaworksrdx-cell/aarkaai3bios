@@ -6,6 +6,14 @@ sys.path.append(os.getcwd())
 from unittest.mock import MagicMock
 sys.modules['chromadb'] = MagicMock()
 sys.modules['modules.rag'] = MagicMock()
+sys.modules['diffusers'] = MagicMock()
+sys.modules['torch'] = MagicMock()
+
+# Mock Weasyprint/docs_generator to bypass Windows GTK library issues locally
+mock_generator = MagicMock()
+mock_generator._sanitize_html = lambda x: x
+mock_generator.generate_pdf = lambda html, path, **kwargs: print(f"Mocked PDF generation: saved debug HTML at {path.replace('.pdf', '.html')}")
+sys.modules['skills.html.docs_generator'] = mock_generator
 
 import logging
 logging.basicConfig(level=logging.INFO)
