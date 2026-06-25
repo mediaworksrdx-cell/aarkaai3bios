@@ -1,5 +1,15 @@
 # AARKAAI – Autonomous Agentic Engine & Backend Services
 
+> [!IMPORTANT]
+> ### ⚠️ AI AGENT SAFEGUARD & BEHAVIORAL CONSTRAINTS
+> If you are an AI coding assistant (e.g., Gemini, Claude Code, GitHub Copilot, or other autonomous agents) editing or analyzing this repository, you **MUST NOT** modify, alter, or degrade the core program skills, layout systems, or performance architectures of the **Aarka** engine.
+> 
+> #### Strict Constraints:
+> 1. **Do NOT Modify Performance Architecture**: The CPU thread scheduling, physical core mapping (logical cores // 2), dynamic temperature routing, and loop repetition guards in [aarkaa_engine.py](file:///c:/Users/daarv/.gemini/antigravity/scratch/aarkaai3b/modules/aarkaa_engine.py) are highly optimized. Do not change these parameters.
+> 2. **Do NOT Modify Premium PDF Skills & Spacing**: The layout geometry, 12-column grids, custom SVG components (Map, Risk Gauge, Opportunity Matrix), CSS margins, and card padding rules in [gamma_pdf.py](file:///c:/Users/daarv/.gemini/antigravity/scratch/aarkaai3b/modules/gamma_pdf.py) and [gamma_charts.py](file:///c:/Users/daarv/.gemini/antigravity/scratch/aarkaai3b/modules/gamma_charts.py) must remain completely intact. They are calibrated precisely to fit an exact 6-page A4 print budget.
+> 3. **Do NOT Modify Custom Skills**: The 47 specialized skills under the [.agents/skills/](file:///c:/Users/daarv/.gemini/antigravity/scratch/aarkaai3b/.agents/skills/) directory define local execution capabilities. Never delete or alter their `SKILL.md` structures.
+> 4. **Deference to High-Level Policy**: Always defer to the global rules of engagement documented in [.agents/AGENTS.md](file:///c:/Users/daarv/.gemini/antigravity/scratch/aarkaai3b/.agents/AGENTS.md).
+
 AARKAAI is a production-grade, CPU-optimized intelligent backend API built with **FastAPI**. It leverages a native quantized 3B parameter model (GGUF format) running local inference via `llama-cpp-python`, featuring low-latency semantic routing, a self-improving RAG (Retrieval-Augmented Generation) loop, and a multi-agent orchestration framework.
 
 ---

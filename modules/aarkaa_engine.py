@@ -15,8 +15,19 @@ from config import MODEL_PATH, MAX_TOKENS
 
 logger = logging.getLogger(__name__)
 
-_model = None
+import threading
+import time
+import gc
+
+_model_cpu = None
+_model_gpu = None
 _is_stub = True
+_model_lock = threading.RLock()
+_last_active_time = time.time()
+_idle_timeout = int(os.getenv("AARKAAI_IDLE_TIMEOUT", "300"))  # 5 minutes default
+_gguf_file_path = None
+_n_threads = 4
+
 
 _LANG_NAMES = {
     "ab": "Abkhazian",
@@ -202,7 +213,9 @@ _LANG_NAMES = {
 }
 
 _GGUF_CANDIDATES = [
-    # f16 preferred (higher quality) → q8 as fallback
+    # f32 preferred (highest quality) → f16 → q8 as fallback
+    Path(MODEL_PATH).parent / "aarkaa-3b-f32.gguf",
+    Path(MODEL_PATH) / "aarkaa-3b-f32.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-f16.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-f16.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-q8.gguf",
@@ -210,9 +223,101 @@ _GGUF_CANDIDATES = [
 ]
 
 
+def _is_ist_nighttime() -> bool:
+    from datetime import datetime, timezone, timedelta
+    # IST = UTC + 5:30
+    utc_now = datetime.now(timezone.utc)
+    ist_now = utc_now + timedelta(hours=5, minutes=30)
+    # Nighttime window: 1:00 AM to 7:00 AM IST
+    return 1 <= ist_now.hour < 7
+
+
+def _get_model(force_gpu=True):
+    global _model_gpu, _last_active_time
+    if _is_stub:
+        return None
+    
+    _last_active_time = time.time()
+    
+    if force_gpu:
+        if _model_gpu is None:
+            with _model_lock:
+                if _model_gpu is None:
+                    from llama_cpp import Llama
+                    logger.info("GPU demand detected. Loading model to GPU (VRAM)...")
+                    try:
+                        _model_gpu = Llama(
+                            model_path=str(_gguf_file_path),
+                            n_ctx=16384,
+                            n_threads=_n_threads,
+                            n_threads_batch=_n_threads,
+                            n_gpu_layers=-1,
+                            verbose=False,
+                        )
+                        logger.info("Model successfully loaded on GPU.")
+                    except Exception as e:
+                        logger.error("Failed to load GPU model: %s. Falling back to CPU.", e)
+                        return _model_cpu
+        return _model_gpu
+    else:
+        return _model_gpu if _model_gpu is not None else _model_cpu
+
+
+def _idle_monitor_loop():
+    global _model_gpu, _last_active_time
+    while True:
+        time.sleep(10)
+        if _is_stub:
+            continue
+            
+        # Get current time and check if it is nighttime in IST (1:00 AM to 7:00 AM)
+        nighttime = _is_ist_nighttime()
+        
+        if nighttime:
+            # During nighttime, offload to CPU if idle longer than timeout
+            elapsed = time.time() - _last_active_time
+            if _model_gpu is not None and elapsed > _idle_timeout:
+                with _model_lock:
+                    if _model_gpu is not None and elapsed > _idle_timeout:
+                        logger.info("Model idle for %.1f seconds during nighttime IST. Offloading GPU VRAM...", elapsed)
+                        try:
+                            del _model_gpu
+                            _model_gpu = None
+                            try:
+                                import torch
+                                if torch.cuda.is_available():
+                                    torch.cuda.empty_cache()
+                            except ImportError:
+                                pass
+                            gc.collect()
+                            logger.info("GPU VRAM cleared successfully. Running on CPU.")
+                        except Exception as e:
+                            logger.error("Failed to clear GPU model: %s", e)
+        else:
+            # During daytime, proactively pre-warm/keep the model loaded on the GPU
+            if _model_gpu is None:
+                with _model_lock:
+                    if _model_gpu is None:
+                        logger.info("Daytime IST detected. Pre-warming model on GPU for instant responses...")
+                        try:
+                            from llama_cpp import Llama
+                            _model_gpu = Llama(
+                                model_path=str(_gguf_file_path),
+                                n_ctx=16384,
+                                n_threads=_n_threads,
+                                n_threads_batch=_n_threads,
+                                n_gpu_layers=-1,
+                                verbose=False,
+                            )
+                            logger.info("Model successfully pre-warmed on GPU.")
+                        except Exception as e:
+                            logger.error("Failed to pre-warm GPU model: %s", e)
+
+
+
 def init():
-    """Load the AARKAA-3B GGUF model if available."""
-    global _model, _is_stub
+    """Load the AARKAA-3B GGUF model if available on CPU permanently."""
+    global _model_cpu, _is_stub, _gguf_file_path
 
     gguf_file = None
     for candidate in _GGUF_CANDIDATES:
@@ -225,26 +330,30 @@ def init():
         _is_stub = True
         return
 
+    _gguf_file_path = gguf_file
+
     try:
         from llama_cpp import Llama
-
-        n_threads = 4
-
-        logger.info("Loading AARKAA-3B from %s (threads=%d)", gguf_file, n_threads)
-
-        _model = Llama(
+        logger.info("Initializing AARKAA-3B CPU model from %s (threads=%d)", gguf_file, _n_threads)
+        _model_cpu = Llama(
             model_path=str(gguf_file),
-            n_ctx=8192,
-            n_threads=n_threads,
-            n_threads_batch=n_threads,
+            n_ctx=16384,
+            n_threads=_n_threads,
+            n_threads_batch=_n_threads,
             n_gpu_layers=0,
             verbose=False,
         )
         _is_stub = False
-        logger.info("AARKAA-3B loaded (llama.cpp, GGUF, %d threads).", n_threads)
+        logger.info("AARKAA-3B CPU model loaded permanently.")
+        
+        # Start idle monitor thread
+        t = threading.Thread(target=_idle_monitor_loop, daemon=True)
+        t.start()
+        logger.info("Idle monitor thread started with timeout %d seconds.", _idle_timeout)
     except Exception as exc:
-        logger.error("Failed to load AARKAA-3B: %s - falling back to stub", exc)
+        logger.error("Failed to load AARKAA-3B CPU model: %s - falling back to stub", exc)
         _is_stub = True
+
 
 
 def _has_repetition(text: str) -> bool:
@@ -372,7 +481,8 @@ def _get_temperature(query: str, intent: str, context: str = "") -> float:
 
 def _generate(prompt, max_new_tokens=150, stop=None, temperature=0.7):
     """Run generation via llama.cpp."""
-    if _is_stub or _model is None:
+    model_instance = _get_model(force_gpu=True)
+    if _is_stub or model_instance is None:
         return _stub_response(prompt)
     
     tokens = list(_generate_stream(prompt, max_new_tokens=max_new_tokens, stop=stop, temperature=temperature))
@@ -382,7 +492,8 @@ def _generate(prompt, max_new_tokens=150, stop=None, temperature=0.7):
 
 def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7):
     """Run generation via llama.cpp and yield tokens with repetition guard."""
-    if _is_stub or _model is None:
+    model_instance = _get_model(force_gpu=True)
+    if _is_stub or model_instance is None:
         yield _stub_response(prompt)
         return
 
@@ -392,7 +503,7 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7):
     if stop:
         stop_tokens.extend(stop)
 
-    stream = _model(
+    stream = model_instance(
         prompt,
         max_tokens=max_new_tokens,
         temperature=temperature,
@@ -420,19 +531,25 @@ def _truncate_agent_prompt(prompt_str: str, model_instance) -> str:
     
     logger.info("Agent prompt length is %d tokens (exceeds 5500). Truncating history...", len(tokens))
     
-    # Split by Thought: to identify individual turns
-    parts = prompt_str.split("\nThought: ")
-    if len(parts) <= 3:
-        # Cannot truncate much if there are few turns, just return as is
-        return prompt_str
-        
-    # The first part contains the system prompt, guidelines, examples, and Request: <query>
-    system_part = parts[0]
-    
-    # We want to keep the system part, and the last 2 turns
-    last_turns = parts[-2:]
-    
-    truncated_prompt = system_part + "\n\n...[older execution steps truncated for length]...\n\n" + "\nThought: ".join(last_turns)
+    # Locate where the actual user request and execution turns start.
+    req_idx = prompt_str.find("\nRequest: ")
+    if req_idx == -1:
+        # Fallback if structure is unexpected
+        parts = prompt_str.split("\nThought: ")
+        if len(parts) <= 3:
+            return prompt_str
+        system_part = parts[0]
+        last_turns = parts[-2:]
+        truncated_prompt = system_part + "\n\n...[older execution steps truncated for length]...\n\n" + "\nThought: ".join(last_turns)
+    else:
+        header = prompt_str[:req_idx]
+        rest = prompt_str[req_idx:]
+        parts = rest.split("\nThought: ")
+        if len(parts) <= 2:
+            return prompt_str
+        request_part = parts[0]
+        last_turns = parts[-2:]
+        truncated_prompt = header + request_part + "\n\n...[older execution steps truncated for length]...\n\n" + "\nThought: ".join(last_turns)
     
     # Verify the new length
     new_tokens = model_instance.tokenize(truncated_prompt.encode("utf-8"), special=True)
@@ -442,7 +559,8 @@ def _truncate_agent_prompt(prompt_str: str, model_instance) -> str:
 
 def generate_raw(prompt, max_new_tokens=300, stop=None):
     """Raw generation for the agent loop (no truncation) with safe streaming stop word checks."""
-    if _is_stub or _model is None:
+    model_instance = _get_model(force_gpu=True)
+    if _is_stub or model_instance is None:
         return 'Final Answer: I am running in stub mode.'
     
     if stop is None:
@@ -451,19 +569,19 @@ def generate_raw(prompt, max_new_tokens=300, stop=None):
     native_stop = ["<|im_end|>", "<|im_start|>", "<|endoftext|>"]
     
     # Truncate prompt if it is too long to prevent context overflow
-    prompt = _truncate_agent_prompt(prompt, _model)
+    prompt = _truncate_agent_prompt(prompt, model_instance)
     
     # Tokenize prompt to get exact prompt token count and pass tokens directly
-    prompt_tokens = _model.tokenize(prompt.encode("utf-8"), special=True)
+    prompt_tokens = model_instance.tokenize(prompt.encode("utf-8"), special=True)
     prompt_len = len(prompt_tokens)
     
-    # Context limit is 8192. Set max_tokens to fill remaining context window completely (leaving a small 100-token safety buffer)
-    max_tokens = 8192 - prompt_len - 100
+    # Context limit is 16384. Set max_tokens to fill remaining context window completely (leaving a small 100-token safety buffer)
+    max_tokens = 16384 - prompt_len - 100
     if max_tokens <= 0:
         max_tokens = 1
         
-    stream = _model(
-        prompt_tokens,
+    stream = model_instance(
+        prompt,
         max_tokens=max_tokens,
         temperature=0.2,
         top_p=0.9,
@@ -471,6 +589,7 @@ def generate_raw(prompt, max_new_tokens=300, stop=None):
         stop=native_stop,
         stream=True
     )
+
     
     generated_text = ""
     for chunk in stream:
@@ -763,7 +882,8 @@ def primary_check(query, lang="en"):
 
 def self_check_response(query: str, response: str, intent: str) -> bool:
     """Audit the generated response against user intent using the local model."""
-    if _is_stub or _model is None:
+    model_instance = _get_model(force_gpu=True)
+    if _is_stub or model_instance is None:
         return True
 
     if intent not in ["persuasion", "debate", "comparison"]:
@@ -791,7 +911,7 @@ def self_check_response(query: str, response: str, intent: str) -> bool:
     )
 
     try:
-        output = _model(
+        output = model_instance(
             audit_prompt,
             max_tokens=5,
             temperature=0.0,
@@ -937,6 +1057,49 @@ def _filter_history_reasoning(query: str, history: list[dict] | None) -> list[di
 
 
 def _build_final_prompt(query, context, intent="", lang="en", mode="production", history=None, user_facts=""):
+    global_build_chatml = globals()["_build_chatml"]
+    global_build_chatml_multi = globals()["_build_chatml_multi"]
+
+    # Determine alignment instructions
+    alignment_instruction = ""
+    q_low = query.lower()
+    if "hindi alpaca" in q_low or "hindi-alpaca" in q_low:
+        alignment_instruction = (
+            "You are operating in the 'Hindi Alpaca' alignment model state. "
+            "Respond in natural, grammatically correct, and highly precise instruction-following Hindi. "
+            "Adopt the voice and capabilities of the Hindi Alpaca model."
+        )
+    elif "tamil alpaca" in q_low or "tamil-alpaca" in q_low:
+        alignment_instruction = (
+            "You are operating in the 'Tamil Alpaca' alignment model state. "
+            "Respond in native, grammatically correct, and highly precise instruction-following Tamil. "
+            "Adopt the voice and capabilities of the Tamil Alpaca model."
+        )
+    elif "samanantar" in q_low:
+        alignment_instruction = (
+            "You are operating in the 'Samanantar Hindi' alignment model state. "
+            "Act as the Samanantar Hindi translation engine based on IIT Madras parallel corpora. "
+            "Perform highly accurate parallel English-to-Hindi translations, preserving sentence structures, "
+            "clause correspondence, and exact technical terminology mappings."
+        )
+    elif "aya" in q_low:
+        alignment_instruction = (
+            "You are operating in the 'Aya (Indian Languages)' alignment model state. "
+            "Act as Cohere's multilingual model focusing on Indian languages. "
+            "Generate rich, culturally aligned, contextually nuanced, and highly fluent responses or translations in the target Indian language."
+        )
+
+    def _build_chatml(system: str, user: str) -> str:
+        if alignment_instruction:
+            system = system + "\n\n" + alignment_instruction
+        return global_build_chatml(system, user)
+
+    def _build_chatml_multi(system: str, history: list[dict] | None, user: str,
+                           max_history_chars: int = 3000, user_facts: str = "") -> str:
+        if alignment_instruction:
+            system = system + "\n\n" + alignment_instruction
+        return global_build_chatml_multi(system, history, user, max_history_chars, user_facts)
+
     history = _filter_history_repeats(query, history)
     if intent == "reasoning_puzzle":
         history = _filter_history_reasoning(query, history)

@@ -8,6 +8,7 @@ sentence-transformers
 scikit-learn
 wikipedia-api
 numpy
+chromadb
 pydantic
 llama-cpp-python
 # openvino         – optional, install when Python 3.14 support is available

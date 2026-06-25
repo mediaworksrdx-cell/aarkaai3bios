@@ -28,7 +28,7 @@ finally:
 
 # 2. Load model and init RAG
 print("Loading sentence-transformers to compute embedding...")
-_st_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+_st_model = SentenceTransformer(EMBEDDING_MODEL_NAME, device="cpu")
 embed_fn = lambda text: _st_model.encode(text, normalize_embeddings=True)
 
 print("Initializing RAG...")

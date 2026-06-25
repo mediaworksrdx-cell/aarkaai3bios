@@ -296,6 +296,155 @@ def _is_trick_question(query: str) -> bool:
     return False
 
 
+def _is_image_generation_query(query: str) -> bool:
+    """Detect queries that request image/art generation, even without the word 'image'.
+    
+    Catches patterns like:
+      - 'Generate an ancient jungle temple...'
+      - 'Create a futuristic cityscape...'
+      - 'Draw a sunset over mountains...'
+      - 'A cyberpunk warrior standing in rain...'
+    """
+    q = query.lower().strip()
+    
+    # Direct explicit triggers (exact substring match)
+    explicit_triggers = [
+        "generate an image", "generate image", "generate a photo", "generate a picture",
+        "create an image", "create a picture", "create image", "create a photo",
+        "draw a", "draw me", "draw an", "paint a", "paint me", "paint an",
+        "make a drawing", "make a picture", "make an image", "make a photo",
+        "generate a drawing", "create a drawing", "draw something",
+        "portrait of", "ultra-realistic portrait", "create art", "generate art",
+        "design an image", "sketch a", "sketch an", "illustrate a", "illustrate an",
+        "render a", "render an", "visualize a", "visualize an",
+    ]
+    if any(t in q for t in explicit_triggers):
+        return True
+    
+    # Pattern: generation verb + visual/artistic scene descriptors
+    # e.g. 'Generate an ancient jungle temple covered in moss...'
+    generation_verbs = r'\b(generate|create|draw|paint|make|render|design|sketch|illustrate|visualize)\b'
+    visual_descriptors = [
+        "realistic", "ultra-detailed", "ultra-realistic", "photorealistic", "hyper-realistic",
+        "cinematic", "4k", "8k", "hd", "high quality", "high-quality", "high resolution",
+        "detailed environment", "dramatic lighting", "realistic lighting",
+        "fantasy art", "digital art", "concept art", "oil painting", "watercolor",
+        "anime style", "pixel art", "3d render", "unreal engine", "octane render",
+        "studio lighting", "golden hour", "bokeh", "depth of field",
+        "artstation", "deviantart", "trending on",
+    ]
+    visual_subjects = [
+        "temple", "castle", "dragon", "warrior", "landscape", "cityscape", "portrait",
+        "forest", "ocean", "mountain", "sunset", "sunrise", "waterfall", "cyberpunk",
+        "steampunk", "medieval", "futuristic", "ancient", "mythical", "ethereal",
+        "creature", "monster", "fairy", "goddess", "knight", "samurai", "ninja",
+        "spaceship", "galaxy", "nebula", "planet", "alien",
+    ]
+    
+    has_gen_verb = bool(re.search(generation_verbs, q))
+    has_visual_desc = any(d in q for d in visual_descriptors)
+    has_visual_subj = any(s in q for s in visual_subjects)
+    
+    # If the query starts with a generation verb and has visual descriptors or subjects
+    if has_gen_verb and (has_visual_desc or has_visual_subj):
+        # Exclude coding/file creation queries
+        coding_excludes = ["python", "script", "code", "function", "class", "html", "css", "javascript", "file", ".py", ".js"]
+        if not any(ex in q for ex in coding_excludes):
+            return True
+    
+    # Pattern: prompt starts with 'a/an/the' + descriptive scene (no verb, just a prompt-style input)
+    # e.g. 'A cyberpunk warrior standing in the rain, neon lights, ultra-detailed'
+    if re.match(r'^(a|an|the)\s+', q) and has_visual_desc and len(q.split()) >= 5:
+        coding_excludes = ["python", "script", "code", "function", "class", "html", "css", "file"]
+        if not any(ex in q for ex in coding_excludes):
+            return True
+    
+    return False
+
+
+def _is_pdf_generation_query(query: str) -> bool:
+    """Detect if the query asks to create/generate a PDF report, document, or similar."""
+    q = query.lower().strip()
+    # Check if the user is asking to write code, create python scripts, or explain how to generate PDFs,
+    # in which case we should NOT intercept and instead let it go to coding assistant.
+    coding_excludes = ["python", "script", "code", "library", "libraries", "how to", "write code", "separate files", "make skills separate"]
+    if any(ex in q for ex in coding_excludes):
+        return False
+
+    action_words = ["create", "generate", "make", "compile", "build", "produce", "export", "write"]
+    pdf_words = ["pdf", "report", "document", "business report"]
+    
+    # Must have both action word and pdf/report word
+    has_action = any(aw in q for aw in action_words)
+    has_pdf = any(pw in q for pw in pdf_words)
+    
+    if has_action and has_pdf:
+        return True
+        
+    return False
+
+def _extract_pdf_topic(query: str) -> str:
+    """Extract a clean topic from a PDF generation query."""
+    q = query.lower()
+    # Remove common prefix phrases
+    prefixes = [
+        "create a premium pdf report about",
+        "generate a premium pdf report about",
+        "create a premium pdf about",
+        "generate a premium pdf about",
+        "create a pdf report about",
+        "generate a pdf report about",
+        "create a pdf about",
+        "generate a pdf about",
+        "create a report about",
+        "generate a report about",
+        "make a pdf report about",
+        "make a pdf about",
+        "make a report about",
+        "create a report on",
+        "generate a report on",
+        "create a pdf on",
+        "generate a pdf on",
+        "create", "generate", "make", "compile", "pdf report about", "pdf about", "report about", "document about", "report on"
+    ]
+    topic = query
+    for p in prefixes:
+        if q.startswith(p):
+            topic = query[len(p):].strip()
+            break
+            
+    # Clean up trailing punctuation or filler words
+    topic = re.sub(r'[.!?]+$', '', topic).strip()
+    if topic.lower().startswith("about "):
+        topic = topic[6:].strip()
+    elif topic.lower().startswith("on "):
+        topic = topic[3:].strip()
+        
+    if not topic:
+        topic = "Business Intelligence Report"
+    return topic
+
+def _generate_pdf_filename(topic: str) -> str:
+    """Convert topic to a safe filename."""
+    safe_name = re.sub(r'[^a-zA-Z0-9]+', '_', topic.lower()).strip('_')
+    if not safe_name:
+        safe_name = "business_report"
+    return f"{safe_name}.pdf"
+
+def _extract_pdf_template(query: str) -> str:
+    """Detect if the user requested a specific color template in their query."""
+    q = query.lower()
+    if "dark" in q:
+        return "dark"
+    elif "green" in q or "emerald" in q or "teal" in q:
+        return "emerald"
+    elif "red" in q or "crimson" in q:
+        return "crimson"
+    elif "amber" in q or "yellow" in q or "orange" in q:
+        return "amber"
+    return "indigo"
+
+
 def _is_calculation_query(query: str) -> bool:
     """Detect queries that require mathematical/arithmetic calculation."""
     q = query.lower()
@@ -331,6 +480,7 @@ def _needs_skill_routing(query: str) -> bool:
         ".pdf", ".docx", ".xlsx", ".pptx", ".csv",
         "pdf", "word document", "word doc", "excel", "spreadsheet",
         "powerpoint", "presentation", "slides", "slide deck",
+        "image", "picture", "drawing", "illustration", "photo", "sketch",
     ]
     # Action + format combinations
     action_words = [
@@ -848,7 +998,15 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         "test it", "test this", "test the code", "test them", "run the",
         "what is the output", "what's the output", "output of the code", "what does this print",
         "what will this print", "what is printed", "what does it print", "output of this",
-        "trace this", "trace the code"
+        "trace this", "trace the code",
+        "draw a", "draw an", "draw me", "draw something",
+        "generate an image", "generate image", "generate a photo", "generate a picture",
+        "generate a drawing", "generate art",
+        "create a picture", "create an image", "create a drawing", "create a photo", "create art",
+        "make a drawing", "make a picture", "make an image",
+        "paint a", "paint an", "paint me",
+        "sketch a", "sketch an", "illustrate a", "render a", "render an",
+        "portrait of", "ultra-realistic portrait",
     ]
     needs_agent = (
         not is_coding_output
@@ -858,6 +1016,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             or (intent == "coding_help" and any(p in query.lower() for p in ["run", "execute", "trace", "test"]))
             or _is_calculation_query(query)
             or _needs_skill_routing(query)
+            or _is_image_generation_query(query)
         )
     )
 
@@ -915,7 +1074,41 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     except Exception as exc:
         logger.error("Error loading user facts: %s", exc)
 
-    if needs_agent:
+    if _is_pdf_generation_query(query):
+        from pathlib import Path
+        from modules.gamma_pdf import compile_gamma_pdf
+        topic = _extract_pdf_topic(query)
+        filename = _generate_pdf_filename(topic)
+        template = _extract_pdf_template(query)
+        try:
+            pdf_path = compile_gamma_pdf(topic, filename, template=template)
+            filename = Path(pdf_path).name
+            final_answer = (
+                f"I have generated the premium Gamma-style PDF report you requested.\n\n"
+                f"**Downloads & Sharing:**\n"
+                f"* [Download PDF Report](/download/{filename})\n"
+                f"* [Download PDF Report (HTTPS)](https://synthetixanalytics.com/download/{filename})"
+            )
+        except Exception as exc:
+            logger.error("Failed to compile premium Gamma PDF: %s", exc)
+            final_answer = f"Error generating PDF: {exc}"
+    elif _is_image_generation_query(query):
+        from modules.tools.image import ImageGenTool
+        image_result = ImageGenTool().execute({"prompt": query})
+        img_match = re.search(r"!\[Generated Image\]\((.*?)\)", image_result)
+        if img_match:
+            img_link = img_match.group(0)
+            filename = img_link.split("/")[-1].replace(")", "")
+            final_answer = (
+                f"I have generated the image you requested. Here is your generated image:\n\n"
+                f"{img_link}\n\n"
+                f"**Downloads & Sharing:**\n"
+                f"* [Download Image](/download/{filename})\n"
+                f"* [Download Image (HTTPS)](https://synthetixanalytics.com/download/{filename})"
+            )
+        else:
+            final_answer = image_result
+    elif needs_agent:
         from modules import coordinator
         # Proactively save previous message to previous_message.txt in case the agent reads it
         _write_previous_message_file(chat_ctx)
@@ -933,12 +1126,13 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     combined_confidence = (filter_confidence + primary_confidence) / 2
 
     # ── 7. In-depth Verification Pass ─────────────────────────────────────
-    try:
-        from modules.agents.verifier import verify_response
-        logger.info("Running verifier agent on final answer...")
-        final_answer = verify_response(query, final_answer)
-    except Exception as exc:
-        logger.error("Failed to run verifier agent on final answer: %s", exc)
+    if not _is_image_generation_query(query):
+        try:
+            from modules.agents.verifier import verify_response
+            logger.info("Running verifier agent on final answer...")
+            final_answer = verify_response(query, final_answer)
+        except Exception as exc:
+            logger.error("Failed to run verifier agent on final answer: %s", exc)
 
     # ── 8. Store + auto-learn (post-process) ──────────────────────────────
     main_source = sources[-1] if len(sources) > 1 else "aarkaa-3b"
@@ -1141,7 +1335,15 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         "test it", "test this", "test the code", "test them", "run the",
         "what is the output", "what's the output", "output of the code", "what does this print",
         "what will this print", "what is printed", "what does it print", "output of this",
-        "trace this", "trace the code"
+        "trace this", "trace the code",
+        "draw a", "draw an", "draw me", "draw something",
+        "generate an image", "generate image", "generate a photo", "generate a picture",
+        "generate a drawing", "generate art",
+        "create a picture", "create an image", "create a drawing", "create a photo", "create art",
+        "make a drawing", "make a picture", "make an image",
+        "paint a", "paint an", "paint me",
+        "sketch a", "sketch an", "illustrate a", "render a", "render an",
+        "portrait of", "ultra-realistic portrait",
     ]
     needs_agent = (
         not is_coding_output
@@ -1151,6 +1353,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             or (intent == "coding_help" and any(p in query.lower() for p in ["run", "execute", "trace", "test"]))
             or _is_calculation_query(query)
             or _needs_skill_routing(query)
+            or _is_image_generation_query(query)
         )
     )
 
@@ -1215,7 +1418,85 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     except Exception as exc:
         logger.error("Error loading user facts in stream: %s", exc)
 
-    if needs_agent:
+    if _is_pdf_generation_query(query):
+        import asyncio
+        from pathlib import Path
+        yield {"type": "status", "status": "Initializing premium Gamma PDF generator..."}
+        from modules.gamma_pdf import compile_gamma_pdf, get_detailed_section
+        topic = _extract_pdf_topic(query)
+        filename = _generate_pdf_filename(topic)
+        template = _extract_pdf_template(query)
+        
+        yield {"type": "status", "status": f"Generating Section 1 of 5 (Executive Summary) for '{topic}'..."}
+        await asyncio.sleep(0.05)
+        sec1 = get_detailed_section(topic, "Executive Summary & Framework", "Core thesis, market indicators, and initial adoption vectors.")
+        
+        yield {"type": "status", "status": "Generating Section 2 of 5 (Market Analysis & Sector Segmentation)..."}
+        await asyncio.sleep(0.05)
+        sec2 = get_detailed_section(topic, "Market Analysis & Sector Segmentation", "Analysis of market drivers, segmentation details, and industry positioning.")
+        
+        yield {"type": "status", "status": "Generating Section 3 of 5 (Quantitative Performance & Revenue Velocity)..."}
+        await asyncio.sleep(0.05)
+        sec3 = get_detailed_section(topic, "Quantitative Performance & Revenue Velocity", "Financial benchmarks, quarterly trends, revenue scalability, and growth curves.")
+        
+        yield {"type": "status", "status": "Generating Section 4 of 5 (Operational Efficiency & Infrastructure)..."}
+        await asyncio.sleep(0.05)
+        sec4 = get_detailed_section(topic, "Operational Efficiency & Architecture", "Infrastructure layout, logistical pipelines, efficiency metrics, and cost-to-output optimization.")
+        
+        yield {"type": "status", "status": "Generating Section 5 of 5 (Risk Analysis & Strategic Outlook)..."}
+        await asyncio.sleep(0.05)
+        sec5 = get_detailed_section(topic, "Risk Analysis, Vulnerability & Strategic Outlook", "Defensive positioning, regulatory compliance, risk distribution, and long-term ecosystem forecasts.")
+        
+        yield {"type": "status", "status": f"Generating custom AI illustrations with AARKAA-VISION and compiling PDF with the '{template}' template..."}
+        await asyncio.sleep(0.05)
+        
+        try:
+            sections = [sec1, sec2, sec3, sec4, sec5]
+            pdf_path = compile_gamma_pdf(topic, filename, template=template, sections=sections)
+            filename = Path(pdf_path).name
+            final_answer = (
+                f"I have generated the premium Gamma-style PDF report you requested.\n\n"
+                f"**Downloads & Sharing:**\n"
+                f"* [Download PDF Report](/download/{filename})\n"
+                f"* [Download PDF Report (HTTPS)](https://synthetixanalytics.com/download/{filename})"
+            )
+        except Exception as exc:
+            logger.error("Failed to compile premium Gamma PDF in stream: %s", exc)
+            final_answer = f"Error generating PDF: {exc}"
+            
+        chunk_size = 8
+        for i in range(0, len(final_answer), chunk_size):
+            token = final_answer[i:i+chunk_size]
+            full_response += token
+            yield {"type": "content", "token": token}
+            await asyncio.sleep(0.01)
+    elif _is_image_generation_query(query):
+        yield {"type": "status", "status": "Generating image..."}
+        from modules.tools.image import ImageGenTool
+        import asyncio
+        
+        image_result = ImageGenTool().execute({"prompt": query})
+        img_match = re.search(r"!\[Generated Image\]\((.*?)\)", image_result)
+        if img_match:
+            img_link = img_match.group(0)
+            filename = img_link.split("/")[-1].replace(")", "")
+            final_answer = (
+                f"I have generated the image you requested. Here is your generated image:\n\n"
+                f"{img_link}\n\n"
+                f"**Downloads & Sharing:**\n"
+                f"* [Download Image](/download/{filename})\n"
+                f"* [Download Image (HTTPS)](https://synthetixanalytics.com/download/{filename})"
+            )
+        else:
+            final_answer = image_result
+
+        chunk_size = 8
+        for i in range(0, len(final_answer), chunk_size):
+            token = final_answer[i:i+chunk_size]
+            full_response += token
+            yield {"type": "content", "token": token}
+            await asyncio.sleep(0.01)
+    elif needs_agent:
         from modules import coordinator
         import asyncio
         # Proactively save previous message to previous_message.txt in case the agent reads it
@@ -1253,12 +1534,13 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
 
     def _background_verify_and_store():
         verified_response = full_response
-        try:
-            from modules.agents.verifier import verify_response
-            logger.info("Running verifier agent on streamed response for database history...")
-            verified_response = verify_response(query, full_response)
-        except Exception as exc:
-            logger.error("Failed to run verifier agent on streamed response: %s", exc)
+        if not _is_image_generation_query(query):
+            try:
+                from modules.agents.verifier import verify_response
+                logger.info("Running verifier agent on streamed response for database history...")
+                verified_response = verify_response(query, full_response)
+            except Exception as exc:
+                logger.error("Failed to run verifier agent on streamed response: %s", exc)
 
         _post_process(
             user_id, session_id, query, verified_response,
