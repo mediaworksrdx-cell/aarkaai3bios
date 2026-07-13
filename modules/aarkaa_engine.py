@@ -515,6 +515,9 @@ def _generate(prompt, max_new_tokens=150, stop=None, temperature=0.7):
     
     tokens = list(_generate_stream(prompt, max_new_tokens=max_new_tokens, stop=stop, temperature=temperature))
     text = "".join(tokens).strip()
+    if not text:
+        logger.warning("_generate: model returned empty output — context overflow or KV cache failure. Returning stub fallback.")
+        return _stub_response(prompt)
     return _clean_response(text)
 
 
@@ -622,7 +625,11 @@ def generate_raw(prompt, max_new_tokens=300, stop=None):
 
             if _has_repetition(generated_text):
                 break
-    return generated_text.strip()
+    result = generated_text.strip()
+    if not result:
+        logger.warning("generate_raw: model returned empty output — possible KV cache overflow (max_tokens=%d, prompt_len=%d). Returning stub.", max_tokens, prompt_len)
+        return "I was unable to generate a response. Please try rephrasing your query."
+    return result
 
 
 def _is_list_header(text, pos):
@@ -970,7 +977,10 @@ def final_response(query, context, intent="", lang="en", mode="production", hist
             logger.error("final_response failed on attempt %d: %s", attempt + 1, exc)
             if attempt == 1:
                 return _stub_response(query, context)
-                
+
+    if not answer or not answer.strip():
+        logger.warning("final_response: all attempts returned empty output. Returning stub fallback.")
+        return _stub_response(query, context)
     return answer
 
 
