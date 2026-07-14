@@ -21,12 +21,18 @@ import gc
 
 _model_cpu = None
 _model_gpu = None
+_model_coder_gpu = None
 _is_stub = True
 _model_lock = threading.RLock()
 _last_active_time = time.time()
 _idle_timeout = int(os.getenv("AARKAAI_IDLE_TIMEOUT", "300"))  # 5 minutes default
 _gguf_file_path = None
+_gguf_coder_path = Path(MODEL_PATH).parent / "aarkaa-coder-3b-f16.gguf"
 _n_threads = 4
+
+import contextvars
+# Global thread/async-safe request domain tracker for dynamic routing
+request_domain = contextvars.ContextVar("request_domain", default="general")
 
 
 _LANG_NAMES = {
@@ -233,13 +239,40 @@ def _is_ist_nighttime() -> bool:
 
 
 def _get_model(force_gpu=True):
-    global _model_gpu, _last_active_time
+    global _model_gpu, _model_coder_gpu, _last_active_time
     if _is_stub:
         return None
     
     _last_active_time = time.time()
     
+    # Route to coder model if the request domain is technology (coding/software design)
+    is_coder_query = (request_domain.get() == "technology")
+    
     if force_gpu:
+        if is_coder_query:
+            if _model_coder_gpu is None:
+                with _model_lock:
+                    if _model_coder_gpu is None:
+                        from llama_cpp import Llama
+                        logger.info("Technology/Coding query detected. Loading Coder GGUF model to GPU...")
+                        try:
+                            _model_coder_gpu = Llama(
+                                model_path=str(_gguf_coder_path),
+                                n_ctx=16384,
+                                n_threads=_n_threads,
+                                n_threads_batch=_n_threads,
+                                n_gpu_layers=-1,
+                                verbose=False,
+                            )
+                            logger.info("Coder GGUF model successfully loaded on GPU.")
+                        except Exception as e:
+                            logger.error("Failed to load Coder GGUF model: %s. Falling back to general model.", e)
+                            is_coder_query = False
+
+            if _model_coder_gpu is not None:
+                return _model_coder_gpu
+
+        # General model loading (or fallback if coder loading failed)
         if _model_gpu is None:
             with _model_lock:
                 if _model_gpu is None:
@@ -260,6 +293,8 @@ def _get_model(force_gpu=True):
                         return _model_cpu
         return _model_gpu
     else:
+        if is_coder_query and _model_coder_gpu is not None:
+            return _model_coder_gpu
         return _model_gpu if _model_gpu is not None else _model_cpu
 
 
@@ -276,13 +311,17 @@ def _idle_monitor_loop():
         if nighttime:
             # During nighttime, offload to CPU if idle longer than timeout
             elapsed = time.time() - _last_active_time
-            if _model_gpu is not None and elapsed > _idle_timeout:
+            if (_model_gpu is not None or _model_coder_gpu is not None) and elapsed > _idle_timeout:
                 with _model_lock:
-                    if _model_gpu is not None and elapsed > _idle_timeout:
+                    if (_model_gpu is not None or _model_coder_gpu is not None) and elapsed > _idle_timeout:
                         logger.info("Model idle for %.1f seconds during nighttime IST. Offloading GPU VRAM...", elapsed)
                         try:
-                            del _model_gpu
-                            _model_gpu = None
+                            if _model_gpu is not None:
+                                del _model_gpu
+                                _model_gpu = None
+                            if _model_coder_gpu is not None:
+                                del _model_coder_gpu
+                                _model_coder_gpu = None
                             try:
                                 import torch
                                 if torch.cuda.is_available():
