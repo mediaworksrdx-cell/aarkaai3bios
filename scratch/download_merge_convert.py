@@ -1,10 +1,10 @@
-﻿import os
+import os
 import shutil
 import subprocess
 import sys
 from huggingface_hub import snapshot_download
 
-# Configuration
+# Configuration — token loaded from environment variable HF_TOKEN
 token = os.environ.get("HF_TOKEN", "")
 base_repo = "Qwen/Qwen2.5-Coder-3B-Instruct"
 adapter_repo = "rthshr/aarkaa-coder-3b-adapter"
