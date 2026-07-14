@@ -89,7 +89,10 @@ _FACTUAL_KEYWORDS = [
     "recommend", "trend", "latest", "current", "news", "price",
     "difference", "information",
     "ebitda", "fcf", "cash flow", "capex", "ebit", "revenue", "income", "earnings",
-    "working capital", "depreciation", "amortization"
+    "working capital", "depreciation", "amortization",
+    "college", "colleges", "university", "universities", "school", "schools",
+    "population", "census", "count", "statistics", "demographics", "how many",
+    "how much", "total number", "number of"
 ]
 
 # Queries matching these keywords are self-contained — they NEVER need web search.
@@ -282,6 +285,51 @@ def _is_reasoning_query(query: str) -> bool:
     return False
 
 
+def _resolve_search_query(query: str, chat_ctx: list[dict] | None) -> str:
+    """Resolve direct conversational search triggers (e.g., 'search web') to the previous user query."""
+    q_low = query.strip().lower()
+    search_directives = ["search web", "search the web", "google it", "look it up", "search online", "find online", "search"]
+    if q_low in search_directives and chat_ctx:
+        # Scan backward to find the last user query
+        for msg in reversed(chat_ctx):
+            if msg.get("role") == "user":
+                last_msg = msg.get("message", "")
+                if last_msg and last_msg.strip().lower() not in search_directives:
+                    logger.info("Resolved search directive '%s' to previous user query: '%s'", query, last_msg)
+                    return last_msg
+    return query
+
+
+def _enhance_search_query(query: str) -> str:
+    """
+    Rewrite and enhance statistical/factual queries with temporal and authority keywords 
+    to ensure search engines prioritize fresh, official, and authoritative results.
+    """
+    q_low = query.lower()
+    
+    # If the query already has a year (e.g. 2024, 2025, 2026), do not modify it
+    if re.search(r'\b(202\d|201\d|19\d{2})\b', q_low):
+        return query
+        
+    # Check if this is a statistical, census, or counting query
+    is_statistical = any(kw in q_low for kw in ["how many", "how much", "count of", "number of", "population", "census", "statistics", "list of"])
+    is_college_related = any(kw in q_low for kw in ["college", "colleges", "university", "universities", "school", "schools", "institution", "institutions"])
+    
+    if is_statistical:
+        enhanced = query.strip().rstrip("?").rstrip(".")
+        # Append the current year to force fresh results
+        enhanced += " 2026"
+        
+        # If it's about educational institutions, append authority keywords to bias search ranking toward official sites
+        if is_college_related:
+            enhanced += " AICTE approved official"
+        
+        logger.info("Rewrote search query: '%s' -> '%s'", query, enhanced)
+        return enhanced
+        
+    return query
+
+
 def _is_trick_question(query: str) -> bool:
     """Detect common trick questions or riddles that should bypass web search."""
     q = query.lower()
@@ -434,7 +482,9 @@ def _generate_pdf_filename(topic: str) -> str:
 def _extract_pdf_template(query: str) -> str:
     """Detect if the user requested a specific color template in their query."""
     q = query.lower()
-    if "dark" in q:
+    if "white" in q or "light" in q:
+        return "indigo"
+    elif "dark" in q:
         return "dark"
     elif "green" in q or "emerald" in q or "teal" in q:
         return "emerald"
@@ -687,13 +737,16 @@ def _should_skip_rag(query: str, intent: str, domain: str) -> bool:
     q_low = query.lower().strip()
     clean_q = re.sub(r"[^\w\s]", "", q_low).strip()
 
-    # 1. Greetings / Conversational Meta Queries / Identity queries
+    # 1. Greetings / Conversational Meta Queries / Identity queries / Verification follow-ups
     greetings = {
         "hello", "hi", "hey", "greetings", "good morning", "good afternoon",
         "good evening", "how are you", "who are you", "aarka", "aarkaai",
-        "what is your name", "what can you do", "help me", "who am i", "who i am"
+        "what is your name", "what can you do", "help me", "who am i", "who i am",
+        "are you sure", "are you certain", "really", "is that true", "is that correct",
+        "why", "why so", "how come", "yes", "no", "ok", "okay", "thanks", "thank you",
+        "got it", "cool", "nice"
     }
-    if clean_q in greetings or _is_identity_query(query) or any(meta in q_low for meta in ["who are you", "what is your name", "what can you do"]):
+    if clean_q in greetings or _is_identity_query(query) or any(meta in q_low for meta in ["who are you", "what is your name", "what can you do", "are you sure", "are you certain"]):
         return True
 
     # 2. Reasoning / Math Puzzles
@@ -704,8 +757,9 @@ def _should_skip_rag(query: str, intent: str, domain: str) -> bool:
     if re.search(r"\b(calculate|compute|solve|what is)\b", q_low) and re.search(r"\d+\s*[\+\-\*/\^]\s*\d+", q_low):
         return True
 
-    # 4. Coding / Technology Help
-    if intent == "coding_help" or _is_coding_syntax(query) or domain == "technology":
+    # 4. Coding / Technology Help (Do NOT skip RAG if it's a system design / architecture query)
+    is_sysdesign = any(w in q_low for w in ["system design", "architecture", "design a", "design an", "scale a", "eviction", "replication", "sharding", "capacity estimation", "latency", "load balancer"])
+    if (intent == "coding_help" or _is_coding_syntax(query) or domain == "technology") and not is_sysdesign:
         return True
 
     # 5. Creative writing / Humor
@@ -716,19 +770,138 @@ def _should_skip_rag(query: str, intent: str, domain: str) -> bool:
     return False
 
 
+def _follow_up_score(query: str, chat_ctx: list) -> float:
+    """Confidence-scored follow-up detection using 7 signal categories.
+
+    Returns a float 0.0–1.0 indicating how strongly the query depends on
+    prior conversation history.  Multiple signals stack (capped at 1.0).
+    """
+    if not chat_ctx:
+        return 0.0
+
+    q_low = query.lower().strip()
+    word_count = len(q_low.split())
+    words = set(re.findall(r"\b[a-zA-Z]+\b", q_low))
+    score = 0.0
+
+    # ── Signal 1: Short query heuristic ──────────────────────────────────
+    if word_count <= 3:
+        score += 0.85
+    elif word_count <= 6:
+        score += 0.70
+
+    # ── Signal 2: Pronoun / demonstrative references ─────────────────────
+    pronoun_refs = {
+        "it", "its", "they", "them", "their", "he", "him", "his",
+        "she", "her", "this", "that", "these", "those",
+    }
+    if words.intersection(pronoun_refs):
+        score += 0.60
+
+    # ── Signal 3: Continuation phrases ───────────────────────────────────
+    continuation_phrases = [
+        "tell me more", "explain further", "go on", "keep going",
+        "what else", "and then", "continue", "elaborate", "more details",
+        "expand on", "can you elaborate", "more about", "in detail",
+    ]
+    if any(p in q_low for p in continuation_phrases):
+        score += 0.90
+
+    # ── Signal 4: Verification / challenge phrases ───────────────────────
+    verification_phrases = [
+        "are you sure", "really", "is that correct", "is that right",
+        "is that true", "why so", "how come", "can you clarify",
+        "are you certain", "prove it", "source", "how do you know",
+        "double check", "verify", "confirm",
+    ]
+    if any(p in q_low for p in verification_phrases):
+        score += 0.85
+
+    # ── Signal 5: Affirmation / negation ─────────────────────────────────
+    affirmation_negation = {
+        "yes", "no", "ok", "okay", "right", "correct", "wrong",
+        "exactly", "agreed", "nope", "yep", "yeah", "nah",
+    }
+    if q_low in affirmation_negation or (word_count <= 3 and words.intersection(affirmation_negation)):
+        score += 0.80
+
+    # ── Signal 6: Contextual back-references ─────────────────────────────
+    back_refs = [
+        "the above", "you said", "you mentioned", "earlier",
+        "previous", "last answer", "your response", "as you said",
+        "you told me", "your answer", "from before",
+    ]
+    if any(p in q_low for p in back_refs):
+        score += 0.95
+
+    # ── Signal 7: Comparative follow-ups ─────────────────────────────────
+    comparative_phrases = [
+        "what about", "how about", "instead of", "versus", " vs ",
+        "compared to", "rather than", "difference between", "or should",
+    ]
+    if any(p in q_low for p in comparative_phrases):
+        score += 0.70
+
+    return min(score, 1.0)
+
+
 def _is_follow_up(query: str, chat_ctx: list) -> bool:
-    """Detect if the current query is a follow-up to the previous conversation."""
+    """Boolean wrapper — returns True when follow-up confidence > 0."""
+    return _follow_up_score(query, chat_ctx) > 0.0
+
+
+def _detect_topic_shift(query: str, chat_ctx: list) -> bool:
+    """Detect when the user switches to an unrelated topic.
+
+    Returns True when the current query has zero meaningful word overlap
+    with recent history, indicating a fresh topic that should not carry
+    stale conversation context.
+    """
     if not chat_ctx:
         return False
 
-    q_low = query.lower()
-    # Check for typical follow-up markers (pronouns or relative adverbs/determiners)
-    follow_up_markers = {
-        "it", "they", "he", "she", "this", "that", "them", "these", "those",
-        "why", "how", "what about", "tell me more", "explain further", "and", "but", "so"
+    q_low = query.lower().strip()
+    word_count = len(q_low.split())
+
+    # Short queries (≤6 words) are almost never fresh-topic — they depend on context
+    if word_count <= 6:
+        return False
+
+    # Topic-shift markers — user explicitly abandons prior topic
+    shift_phrases = [
+        "forget that", "never mind", "forget it", "actually forget",
+        "new topic", "change topic", "different question", "something else",
+        "actually,", "forget java", "forget python",  # "actually forget X"
+    ]
+    if any(p in q_low for p in shift_phrases):
+        return True
+
+    # Content overlap check: compare query words with last 4 messages
+    stop_words = {
+        "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "may", "might", "shall", "can", "to", "of", "in", "for",
+        "on", "with", "at", "by", "from", "as", "into", "about", "between",
+        "through", "and", "but", "or", "so", "if", "then", "than", "that",
+        "this", "it", "its", "i", "me", "my", "you", "your", "we", "our",
+        "what", "how", "why", "when", "where", "which", "who", "whom",
+        "not", "no", "yes", "all", "each", "every", "some", "any",
+        "tell", "explain", "describe", "give", "show", "please",
     }
-    words = set(re.findall(r"\b[a-zA-Z]+\b", q_low))
-    if words.intersection(follow_up_markers):
+    query_words = set(re.findall(r"\b[a-zA-Z]{3,}\b", q_low)) - stop_words
+    if len(query_words) < 2:
+        return False  # Too few content words to judge
+
+    # Collect content words from last 4 history messages
+    recent = chat_ctx[-4:] if len(chat_ctx) >= 4 else chat_ctx
+    history_text = " ".join(m.get("message", "") for m in recent).lower()
+    history_words = set(re.findall(r"\b[a-zA-Z]{3,}\b", history_text)) - stop_words
+
+    overlap = query_words.intersection(history_words)
+    overlap_ratio = len(overlap) / len(query_words) if query_words else 0.0
+
+    # If less than 15% word overlap with recent history, it's likely a new topic
+    if overlap_ratio < 0.15 and word_count > 8:
         return True
 
     return False
@@ -859,7 +1032,14 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     intent = filter_result["intent"]
 
     # Fallback to general query if classifier confidence is low
-    if filter_confidence < 0.45 and intent not in ["persuasion", "debate", "comparison", "roleplay"]:
+    # Bypassed if the query explicitly asks for systems/software design or architecture
+    _has_design_keywords = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"])
+    if _has_design_keywords:
+        domain = "technology"
+        intent = "tech_info"
+        filter_confidence = max(filter_confidence, 0.90)
+        logger.info("Forced domain=technology, intent=tech_info due to design/architecture keywords")
+    elif filter_confidence < 0.45 and intent not in ["persuasion", "debate", "comparison", "roleplay"]:
         logger.info("Low filter confidence (%.3f < 0.45) — falling back to general query", filter_confidence)
         domain = "general"
         intent = "general_query"
@@ -868,6 +1048,9 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         "Filter → domain=%s  conf=%.3f  intent=%s",
         domain, filter_confidence, intent,
     )
+    
+    # Track the active request domain for engine model routing
+    aarkaa_engine.request_domain.set(domain)
 
     # ── 2. Skip primary check – run model only ONCE at the end (speed)
     # Gathering external context first, then a single model call with
@@ -879,7 +1062,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # Fetch chat history early for follow-up detection and context budget
     chat_ctx = None
     try:
-        chat_ctx = memory.get_chat_context(user_id, session_id, limit=10)
+        chat_ctx = memory.get_chat_context(user_id, session_id, limit=15)
         if chat_ctx:
             last_user_msg = None
             for msg in reversed(chat_ctx):
@@ -897,15 +1080,54 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     context_parts: list[str] = []
 
     # RAG – check the knowledge base first
-    if not _should_skip_rag(query, intent, domain) and mode != "benchmark":
+    # Confidence-gated RAG skip: high-confidence follow-ups (≥0.7) with ≤8
+    # words skip RAG entirely; medium confidence (≥0.5) reduces top_k to 1.
+    _fu_score = _follow_up_score(query, chat_ctx)
+    _is_short_followup = _fu_score >= 0.7 and len(query.split()) <= 8
+    if not _should_skip_rag(query, intent, domain) and mode != "benchmark" and not _is_short_followup:
         try:
-            top_k = 1 if _is_follow_up(query, chat_ctx) else 3
+            from modules.aarkaa_engine import _classify_and_plan
+            plan = _classify_and_plan(query)
+            if _fu_score >= 0.5:
+                top_k = 1
+            elif plan["domain"] in ["system_design", "coding", "debugging"]:
+                top_k = 6
+            elif plan["type"] == "fact_lookup":
+                top_k = 2
+            else:
+                top_k = 3
             rag_context = rag.get_context(query, top_k=top_k, user_id=user_id, query_domain=domain)
             if rag_context:
                 context_parts.append(f"[Knowledge Base]\n{rag_context}")
                 sources.append("rag")
         except Exception as exc:
             logger.error("RAG module error: %s", exc)
+
+    # Topic-shift detection: if the user switched to an unrelated topic,
+    # trim history to prevent conversation drift from stale context.
+    if chat_ctx and _detect_topic_shift(query, chat_ctx):
+        logger.info("Topic shift detected — trimming history to last 2 turns")
+        chat_ctx = chat_ctx[-4:]  # Keep only last 2 user+assistant pairs
+
+    # Architecture self-awareness – detect queries about AARKAA's own internals
+    from modules.architecture_verifier import is_architecture_query
+    _is_arch_query = is_architecture_query(query)
+    _arch_context = ""
+    if _is_arch_query and mode != "benchmark":
+        try:
+            _arch_context = rag.get_context(
+                query, top_k=5, user_id=user_id,
+                max_chars=8000, source_filter="architecture"
+            )
+            if _arch_context:
+                context_parts.insert(0, (
+                    "[AARKAA Architecture Documentation — Answer from this ONLY]\n"
+                    + _arch_context
+                ))
+                sources.append("architecture")
+                logger.info("Architecture query detected — injected %d chars of arch docs", len(_arch_context))
+        except Exception as exc:
+            logger.error("Architecture RAG retrieval error: %s", exc)
 
     # Domain-specific routing
     is_fin_intent = _has_live_finance_intent(query, domain, intent)
@@ -966,7 +1188,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
 
     # Detect current events / news queries that need web search
     q_lower = query.lower()
-    is_factual = any(q_lower.startswith(prefix) for prefix in _FACTUAL_PREFIXES)
+    is_factual = any(prefix in q_lower for prefix in _FACTUAL_PREFIXES)
 
     # Skip web search if live finance data was already fetched — web results
     # often contain stale prices that contradict the live Yahoo Finance feed
@@ -1013,6 +1235,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         and (
             any(w in query.lower() for w in agent_triggers)
             or bool(re.search(r"\brun\b", query.lower()))
+            or bool(re.search(r"\bgit\b", query.lower()))
             or (intent == "coding_help" and any(p in query.lower() for p in ["run", "execute", "trace", "test"]))
             or _is_calculation_query(query)
             or _needs_skill_routing(query)
@@ -1023,6 +1246,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # Queries that are self-contained (algorithms, system design, CS theory)
     # should NEVER trigger web search — the model knows the answer.
     is_no_web = any(kw in q_lower for kw in _NO_WEB_SEARCH_KEYWORDS)
+    is_search_directive = q_lower.strip() in ["search web", "search the web", "google it", "look it up", "search online", "find online", "search"]
 
     is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
 
@@ -1033,10 +1257,12 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         and not has_finance_context
         and not is_greeting
         and not _is_identity_query(query)
-        and intent != "coding_help"
-        and intent != "reasoning_puzzle"
+        and not _is_short_followup
+        and (intent != "coding_help" or is_factual)
+        and (intent != "reasoning_puzzle" or is_factual)
         and (
             domain == "web_search"
+            or is_search_directive
             or intent in ("web_lookup", "news_search", "science_query")
             or _has_keyword_match(query, _NEWS_KEYWORDS)
             or _has_keyword_match(query, _FACTUAL_KEYWORDS)
@@ -1048,7 +1274,9 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     if needs_web and not needs_agent:
         if not _web_breaker.is_open:
             try:
-                web_ctx = web_search.get_web_context(query, lang=detected_lang, filter_live=(not is_fin_intent))
+                search_query = _resolve_search_query(query, chat_ctx)
+                search_query = _enhance_search_query(search_query)
+                web_ctx = web_search.get_web_context(search_query, lang=detected_lang, filter_live=(not is_fin_intent))
                 if web_ctx:
                     context_parts.append(f"[Web Search]\n{web_ctx}")
                     sources.append("web_search")
@@ -1073,6 +1301,34 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         user_facts = memory.get_user_facts_prompt(user_id)
     except Exception as exc:
         logger.error("Error loading user facts: %s", exc)
+
+    # ── Autonomous Planner Guard Integration ────────────────────────────────
+    import os
+    ENABLE_AUTONOMOUS_PLANNING = os.getenv("ENABLE_AUTONOMOUS_PLANNING", "true").lower() == "true"
+    
+    if ENABLE_AUTONOMOUS_PLANNING:
+        from modules import goal_planner
+        if goal_planner.needs_planning(query, filter_result, chat_ctx):
+            try:
+                from modules import task_memory, execution_engine
+                plan_dag = goal_planner.create_plan(query, fused_context, chat_ctx)
+                goal_id = task_memory.save_goal(user_id, session_id, query, plan_dag)
+                final_answer = execution_engine.execute(plan_dag, goal_id, user_id, session_id)
+                
+                # Combined confidence
+                combined_confidence = 0.95
+                elapsed = round(time.perf_counter() - start, 3)
+                logger.info("Autonomous execution planner finished in %.3fs", elapsed)
+                return PromptResponse(
+                    response=final_answer,
+                    intent=intent,
+                    confidence=combined_confidence,
+                    sources=sources + ["autonomous_planner"],
+                    detected_language=detected_lang,
+                    processing_time=elapsed,
+                )
+            except Exception as plan_exc:
+                logger.error("Autonomous Planner execution failed: %s. Falling back.", plan_exc)
 
     if _is_pdf_generation_query(query):
         from pathlib import Path
@@ -1127,10 +1383,29 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
 
     # ── 7. In-depth Verification Pass ─────────────────────────────────────
     if not _is_image_generation_query(query):
+        # Architecture-specific verification (runs first for arch queries)
+        if _is_arch_query and _arch_context:
+            try:
+                from modules.architecture_verifier import verify_architecture_response, build_architecture_repair_prompt
+                if not verify_architecture_response(query, final_answer):
+                    logger.info("Architecture verifier rejected response — regenerating with repair prompt")
+                    repair_prompt = build_architecture_repair_prompt(query, _arch_context)
+                    final_answer = aarkaa_engine.generate_raw(repair_prompt, max_new_tokens=1024)
+                    final_answer = aarkaa_engine.clean_response(final_answer)
+                    # Verify again — if still bad, prepend arch docs as direct answer
+                    if not verify_architecture_response(query, final_answer):
+                        logger.warning("Architecture verifier rejected repair response — using direct docs")
+                        final_answer = (
+                            "Based on AARKAA's internal architecture:\n\n"
+                            + _arch_context
+                        )
+            except Exception as exc:
+                logger.error("Architecture verification failed: %s", exc)
+
         try:
             from modules.agents.verifier import verify_response
             logger.info("Running verifier agent on final answer...")
-            final_answer = verify_response(query, final_answer)
+            final_answer = verify_response(query, final_answer, evidence=fused_context)
         except Exception as exc:
             logger.error("Failed to run verifier agent on final answer: %s", exc)
 
@@ -1206,7 +1481,14 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     intent = filter_result["intent"]
 
     # Fallback to general query if classifier confidence is low
-    if filter_confidence < 0.45 and intent not in ["persuasion", "debate", "comparison", "roleplay"]:
+    # Bypassed if the query explicitly asks for systems/software design or architecture
+    _has_design_keywords = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"])
+    if _has_design_keywords:
+        domain = "technology"
+        intent = "tech_info"
+        filter_confidence = max(filter_confidence, 0.90)
+        logger.info("Forced domain=technology, intent=tech_info due to design/architecture keywords (stream)")
+    elif filter_confidence < 0.45 and intent not in ["persuasion", "debate", "comparison", "roleplay"]:
         logger.info("Low filter confidence (%.3f < 0.45) — falling back to general query", filter_confidence)
         domain = "general"
         intent = "general_query"
@@ -1215,12 +1497,15 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         "Filter → domain=%s  conf=%.3f  intent=%s",
         domain, filter_confidence, intent,
     )
+    
+    # Track the active request domain for engine model routing
+    aarkaa_engine.request_domain.set(domain)
     sources.append("aarkaa-3b")
 
     # Fetch chat history early for follow-up detection and context budget
     chat_ctx = None
     try:
-        chat_ctx = memory.get_chat_context(user_id, session_id, limit=10)
+        chat_ctx = memory.get_chat_context(user_id, session_id, limit=15)
         if chat_ctx:
             last_user_msg = None
             for msg in reversed(chat_ctx):
@@ -1236,15 +1521,22 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     # ── 4. Gather Context ─────────────────────────────────────────────────
     context_parts: list[str] = []
     
-    # RAG
-    if not _should_skip_rag(query, intent, domain) and mode != "benchmark":
+    # RAG — confidence-gated skip for follow-ups
+    _fu_score_s = _follow_up_score(query, chat_ctx)
+    _is_short_followup_s = _fu_score_s >= 0.7 and len(query.split()) <= 8
+    if not _should_skip_rag(query, intent, domain) and mode != "benchmark" and not _is_short_followup_s:
         try:
-            top_k = 1 if _is_follow_up(query, chat_ctx) else 3
+            top_k = 1 if _fu_score_s >= 0.5 else 3
             rag_context = rag.get_context(query, top_k=top_k, user_id=user_id, query_domain=domain)
             if rag_context:
                 context_parts.append(f"[Knowledge Base]\n{rag_context}")
                 sources.append("rag")
         except Exception: pass
+
+    # Topic-shift detection: trim stale history on topic change
+    if chat_ctx and _detect_topic_shift(query, chat_ctx):
+        logger.info("Topic shift detected (stream) — trimming history to last 2 turns")
+        chat_ctx = chat_ctx[-4:]
 
     # Domain-specific routing
     is_fin_intent = _has_live_finance_intent(query, domain, intent)
@@ -1304,7 +1596,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             logger.error("Strategy module error: %s", exc)
 
     # Detect current events / news queries that need web search
-    is_factual = any(q_lower.startswith(prefix) for prefix in _FACTUAL_PREFIXES)
+    is_factual = any(prefix in q_lower for prefix in _FACTUAL_PREFIXES)
 
     # Skip web search if live finance data was already fetched — web results
     # often contain stale prices that contradict the live Yahoo Finance feed
@@ -1350,6 +1642,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         and (
             any(w in query.lower() for w in agent_triggers)
             or bool(re.search(r"\brun\b", query.lower()))
+            or bool(re.search(r"\bgit\b", query.lower()))
             or (intent == "coding_help" and any(p in query.lower() for p in ["run", "execute", "trace", "test"]))
             or _is_calculation_query(query)
             or _needs_skill_routing(query)
@@ -1360,6 +1653,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     # Queries that are self-contained (algorithms, system design, CS theory)
     # should NEVER trigger web search — the model knows the answer.
     is_no_web = any(kw in q_lower for kw in _NO_WEB_SEARCH_KEYWORDS)
+    is_search_directive = q_lower.strip() in ["search web", "search the web", "google it", "look it up", "search online", "find online", "search"]
 
     is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
 
@@ -1370,10 +1664,12 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         and not has_finance_context
         and not is_greeting
         and not _is_identity_query(query)
-        and intent != "coding_help"
-        and intent != "reasoning_puzzle"
+        and not _is_short_followup_s
+        and (intent != "coding_help" or is_factual)
+        and (intent != "reasoning_puzzle" or is_factual)
         and (
             domain == "web_search"
+            or is_search_directive
             or intent in ("web_lookup", "news_search", "science_query")
             or _has_keyword_match(query, _NEWS_KEYWORDS)
             or _has_keyword_match(query, _FACTUAL_KEYWORDS)
@@ -1385,7 +1681,9 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     if needs_web and not needs_agent:
         if not _web_breaker.is_open:
             try:
-                web_ctx = web_search.get_web_context(query, lang=detected_lang, filter_live=(not is_fin_intent))
+                search_query = _resolve_search_query(query, chat_ctx)
+                search_query = _enhance_search_query(search_query)
+                web_ctx = web_search.get_web_context(search_query, lang=detected_lang, filter_live=(not is_fin_intent))
                 if web_ctx:
                     context_parts.append(f"[Web Search]\n{web_ctx}")
                     sources.append("web_search")
@@ -1422,34 +1720,43 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         import asyncio
         from pathlib import Path
         yield {"type": "status", "status": "Initializing premium Gamma PDF generator..."}
-        from modules.gamma_pdf import compile_gamma_pdf, get_detailed_section
+        from modules.gamma_pdf import compile_gamma_pdf, get_detailed_section, generate_domain_metadata
+        from modules.gamma_domains import detect_domain
         topic = _extract_pdf_topic(query)
         filename = _generate_pdf_filename(topic)
         template = _extract_pdf_template(query)
-        
-        yield {"type": "status", "status": f"Generating Section 1 of 5 (Executive Summary) for '{topic}'..."}
+
+        # Let Aarka decide section titles based on the actual topic and domain
+        domain = detect_domain(topic)
+        yield {"type": "status", "status": f"Analysing topic '{topic}' (domain: {domain}) and generating report structure..."}
         await asyncio.sleep(0.05)
-        sec1 = get_detailed_section(topic, "Executive Summary & Framework", "Core thesis, market indicators, and initial adoption vectors.")
-        
-        yield {"type": "status", "status": "Generating Section 2 of 5 (Market Analysis & Sector Segmentation)..."}
+        meta = generate_domain_metadata(topic, domain)
+        s_titles = meta["section_titles"]
+        s_hints  = meta["section_hints"]
+
+        yield {"type": "status", "status": f"Generating Section 1 of 5 ({s_titles[0]})..."}
         await asyncio.sleep(0.05)
-        sec2 = get_detailed_section(topic, "Market Analysis & Sector Segmentation", "Analysis of market drivers, segmentation details, and industry positioning.")
-        
-        yield {"type": "status", "status": "Generating Section 3 of 5 (Quantitative Performance & Revenue Velocity)..."}
+        sec1 = get_detailed_section(topic, s_titles[0], s_hints[0])
+
+        yield {"type": "status", "status": f"Generating Section 2 of 5 ({s_titles[1]})..."}
         await asyncio.sleep(0.05)
-        sec3 = get_detailed_section(topic, "Quantitative Performance & Revenue Velocity", "Financial benchmarks, quarterly trends, revenue scalability, and growth curves.")
-        
-        yield {"type": "status", "status": "Generating Section 4 of 5 (Operational Efficiency & Infrastructure)..."}
+        sec2 = get_detailed_section(topic, s_titles[1], s_hints[1])
+
+        yield {"type": "status", "status": f"Generating Section 3 of 5 ({s_titles[2]})..."}
         await asyncio.sleep(0.05)
-        sec4 = get_detailed_section(topic, "Operational Efficiency & Architecture", "Infrastructure layout, logistical pipelines, efficiency metrics, and cost-to-output optimization.")
-        
-        yield {"type": "status", "status": "Generating Section 5 of 5 (Risk Analysis & Strategic Outlook)..."}
+        sec3 = get_detailed_section(topic, s_titles[2], s_hints[2])
+
+        yield {"type": "status", "status": f"Generating Section 4 of 5 ({s_titles[3]})..."}
         await asyncio.sleep(0.05)
-        sec5 = get_detailed_section(topic, "Risk Analysis, Vulnerability & Strategic Outlook", "Defensive positioning, regulatory compliance, risk distribution, and long-term ecosystem forecasts.")
-        
+        sec4 = get_detailed_section(topic, s_titles[3], s_hints[3])
+
+        yield {"type": "status", "status": f"Generating Section 5 of 5 ({s_titles[4]})..."}
+        await asyncio.sleep(0.05)
+        sec5 = get_detailed_section(topic, s_titles[4], s_hints[4])
+
         yield {"type": "status", "status": f"Generating custom AI illustrations with AARKAA-VISION and compiling PDF with the '{template}' template..."}
         await asyncio.sleep(0.05)
-        
+
         try:
             sections = [sec1, sec2, sec3, sec4, sec5]
             pdf_path = compile_gamma_pdf(topic, filename, template=template, sections=sections)
@@ -1507,6 +1814,9 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         for event_type, data in coordinator.stream_task(query, agent_ctx):
             if event_type == "status":
                 yield {"type": "status", "status": data}
+            elif event_type == "error":
+                yield {"type": "error", "detail": data}
+                return
             elif event_type == "final":
                 final_answer = data
                 
@@ -1517,14 +1827,36 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             yield {"type": "content", "token": token}
             await asyncio.sleep(0.01)
     else:
-        # Stream the tokens
+        # Generate the complete raw response first to execute safety validation
+        raw_response = ""
         for token in aarkaa_engine.stream_final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode, history=chat_ctx, user_facts=user_facts):
+            raw_response += token
+        
+        # Intercept and perform synchronous verifier audit checks for coding requests
+        if intent == "coding_help" or "coding" in intent:
+            try:
+                from modules.agents.verifier import verify_response
+                logger.info("Enforcing synchronous verifier check on generated response...")
+                final_answer = verify_response(query, raw_response, evidence=fused_context)
+            except Exception as exc:
+                logger.error("Failed executing synchronous verifier check: %s", exc)
+                final_answer = raw_response
+        else:
+            final_answer = raw_response
+            
+        # Stream the validated tokens to the client
+        import asyncio
+        chunk_size = 8
+        for i in range(0, len(final_answer), chunk_size):
+            token = final_answer[i:i+chunk_size]
             full_response += token
             yield {"type": "content", "token": token}
+            await asyncio.sleep(0.01)
 
     # ── 7. Yield final stats IMMEDIATELY so the client can close the stream ─
     elapsed = round(time.perf_counter() - start, 3)
     yield {"type": "final", "processing_time": elapsed}
+
 
     # ── 8. Verification + post-process in background (non-blocking) ───────
     # The verifier runs a full LLM inference pass (~30-60s on CPU) which
@@ -1538,7 +1870,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             try:
                 from modules.agents.verifier import verify_response
                 logger.info("Running verifier agent on streamed response for database history...")
-                verified_response = verify_response(query, full_response)
+                verified_response = verify_response(query, full_response, evidence=fused_context)
             except Exception as exc:
                 logger.error("Failed to run verifier agent on streamed response: %s", exc)
 
