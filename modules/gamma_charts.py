@@ -39,18 +39,26 @@ GRADIENT_AREA  = ['#6366F180', '#10B98180', '#F59E0B80']
 
 def _apply_gamma_style(ax, fig, title: str, transparent: bool = True):
     """Apply premium Gamma styling to a matplotlib axes."""
+    # Read output background theme parameter dynamically from environment or global layout context
+    import os
+    is_dark = os.getenv("AARKAAI_THEME", "light").lower() == "dark"
+    text_color = '#F3F4F6' if is_dark else '#0F172A'
+    grid_color = '#1F2937' if is_dark else '#E2E8F0'
+    spine_color = '#374151' if is_dark else '#CBD5E1'
+    tick_color = '#9CA3AF' if is_dark else '#64748B'
+
     if transparent:
         fig.patch.set_alpha(0)
         ax.set_facecolor('none')
-    ax.set_title(title.upper(), fontsize=9, fontweight='bold', color='#0F172A',
+    ax.set_title(title.upper(), fontsize=9, fontweight='bold', color=text_color,
                  pad=12, loc='left', fontfamily='sans-serif')
-    ax.tick_params(colors='#64748B', labelsize=7, length=3, width=0.6)
-    ax.grid(True, axis='y', linestyle='--', color='#E2E8F0', alpha=0.6, linewidth=0.5)
+    ax.tick_params(colors=tick_color, labelsize=7, length=3, width=0.6)
+    ax.grid(True, axis='y', linestyle='--', color=grid_color, alpha=0.6, linewidth=0.5)
     ax.grid(False, axis='x')
     for spine in ('top', 'right'):
         ax.spines[spine].set_visible(False)
     for spine in ('left', 'bottom'):
-        ax.spines[spine].set_color('#CBD5E1')
+        ax.spines[spine].set_color(spine_color)
         ax.spines[spine].set_linewidth(0.6)
 
 def _chart_to_base64(fig, name_prefix: str, output_dir: Path) -> dict:
@@ -104,6 +112,9 @@ def generate_bar_chart(topic: str, output_dir: Path, domain: str = None) -> dict
     elif domain == "energy":
         labels = ['2022', '2023', '2024', '2025', '2026 (P)']
         values = [4.2, 6.8, 9.4, 11.2, 12.4]
+    elif domain == "general":
+        labels = ['2018', '2020', '2022', '2024', '2026 (P)']
+        values = [5.2, 3.1, 7.8, 12.4, 15.0]
     else:
         labels = ['FY 2021', 'FY 2022', 'FY 2023', 'FY 2024', 'FY 2025 (P)']
         values = [110.0, 185.0, 310.0, 540.0, 780.0]
@@ -119,14 +130,18 @@ def generate_bar_chart(topic: str, output_dir: Path, domain: str = None) -> dict
     
     # Value annotations
     unit = '%' if domain == 'macro' else ('B' if domain in ['crypto', 'realestate'] else ('GW' if domain == 'energy' else 'M'))
-    prefix = '$' if domain not in ['macro', 'ml', 'energy', 'healthcare', 'pharma'] else ''
+    prefix = '$' if domain not in ['macro', 'ml', 'energy', 'healthcare', 'pharma', 'general'] else ''
     
+    import os
+    is_dark = os.getenv("AARKAAI_THEME", "light").lower() == "dark"
+    label_color = '#E2E8F0' if is_dark else '#1E293B'
+
     for b in bars:
         h = b.get_height()
         ax.annotate(f'{prefix}{h:.1f}{unit}' if h < 15 else f'{prefix}{int(h)}{unit}', 
                     xy=(b.get_x() + b.get_width()/2, h),
                     xytext=(0, 5), textcoords='offset points',
-                    ha='center', va='bottom', fontsize=7, fontweight='bold', color='#1E293B')
+                    ha='center', va='bottom', fontsize=7, fontweight='bold', color=label_color)
                     
     _apply_gamma_style(ax, fig, title)
     ax.set_ylabel(ylabel, fontsize=7, color='#64748B')
@@ -176,6 +191,12 @@ def generate_line_chart(topic: str, output_dir: Path, domain: str = None) -> dic
             'Avg Stay (Days)': [6.8, 6.4, 5.8, 5.2, 4.8, 4.5, 4.2, 4.2],
             'Quality Score (%)': [78, 82, 85, 88, 90, 92, 92, 94]
         }
+    elif domain == "general":
+        series = {
+            'Structural Integrity (%)': [92, 90, 88, 85, 91, 93, 94, 96],
+            'Restoration Progress (%)': [10, 25, 40, 55, 70, 82, 90, 95],
+            'Visitor Satisfaction (%)': [78, 80, 82, 85, 87, 89, 91, 93]
+        }
     else:
         series = {
             'Revenue ($M)': [40, 52, 68, 85, 110, 135, 160, 185],
@@ -201,7 +222,11 @@ def generate_line_chart(topic: str, output_dir: Path, domain: str = None) -> dic
     ax.fill_between(quarters, series[first_key], alpha=0.06, color=colors[0])
     
     _apply_gamma_style(ax, fig, title)
-    ax.legend(fontsize=6.5, frameon=False, loc='upper left', labelcolor='#475569')
+    import os
+    is_dark = os.getenv("AARKAAI_THEME", "light").lower() == "dark"
+    legend_label_color = '#CBD5E1' if is_dark else '#475569'
+
+    ax.legend(fontsize=6.5, frameon=False, loc='upper left', labelcolor=legend_label_color)
     plt.xticks(rotation=30, ha='right')
     plt.tight_layout()
     return _chart_to_base64(fig, "chart_line", output_dir)
@@ -236,6 +261,9 @@ def generate_donut_chart(topic: str, output_dir: Path, domain: str = None) -> di
     elif domain == "esg":
         segments = ['Solar Power', 'Offshore Wind', 'Battery Storage', 'Bioenergy', 'Grid-Tech']
         sizes = [42, 28, 15, 10, 5]
+    elif domain == "general":
+        segments = ['Heritage Pilgrims', 'Cultural Tourists', 'Academic Researchers', 'Local Devotees', 'Foreign Visitors']
+        sizes = [45, 25, 12, 10, 8]
     else:
         segments = ['Enterprise SaaS', 'Consumer tech', 'Fintech Platform', 'DeepTech core', 'AdTech / Market']
         sizes = [38, 24, 18, 12, 8]
@@ -254,16 +282,22 @@ def generate_donut_chart(topic: str, output_dir: Path, domain: str = None) -> di
         wedgeprops=dict(width=0.42, edgecolor='white', linewidth=1.5)
     )
     
+    import os
+    is_dark = os.getenv("AARKAAI_THEME", "light").lower() == "dark"
+    label_color = '#CBD5E1' if is_dark else '#475569'
+    auto_text_color = '#E2E8F0' if is_dark else '#1E293B'
+    title_color = '#F3F4F6' if is_dark else '#0F172A'
+    
     for t in texts:
         t.set_fontsize(6.5)
-        t.set_color('#475569')
+        t.set_color(label_color)
     for t in autotexts:
         t.set_fontsize(6)
         t.set_fontweight('bold')
-        t.set_color('#1E293B')
+        t.set_color(auto_text_color)
         
     ax.set_title(title.upper(), fontsize=9, fontweight='bold',
-                 color='#0F172A', pad=14, loc='left', fontfamily='sans-serif')
+                 color=title_color, pad=14, loc='left', fontfamily='sans-serif')
     plt.tight_layout()
     return _chart_to_base64(fig, "chart_donut", output_dir)
 
@@ -299,6 +333,10 @@ def generate_hbar_chart(topic: str, output_dir: Path, domain: str = None) -> dic
         metrics = ['Carbon Abatement\nIndex', 'Water Recycle\nEfficiency', 'Renewable Generation\nYield',
                    'Supply Chain Green\nTaxonomy', 'Waste Recovery\nRate']
         scores = [88, 84, 92, 78, 90]
+    elif domain == "general":
+        metrics = ['Stone Conservation\nIndex', 'Foundation Stability\nIndex', 'Seismic Resilience\nScore',
+                   'Archival Documentation\nCoverage', 'Visitor Safety\nRating']
+        scores = [94, 91, 88, 95, 92]
     else:
         metrics = ['Infrastructure\nEfficiency', 'Cost\nOptimization', 'Supply Chain\nResilience',
                    'Workforce\nProductivity', 'Digital\nTransformation']
@@ -317,12 +355,17 @@ def generate_hbar_chart(topic: str, output_dir: Path, domain: str = None) -> dic
     bar_colors = [colors[i % len(colors)] for i in range(len(metrics))]
     bars = ax.barh(metrics, scores, color=bar_colors, height=0.55, edgecolor='none', zorder=3)
     
+    import os
+    is_dark = os.getenv("AARKAAI_THEME", "light").lower() == "dark"
+    score_color = '#E2E8F0' if is_dark else '#1E293B'
+    grid_color = '#1F2937' if is_dark else '#E2E8F0'
+
     for b, s in zip(bars, scores):
         ax.text(b.get_width() + 1.5, b.get_y() + b.get_height()/2,
-                f'{s}%', va='center', ha='left', fontsize=7, fontweight='bold', color='#1E293B')
+                f'{s}%', va='center', ha='left', fontsize=7, fontweight='bold', color=score_color)
                 
     _apply_gamma_style(ax, fig, title)
-    ax.grid(True, axis='x', linestyle='--', color='#E2E8F0', alpha=0.6, linewidth=0.5)
+    ax.grid(True, axis='x', linestyle='--', color=grid_color, alpha=0.6, linewidth=0.5)
     ax.grid(False, axis='y')
     ax.set_xlim(0, 110)
     ax.set_xlabel('Score (%)', fontsize=7, color='#64748B')
@@ -363,6 +406,11 @@ def generate_area_chart(topic: str, output_dir: Path, domain: str = None) -> dic
         y1 = [18, 24, 32, 28, 22, 14]
         y2 = [14, 18, 22, 25, 20, 15]
         y3 = [8, 12, 15, 18, 22, 24]
+    elif domain == "general":
+        labels = ['Weathering Wear', 'Structural Fatigue', 'High Crowd Impact']
+        y1 = [10, 12, 15, 18, 22, 25]
+        y2 = [8, 10, 12, 14, 13, 11]
+        y3 = [4, 6, 9, 12, 15, 18]
     else:
         labels = ['Regulatory Risk', 'Market Volatility', 'Operational Risk']
         y1 = [10, 14, 18, 22, 26, 32]
@@ -381,7 +429,11 @@ def generate_area_chart(topic: str, output_dir: Path, domain: str = None) -> dic
     ax.plot(years, total, color='#EF4444', linewidth=1.5, linestyle='--', label='Total Exposure', zorder=4)
     
     _apply_gamma_style(ax, fig, title)
-    ax.legend(fontsize=6, frameon=False, loc='upper left', labelcolor='#475569')
+    import os
+    is_dark = os.getenv("AARKAAI_THEME", "light").lower() == "dark"
+    legend_label_color = '#CBD5E1' if is_dark else '#475569'
+
+    ax.legend(fontsize=6, frameon=False, loc='upper left', labelcolor=legend_label_color)
     ax.set_ylabel('Risk Index Score', fontsize=7, color='#64748B')
     plt.tight_layout()
     return _chart_to_base64(fig, "chart_area", output_dir)
@@ -405,7 +457,8 @@ def _get_domain_colors(domain: str = None):
         "manufacturing": ['#6366F1', '#10B981', '#EF4444', '#8B5CF6', '#06B6D4'],
         "supplychain": ['#6366F1', '#10B981', '#EF4444', '#8B5CF6', '#06B6D4'],
         "pharma": ['#E53E3E', '#DD6B20', '#3B82F6', '#10B981', '#8B5CF6'],
-        "energy": ['#D97706', '#10B981', '#B45309', '#3B82F6', '#EF4444']
+        "energy": ['#D97706', '#10B981', '#B45309', '#3B82F6', '#EF4444'],
+        "general": ['#4F46E5', '#06B6D4', '#F59E0B', '#EF4444', '#10B981']
     }
     return themes.get(domain, ['#6366F1', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'])
 

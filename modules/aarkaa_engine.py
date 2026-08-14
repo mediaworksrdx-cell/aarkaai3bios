@@ -219,7 +219,10 @@ _LANG_NAMES = {
 }
 
 _GGUF_CANDIDATES = [
-    # f32 preferred (highest quality) → f16 → q8 as fallback
+    # 7B Model (Highest Reasoning Quality)
+    Path(MODEL_PATH).parent / "aarkaa-7b-f16.gguf",
+    Path(MODEL_PATH) / "aarkaa-7b-f16.gguf",
+    # 3B Fallbacks
     Path(MODEL_PATH).parent / "aarkaa-3b-f32.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-f32.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-f16.gguf",
@@ -227,6 +230,22 @@ _GGUF_CANDIDATES = [
     Path(MODEL_PATH).parent / "aarkaa-3b-q8.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-q8.gguf",
 ]
+
+
+def _has_cuda() -> bool:
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except Exception:
+        return False
+
+
+def _get_gpu_layers() -> int:
+    return 99 if _has_cuda() else 0
+
+
+def _get_threads() -> int:
+    return 4 if _has_cuda() else 2
 
 
 def _is_ist_nighttime() -> bool:
@@ -238,15 +257,15 @@ def _is_ist_nighttime() -> bool:
     return 1 <= ist_now.hour < 7
 
 
-def _get_model(force_gpu=True):
+def _get_model(force_gpu=True, force_general=False):
     global _model_gpu, _model_coder_gpu, _last_active_time
     if _is_stub:
         return None
     
     _last_active_time = time.time()
     
-    # Route to coder model if the request domain is technology (coding/software design)
-    is_coder_query = (request_domain.get() == "technology")
+    # Route to coder model if the request domain is technology (coding/software design) and we don't force general
+    is_coder_query = (request_domain.get() == "technology") and not force_general
     
     if force_gpu:
         if is_coder_query:
@@ -259,12 +278,12 @@ def _get_model(force_gpu=True):
                             _model_coder_gpu = Llama(
                                 model_path=str(_gguf_coder_path),
                                 n_ctx=16384,
-                                n_threads=_n_threads,
-                                n_threads_batch=_n_threads,
-                                n_gpu_layers=-1,
+                                n_threads=_get_threads(),
+                                n_threads_batch=_get_threads(),
+                                n_gpu_layers=_get_gpu_layers(),
                                 verbose=False,
                             )
-                            logger.info("Coder GGUF model successfully loaded on GPU.")
+                            logger.info("Coder GGUF model successfully loaded.")
                         except Exception as e:
                             logger.error("Failed to load Coder GGUF model: %s. Falling back to general model.", e)
                             is_coder_query = False
@@ -281,25 +300,24 @@ def _get_model(force_gpu=True):
                     try:
                         _model_gpu = Llama(
                             model_path=str(_gguf_file_path),
-                            n_ctx=16384,
-                            n_threads=_n_threads,
-                            n_threads_batch=_n_threads,
-                            n_gpu_layers=-1,
-                            verbose=False,
+                            n_ctx=8192,
+                            n_gpu_layers=_get_gpu_layers(),
+                            n_threads=_get_threads(),
+                            verbose=False
                         )
-                        logger.info("Model successfully loaded on GPU.")
+                        logger.info("Model successfully loaded (gpu_layers=%d).", _get_gpu_layers())
                     except Exception as e:
-                        logger.error("Failed to load GPU model: %s. Falling back to CPU.", e)
-                        return _model_cpu
+                        logger.error("Failed to load GPU model: %s.", e)
+                        return None
         return _model_gpu
     else:
         if is_coder_query and _model_coder_gpu is not None:
             return _model_coder_gpu
-        return _model_gpu if _model_gpu is not None else _model_cpu
+        return _model_gpu
 
 
 def _idle_monitor_loop():
-    global _model_gpu, _last_active_time
+    global _model_gpu, _model_coder_gpu, _last_active_time
     while True:
         time.sleep(10)
         if _is_stub:
@@ -342,21 +360,20 @@ def _idle_monitor_loop():
                             from llama_cpp import Llama
                             _model_gpu = Llama(
                                 model_path=str(_gguf_file_path),
-                                n_ctx=16384,
-                                n_threads=_n_threads,
-                                n_threads_batch=_n_threads,
-                                n_gpu_layers=-1,
-                                verbose=False,
+                                n_ctx=8192,
+                                n_gpu_layers=_get_gpu_layers(),
+                                n_threads=_get_threads(),
+                                verbose=False
                             )
-                            logger.info("Model successfully pre-warmed on GPU.")
+                            logger.info("Model successfully pre-warmed.")
                         except Exception as e:
                             logger.error("Failed to pre-warm GPU model: %s", e)
 
 
 
 def init():
-    """Load the AARKAA-3B GGUF model if available on CPU permanently."""
-    global _model_cpu, _is_stub, _gguf_file_path
+    """Load the AARKAA-3B GGUF model directly on GPU."""
+    global _model_gpu, _is_stub, _gguf_file_path
 
     gguf_file = None
     for candidate in _GGUF_CANDIDATES:
@@ -370,27 +387,26 @@ def init():
         return
 
     _gguf_file_path = gguf_file
+    _is_stub = False
 
     try:
         from llama_cpp import Llama
-        logger.info("Initializing AARKAA-3B CPU model from %s (threads=%d)", gguf_file, _n_threads)
-        _model_cpu = Llama(
+        logger.info("Initializing AARKAA-3B GPU model from %s...", gguf_file)
+        _model_gpu = Llama(
             model_path=str(gguf_file),
-            n_ctx=16384,
-            n_threads=_n_threads,
-            n_threads_batch=_n_threads,
-            n_gpu_layers=0,
-            verbose=False,
+            n_ctx=8192,
+            n_gpu_layers=_get_gpu_layers(),
+            n_threads=_get_threads(),
+            verbose=False
         )
-        _is_stub = False
-        logger.info("AARKAA-3B CPU model loaded permanently.")
+        logger.info("AARKAA-3B model loaded successfully (gpu_layers=%d, threads=%d).", _get_gpu_layers(), _get_threads())
         
         # Start idle monitor thread
         t = threading.Thread(target=_idle_monitor_loop, daemon=True)
         t.start()
-        logger.info("Idle monitor thread started with timeout %d seconds.", _idle_timeout)
+        logger.info("Idle monitor thread started.")
     except Exception as exc:
-        logger.error("Failed to load AARKAA-3B CPU model: %s - falling back to stub", exc)
+        logger.error("Failed to load AARKAA-3B GPU model: %s. Running in STUB mode.", exc)
         _is_stub = True
 
 def _classify_and_plan(query: str) -> dict:
@@ -546,13 +562,13 @@ def _get_temperature(query: str, intent: str, context: str = "") -> float:
     return 0.7
 
 
-def _generate(prompt, max_new_tokens=150, stop=None, temperature=0.7):
+def _generate(prompt, max_new_tokens=150, stop=None, temperature=0.7, force_general=False):
     """Run generation via llama.cpp."""
-    model_instance = _get_model(force_gpu=True)
+    model_instance = _get_model(force_gpu=True, force_general=force_general)
     if _is_stub or model_instance is None:
         return _stub_response(prompt)
     
-    tokens = list(_generate_stream(prompt, max_new_tokens=max_new_tokens, stop=stop, temperature=temperature))
+    tokens = list(_generate_stream(prompt, max_new_tokens=max_new_tokens, stop=stop, temperature=temperature, force_general=force_general))
     text = "".join(tokens).strip()
     if not text:
         logger.warning("_generate: model returned empty output — context overflow or KV cache failure. Returning stub fallback.")
@@ -560,9 +576,9 @@ def _generate(prompt, max_new_tokens=150, stop=None, temperature=0.7):
     return _clean_response(text)
 
 
-def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7):
+def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, force_general=False):
     """Run generation via llama.cpp and yield tokens with repetition guard."""
-    model_instance = _get_model(force_gpu=True)
+    model_instance = _get_model(force_gpu=True, force_general=force_general)
     if _is_stub or model_instance is None:
         yield _stub_response(prompt)
         return
@@ -583,14 +599,45 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7):
         stream=True
     )
     generated_text = ""
+    stripped_header = False
+
+    # Keywords that indicate code/architecture is requested
+    code_keywords = [
+        "code", "script", "program", "function", "write code", "python",
+        "javascript", "implement", "fastapi", "design", "system", "api",
+        "architecture", "backend", "service", "build", "create", "app",
+        "server", "oms", "database", "class", "structure"
+    ]
+    prompt_requests_code = any(w in prompt.lower() for w in code_keywords)
+
     for chunk in stream:
         token = chunk["choices"][0]["text"]
         if token:
             generated_text += token
+
+            # Anti-hallucination guard: Stop streaming if model begins unrequested code blocks
+            if "```" in generated_text.lower() and not prompt_requests_code:
+                logger.warning("Unrequested code block detected in stream; terminating generation.")
+                break
+
+            if "[Finance Data]" in generated_text or "Target (TGT)" in generated_text:
+                logger.warning("Unrequested financial ticker drift detected in stream; terminating generation.")
+                break
+
+            # Strip leading "Thought:" / "Action Input:" header token at beginning of output without blocking subsequent tokens
+            if not stripped_header and len(generated_text) <= 30:
+                low_token = token.lower().strip()
+                if low_token in ["thought:", "thought", "action input:", "action input"]:
+                    logger.info("Stripping leading ReAct scaffolding token: %r", token)
+                    stripped_header = True
+                    continue
+
             if _has_repetition(generated_text):
                 logger.warning("Repetition loop detected; terminating stream early to protect response.")
                 break
+
             yield token
+
 
 
 def _truncate_agent_prompt(prompt_str: str, model_instance) -> str:
@@ -695,9 +742,23 @@ def _clean_response(text):
     if not text:
         return text
     
-    # Strip out hallucinated markers
-    text = text.replace("[end of web search results]", "").strip()
-    text = text.replace("[End of web search results]", "").strip()
+    # Strip out hallucinated markers, disclaimers, and meta phrases
+    meta_phrases_to_remove = [
+        "[end of web search results]",
+        "[End of web search results]",
+        "Please note that these values are live, real-time data fetched from Yahoo Finance just now.",
+        "Please note that these values are live, real-time data",
+        "CRITICAL: Do NOT output any meta-conversation",
+        "Here is the verified response",
+        "Verification passed:",
+        "Changes made:",
+    ]
+    for phrase in meta_phrases_to_remove:
+        text = text.replace(phrase, "").strip()
+
+    # Regex-based disclaimer stripper (removes "It is important to note that these prices are live...")
+    import re
+    text = re.sub(r"(?i)\n*\s*(?:it is important to note|please note|note that|keep in mind|as of now|these values are live).*$", "", text).strip()
 
     # Programmatically strip common email/letter salutations and sign-offs
     lines = text.split('\n')
@@ -884,21 +945,29 @@ def primary_check(query, lang="en"):
             tokens = MAX_TOKENS
         else:
             is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
-            is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
+            is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:", "plan a", "project plan", "saas", "roadmap"]) or (
                 all(w in query.lower() for w in ["gpu", "schedul", "queu", "cost", "isolation"])
             )
             
             if is_design_query:
                 system_prompt = (
-                    "You are AARKAA, a principal systems architect. "
-                    "Provide a comprehensive, production-grade technical design architecture. "
-                    "Detail every requested component in depth with clear headers, technical details, and structured analysis."
+                    "You are AARKAA, a Principal Software & Systems Architect, Product Strategist, and Enterprise Lead. "
+                    "Provide a comprehensive, production-grade technical design architecture, business roadmap, and implementation plan.\n\n"
+                    "Structure your response with detailed sections:\n"
+                    "1. Executive Summary & Core Value Proposition\n"
+                    "2. Business & Monetization Strategy (Revenue models, pricing tiers, customer acquisition)\n"
+                    "3. Product Scope & Phased Roadmap (MVP -> Production -> Scaling)\n"
+                    "4. Deep Technical Architecture (Frontend, Backend, Database schema, API layer, Auth, Caching, Infrastructure)\n"
+                    "5. Security, Multi-Tenancy & Compliance\n"
+                    "6. DevOps, CI/CD & Observability\n"
+                    "7. Team Composition, Estimated Timelines & Operational Cost Estimates\n\n"
+                    "Detail every component thoroughly with clean Markdown headings, bullet points, and technical specifications."
                 )
                 user_prompt = (
-                    f"Design and explain the following architecture request: {query}\n\n"
-                    "IMPORTANT: Provide a detailed, comprehensive architectural layout. "
-                    "Explain each requirement/component thoroughly in its own section. "
-                    "Do NOT write conversational filler. Do NOT stop early or truncate the explanation."
+                    f"Design and plan the following request in full technical and business detail: {query}\n\n"
+                    "IMPORTANT: Provide an exhaustive, production-grade project plan and architectural layout. "
+                    "Cover technical architecture, database design, API design, business model, and infrastructure. "
+                    "Do NOT write high-level filler. Provide precise technical depth."
                 )
             elif is_step_by_step:
                 system_prompt = (
@@ -971,7 +1040,7 @@ def self_check_response(query: str, response: str, intent: str) -> bool:
         return True
 
 
-def final_response(query, context, intent="", lang="en", mode="production", history=None, user_facts=""):
+def final_response(query, context, intent="", lang="en", mode="production", history=None, user_facts="", force_general=False):
     """Full reasoning pass with fused context from external modules."""
     if _is_stub:
         return _stub_response(query, context)
@@ -1003,7 +1072,7 @@ def final_response(query, context, intent="", lang="en", mode="production", hist
                 prompt, tokens = result[0], result[1]
                 temp = result[2] if len(result) > 2 else 0.7
             
-            answer = _generate(prompt, max_new_tokens=tokens, temperature=temp)
+            answer = _generate(prompt, max_new_tokens=tokens, temperature=temp, force_general=force_general)
             
             # Audit the response
             if self_check_response(query, answer, intent):
@@ -1023,16 +1092,21 @@ def final_response(query, context, intent="", lang="en", mode="production", hist
     return answer
 
 
-def stream_final_response(query, context, intent="", lang="en", mode="production", history=None, user_facts=""):
+def stream_final_response(query, context, intent="", lang="en", mode="production", history=None, user_facts="", force_general=False):
     """Stream tokens for the final response pass."""
     if _is_stub:
         yield _stub_response(query, context)
         return
 
     try:
+        is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"])
+        if is_design_query:
+            force_general = True
+
         result = _build_final_prompt(query, context, intent, lang, mode, history=history, user_facts=user_facts)
         prompt, tokens = result[0], result[1]
         temp = result[2] if len(result) > 2 else 0.7
+
         
         # Safety check: if prompt is too long, rebuild without history
         prompt_len = len(prompt)
@@ -1044,7 +1118,7 @@ def stream_final_response(query, context, intent="", lang="en", mode="production
             temp = result[2] if len(result) > 2 else 0.7
             logger.info("Rebuilt prompt: %d chars", len(prompt))
         
-        yield from _generate_stream(prompt, max_new_tokens=tokens, temperature=temp)
+        yield from _generate_stream(prompt, max_new_tokens=tokens, temperature=temp, force_general=force_general)
     except Exception as exc:
         logger.error("stream_final_response failed: %s", exc)
         yield _stub_response(query, context)
@@ -1373,6 +1447,30 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
         tokens = MAX_TOKENS
         temp = 0.75 if intent in ["persuasion", "roleplay"] else 0.4
         return prompt, tokens, temp
+    is_design = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
+        all(w in query.lower() for w in ["gpu", "schedul", "queu", "cost", "isolation"])
+    )
+    if is_design:
+        system_prompt = (
+            "You are AARKAA, a principal systems architect. "
+            "Provide a comprehensive, production-grade technical design architecture in markdown. "
+            "NEVER output ReAct agent loop headers (such as 'Thought:', 'Action:', 'Action Input:', 'Observation:', 'FileEditTool'). "
+            "Start immediately with the markdown design specification."
+        )
+
+        user_prompt = ""
+        if context:
+            user_prompt += "Context:\n" + context + "\n\n"
+        user_prompt += (
+            f"Design and explain the following architecture request: {query}\n\n"
+            "IMPORTANT: Provide a detailed, comprehensive architectural layout. "
+            "Explain each requirement/component thoroughly in its own section. "
+            "Do NOT write conversational filler. Do NOT stop early or truncate the explanation."
+        )
+        prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
+        logger.info("AARKAA_ENGINE_PROMPT (is_design):\n%s", prompt)
+        tokens = MAX_TOKENS
+        return prompt, tokens, 0.7
 
     is_code = intent == "coding_help" or any(
         w in query.lower()
@@ -1406,14 +1504,30 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 user_prompt += f" You MUST write your response ONLY in the following language: {lang_name}."
         else:
             system_prompt = (
-                "You are AARKAA, an expert programming AI assistant. "
-                "You have the ability to execute code and bash commands if the user asks you to 'run' or 'execute' them."
+                "You are Aarkaa AI, a Principal Software Engineer and Quantitative Systems Architect built by Synthetix Analytics.\n"
+                "Your objective is to provide production-grade, mathematically exact, and fully implemented software solutions.\n\n"
+                "STRICT CODING & ACCOUNTING STANDARDS:\n"
+                "1. ZERO REACT / SCAFFOLDING LEAKS: Output ONLY clean markdown text and python code blocks. NEVER output ReAct agent loop headers (e.g. 'Thought:', 'Action:', 'Action Input:', 'Observation:', 'FileEditTool').\n"
+                "2. MATHEMATICALLY EXACT FIFO ACCOUNTING:\n"
+                "   - Method signature: `sell_stock(symbol: str, quantity: int, price: float, date: datetime)` (MUST accept sell price & date!).\n"
+                "   - For stock portfolio tracking, use `collections.deque` per symbol storing open lots: `[quantity, purchase_price, purchase_date]`.\n"
+                "   - BUY: Append new lot `[qty, price, date]` to the symbol's deque.\n"
+                "   - SELL: Match sell quantity against the OLDEST lots from the left (`popleft()`). If partial lot remains after match, `appendleft()` the remaining lot back!\n"
+                "   - Realized P&L = sum over matched lots: `matched_qty * (sell_price - buy_price)`.\n"
+                "   - Unrealized P&L = sum over open lots in deques: `lot_qty * (current_market_price - buy_price)`.\n"
+                "   - Example: BUY 100 @ 150 (cost 15000), SELL 50 @ 160 -> Realized P&L = 50 * (160 - 150) = 500. Remaining: 50 @ 150 (cost basis 7500).\n"
+                "3. ACCURATE CAGR FORMULA:\n"
+                "   - CAGR = `( (current_price / weighted_avg_buy_price) ** (365.25 / total_days_held) ) - 1`.\n"
+                "4. MANDATORY TIME & SPACE COMPLEXITY ANALYSIS:\n"
+                "   - Always provide an explicit 'Complexity Analysis' section detailing time complexity (O(N), O(1)) and space complexity for every major method.\n"
+                "5. RIGOROUS UNIT TESTS:\n"
+                "   - Provide comprehensive pytest test cases covering multi-symbol, multi-lot FIFO, partial sells, realized P&L, unrealized P&L, and CAGR."
             )
             user_prompt = ""
             if context:
                 user_prompt += "Context:\n" + context + "\n\n"
             user_prompt += f"Request: {query}\n\n"
-            user_prompt += "Provide working code with a clear explanation."
+            user_prompt += "Provide production-grade Python code with complete FIFO accounting logic, exact unit tests, and a dedicated Complexity Analysis section. Output ONLY clean markdown."
             if lang != "en":
                 user_prompt += f" You MUST write your response ONLY in the following language: {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
@@ -1547,6 +1661,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
                 )
                 is_general = intent in ["general_query", "web_lookup", "news_search", "science_query", "tech_info", "finance_general", "health_query", "history_query", ""] or not intent
+                tokens = MAX_TOKENS
                 if is_general:
                     is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
                     is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
@@ -1559,15 +1674,23 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                             "Provide a comprehensive, production-grade technical design architecture. "
                             "Detail every requested component in depth with clear headers, technical details, and structured analysis."
                         )
-                    elif is_step_by_step:
-                        system_prompt = (
-                            "You are Aarkaa AI, a highly intelligent and helpful assistant built by Synthetix Analytics.\n"
-                            "Provide comprehensive, detailed, and complete step-by-step guides or recipes."
-                        )
                     else:
                         system_prompt = (
-                            "You are Aarkaa AI, a highly intelligent and helpful assistant built by Synthetix Analytics.\n"
-                            "Provide accurate, clear, and comprehensive answers to the user's query."
+                            "You are Aarkaa AI, a Principal Macroeconomic Analyst and Quantitative Financial Strategist built by Synthetix Analytics.\n"
+                            "Your objective is to provide institutional-grade, highly rigorous, and multi-dimensional analysis.\n\n"
+                            "STRICT SCOPE & BOUNDARY RULES:\n"
+                            "1. ZERO UNRELATED INJECTIONS: Answer ONLY the specific topics requested by the user. NEVER inject unrelated stock tickers (e.g. Target/TGT), technical indicators (RSI, MACD, Bollinger Bands), options strategies (Iron Condor), or unrequested Python code blocks.\n"
+                            "2. ACCURATE CAUSAL & FIXED INCOME REASONING:\n"
+                            "   - BOND DURATION RIGOR: Long-duration bonds are ALWAYS MORE SENSITIVE to interest rate changes than short-duration bonds (higher Macaulay/Modified duration = higher price volatility when yields move).\n"
+                            "   - NIM DEPENDENCY: Net Interest Margin (NIM) expansion is balance-sheet dependent — whether NIM expands depends on how quickly floating loans reprice (EBLR vs MCLR) relative to deposit repricing and the bank's funding mix (especially CASA ratio).\n"
+                            "   - STAGFLATION DEFINITION: A rate hike does NOT 'create' stagflation; it is a monetary tightening response to existing inflation during slowing GDP growth. It aims to anchor inflation expectations while accepting a temporary growth sacrifice.\n"
+                            "3. CORE ECONOMIC TOPICS TO COVER FOR RATE HIKES:\n"
+                            "   - Commercial Banks: Funding mix (CASA vs Term Deposits), EBLR vs MCLR transmission lags, ALM, balance-sheet specific Net Interest Margin (NIM) dynamics.\n"
+                            "   - Bond Markets: Explain duration sensitivity accurately (long-duration bonds experience larger price declines than short-duration bonds during rate hikes).\n"
+                            "   - Equity Markets: Contrast rate-sensitive sector headwinds (Real Estate, Auto) with financial sector NIM expansion and cash-rich defensive sectors (IT, Pharma).\n"
+                            "   - Indian Rupee: Analyze interest rate differentials, foreign portfolio investment (FPI) capital flows vs global risk sentiment, crude oil prices, and CAD pressures.\n"
+                            "   - Macroeconomic Trade-Offs: Detail monetary policy transmission lags, real vs nominal rates, and inflation-growth trade-offs.\n"
+                            "Do NOT output any disclaimers, code snippets, or unrelated market analyses. Stay 100% focused on the requested scope."
                         )
                 user_prompt = f"Question: {query}\n\n"
                 if context:
@@ -1576,10 +1699,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                         user_prompt += (
                             "IMPORTANT: The data below contains LIVE, REAL-TIME financial data fetched just now from Yahoo Finance. "
                             "You MUST use the exact prices, values, and percentages from the [Finance Data] section. "
-                            "Do NOT use any prices from your training data or prior knowledge — they are outdated.\n"
-                            "Provide a VERY CONCISE answer showing ONLY the price, change, and percentage change. Do not add fluff.\n\n"
+                            "Do NOT use any prices from your training data or prior knowledge — they are outdated.\n\n"
                         )
-                        tokens = 100
                     # Cap context length to prevent prompt overflow for step-by-step queries
                     ctx_to_inject = context
                     if len(context) > 3000 and (is_step_by_step or is_design_query):
@@ -1590,7 +1711,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                         + ctx_to_inject + "\n"
                         "---------------------\n"
                     )
-                    user_prompt += "Answer the question above in a detailed and comprehensive manner. If the reference information does not directly answer the question, IGNORE it and answer from your own knowledge. Do NOT output any notes, warnings, or disclaimers about context sufficiency."
+                    user_prompt += "Answer the question above in a detailed, technical, and comprehensive manner. If the reference information does not directly answer the question, IGNORE it and answer from your own knowledge. Do NOT output any notes, warnings, or disclaimers about context sufficiency."
                 else:
                     if is_general and is_design_query:
                         user_prompt += (
@@ -1599,7 +1720,9 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                             "Do NOT stop early or truncate the explanation."
                         )
                     else:
-                        user_prompt += "Answer the question above directly, comprehensively, and accurately."
+                        user_prompt += (
+                            "Answer the question above in full technical depth with structured sections, granular financial mechanics, and clear analytical rigor."
+                        )
                 # Always add step-by-step formatting instruction for recipe/guide queries
                 if is_step_by_step:
                     user_prompt += (

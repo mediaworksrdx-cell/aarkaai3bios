@@ -266,7 +266,10 @@ def extract_tickers(query: str) -> list[str]:
             clean_ticker = clean_ticker.split(".")[0]
         
         if clean_ticker.lower() in _TICKER_BLOCKLIST:
-            if re.search(r"\b" + re.escape(clean_ticker) + r"\b", query):
+            pattern = r"\b" + re.escape(clean_ticker) + r"\b"
+            if clean_ticker.upper() == "C":
+                pattern = r"\bC\b(?!\+\+|#)"
+            if re.search(pattern, query):
                 tickers.append(ticker)
 
     # Search using word boundaries to avoid partial matches
@@ -274,7 +277,10 @@ def extract_tickers(query: str) -> list[str]:
         # Special case: skip 'target' matching 'TGT' if user says 'target price'
         if name == "target" and "target price" in q_lower:
             continue
-        if re.search(r"\b" + re.escape(name) + r"\b", q_lower):
+        pattern = r"\b" + re.escape(name) + r"\b"
+        if name.lower() == "c":
+            pattern = r"\bc\b(?!\+\+|#)"
+        if re.search(pattern, q_lower):
             tickers.append(ticker)
 
     return list(dict.fromkeys(tickers))  # deduplicate, preserve order
@@ -379,19 +385,221 @@ def format_finance_context(data: dict) -> str:
         change = info.get("change", "")
         pct = info.get("change_percent", "")
         cap = info.get("market_cap")
-        cap_str = f", Market Cap: {_format_large_number(cap)}" if cap else ""
+        cap_str = f", Market Cap: {_format_large_number(cap, currency)}" if cap else ""
         change_str = f", Change: {change} ({pct}%)" if change != "" else ""
         lines.append(f"• {name} ({symbol}): {currency} {price}{change_str}{cap_str}")
     return "\n".join(lines) if lines else "No data available."
 
 
-def _format_large_number(n: Optional[int]) -> str:
+def _format_large_number(n: Optional[int], currency: str = "USD") -> str:
     if n is None:
         return "N/A"
-    if n >= 1_000_000_000_000:
-        return f"${n / 1_000_000_000_000:.2f}T"
-    if n >= 1_000_000_000:
-        return f"${n / 1_000_000_000:.2f}B"
-    if n >= 1_000_000:
-        return f"${n / 1_000_000:.2f}M"
-    return f"${n:,}"
+    if currency == "INR":
+        if n >= 10_000_000_000_000:
+            return f"₹{n / 100_000_000_000:.2f} Lakh Cr"
+        if n >= 10_000_000:
+            return f"₹{n / 10_000_000:.2f} Cr"
+        if n >= 100_000:
+            return f"₹{n / 100_000:.2f} Lakh"
+        return f"₹{n:,}"
+    else:
+        if n >= 1_000_000_000_000:
+            return f"${n / 1_000_000_000_000:.2f}T"
+        if n >= 1_000_000_000:
+            return f"${n / 1_000_000_000:.2f}B"
+        if n >= 1_000_000:
+            return f"${n / 1_000_000:.2f}M"
+        return f"${n:,}"
+
+def get_ohlcv_history(symbol: str, period: str = "1mo", interval: str = "1d") -> dict:
+    """Fetch OHLCV candle data via yfinance.
+    period: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, max
+    interval: 1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo
+    Returns dict with symbol, period, interval, data (list of candles), stats (high, low, avg_volume)."""
+    import yfinance as yf
+    try:
+        tk = yf.Ticker(symbol)
+        hist = tk.history(period=period, interval=interval)
+        if hist.empty:
+            return {"symbol": symbol, "error": "No data found."}
+        data = []
+        for index, row in hist.iterrows():
+            data.append({
+                "date": str(index),
+                "open": round(float(row["Open"]), 2),
+                "high": round(float(row["High"]), 2),
+                "low": round(float(row["Low"]), 2),
+                "close": round(float(row["Close"]), 2),
+                "volume": int(row["Volume"])
+            })
+        stats = {
+            "high": round(float(hist["High"].max()), 2),
+            "low": round(float(hist["Low"].min()), 2),
+            "avg_volume": int(hist["Volume"].mean())
+        }
+        return {"symbol": symbol, "period": period, "interval": interval, "data": data, "stats": stats}
+    except Exception as exc:
+        logger.error("get_ohlcv_history failed for %s: %s", symbol, exc)
+        return {"symbol": symbol, "error": str(exc)}
+
+def get_options_chain(symbol: str) -> dict:
+    """Fetch options chain via yfinance. 
+    Returns dict with symbol, expiration_dates, calls (list of option data), puts (list),
+    summary (total_call_oi, total_put_oi, pcr, max_call_oi_strike, max_put_oi_strike).
+    Each option: strike, lastPrice, bid, ask, volume, openInterest, impliedVolatility."""
+    import yfinance as yf
+    import pandas as pd
+    try:
+        tk = yf.Ticker(symbol)
+        exps = tk.options
+        if not exps:
+            return {"symbol": symbol, "error": "Options chain not available for this symbol."}
+        
+        # Get nearest expiry
+        chain = tk.option_chain(exps[0])
+        calls_df = chain.calls
+        puts_df = chain.puts
+        
+        calls = []
+        for _, row in calls_df.iterrows():
+            calls.append({
+                "strike": float(row.get("strike", 0)),
+                "lastPrice": float(row.get("lastPrice", 0)),
+                "bid": float(row.get("bid", 0)),
+                "ask": float(row.get("ask", 0)),
+                "volume": int(row.get("volume", 0) if pd.notna(row.get("volume")) else 0),
+                "openInterest": int(row.get("openInterest", 0) if pd.notna(row.get("openInterest")) else 0),
+                "impliedVolatility": float(row.get("impliedVolatility", 0))
+            })
+            
+        puts = []
+        for _, row in puts_df.iterrows():
+            puts.append({
+                "strike": float(row.get("strike", 0)),
+                "lastPrice": float(row.get("lastPrice", 0)),
+                "bid": float(row.get("bid", 0)),
+                "ask": float(row.get("ask", 0)),
+                "volume": int(row.get("volume", 0) if pd.notna(row.get("volume")) else 0),
+                "openInterest": int(row.get("openInterest", 0) if pd.notna(row.get("openInterest")) else 0),
+                "impliedVolatility": float(row.get("impliedVolatility", 0))
+            })
+            
+        total_call_oi = sum(c["openInterest"] for c in calls)
+        total_put_oi = sum(p["openInterest"] for p in puts)
+        pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else 0
+        
+        max_call = max(calls, key=lambda x: x["openInterest"]) if calls else None
+        max_put = max(puts, key=lambda x: x["openInterest"]) if puts else None
+        
+        summary = {
+            "total_call_oi": total_call_oi,
+            "total_put_oi": total_put_oi,
+            "pcr": pcr,
+            "max_call_oi_strike": max_call["strike"] if max_call else None,
+            "max_put_oi_strike": max_put["strike"] if max_put else None
+        }
+        
+        return {
+            "symbol": symbol,
+            "expiration_dates": list(exps),
+            "calls": calls,
+            "puts": puts,
+            "summary": summary
+        }
+    except Exception as exc:
+        logger.error("get_options_chain failed for %s: %s", symbol, exc)
+        return {"symbol": symbol, "error": str(exc)}
+
+def get_open_interest_summary(symbol: str) -> dict:
+    """OI summary from nearest expiry options chain.
+    Returns total_call_oi, total_put_oi, pcr, max_pain_estimate, 
+    top_call_oi_strikes (top 5), top_put_oi_strikes (top 5)."""
+    data = get_options_chain(symbol)
+    if "error" in data:
+        return data
+        
+    calls = data.get("calls", [])
+    puts = data.get("puts", [])
+    
+    top_calls = sorted(calls, key=lambda x: x["openInterest"], reverse=True)[:5]
+    top_puts = sorted(puts, key=lambda x: x["openInterest"], reverse=True)[:5]
+    
+    summary = data.get("summary", {})
+    
+    # Rough max pain estimate
+    strikes = set([c["strike"] for c in calls] + [p["strike"] for p in puts])
+    max_pain = 0
+    min_pain_val = float('inf')
+    
+    for strike in strikes:
+        pain = 0
+        for c in calls:
+            if c["strike"] < strike:
+                pain += (strike - c["strike"]) * c["openInterest"]
+        for p in puts:
+            if p["strike"] > strike:
+                pain += (p["strike"] - strike) * p["openInterest"]
+        if pain < min_pain_val:
+            min_pain_val = pain
+            max_pain = strike
+            
+    return {
+        "symbol": symbol,
+        "total_call_oi": summary.get("total_call_oi"),
+        "total_put_oi": summary.get("total_put_oi"),
+        "pcr": summary.get("pcr"),
+        "max_pain_estimate": max_pain,
+        "top_call_oi_strikes": [c["strike"] for c in top_calls],
+        "top_put_oi_strikes": [p["strike"] for p in top_puts]
+    }
+
+def get_stock_info_extended(symbol: str) -> dict:
+    """Extended stock info: 52w high/low, avg volume, shares outstanding, 
+    float shares, beta, dividend rate, ex-dividend date."""
+    import yfinance as yf
+    try:
+        tk = yf.Ticker(symbol)
+        info = tk.info or {}
+        return {
+            "symbol": symbol,
+            "fiftyTwoWeekHigh": info.get("fiftyTwoWeekHigh"),
+            "fiftyTwoWeekLow": info.get("fiftyTwoWeekLow"),
+            "averageVolume": info.get("averageVolume"),
+            "sharesOutstanding": info.get("sharesOutstanding"),
+            "floatShares": info.get("floatShares"),
+            "beta": info.get("beta"),
+            "dividendRate": info.get("dividendRate"),
+            "exDividendDate": info.get("exDividendDate")
+        }
+    except Exception as exc:
+        logger.error("get_stock_info_extended failed for %s: %s", symbol, exc)
+        return {"symbol": symbol, "error": str(exc)}
+
+def format_ohlcv_context(data: dict) -> str:
+    """Format OHLCV data as readable context."""
+    if "error" in data:
+        return f"OHLCV Data Error for {data.get('symbol')}: {data['error']}"
+    
+    lines = [f"OHLCV History for {data['symbol']} (Period: {data['period']}, Interval: {data['interval']})"]
+    stats = data.get("stats", {})
+    lines.append(f"Stats - High: {stats.get('high')}, Low: {stats.get('low')}, Avg Volume: {stats.get('avg_volume')}")
+    
+    history = data.get("data", [])
+    if history:
+        lines.append("Recent Candles:")
+        for c in history[-5:]: # show last 5
+            lines.append(f"  {c['date']}: Open {c['open']}, High {c['high']}, Low {c['low']}, Close {c['close']}, Vol {c['volume']}")
+    return "\\n".join(lines)
+
+def format_options_context(data: dict) -> str:
+    """Format options chain as readable context."""
+    if "error" in data:
+        return f"Options Chain Error for {data.get('symbol')}: {data['error']}"
+        
+    summary = data.get("summary", {})
+    return (f"Options Summary for {data['symbol']}:\\n"
+            f"Total Call OI: {summary.get('total_call_oi')}\\n"
+            f"Total Put OI: {summary.get('total_put_oi')}\\n"
+            f"Put/Call Ratio (PCR): {summary.get('pcr')}\\n"
+            f"Max Call OI Strike: {summary.get('max_call_oi_strike')}\\n"
+            f"Max Put OI Strike: {summary.get('max_put_oi_strike')}")

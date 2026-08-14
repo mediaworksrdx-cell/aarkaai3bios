@@ -44,6 +44,30 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             logCrash("setContent", e)
         }
+        
+        handleDeepLink(intent)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    private fun handleDeepLink(intent: android.content.Intent?) {
+        val data: android.net.Uri? = intent?.data
+        if (data != null && data.scheme == "aarkaai" && data.host == "auth-callback") {
+            val token = data.getQueryParameter("token")
+            val userId = data.getQueryParameter("user_id")
+            val name = data.getQueryParameter("name") ?: "GitHub User"
+            
+            if (token != null && userId != null) {
+                // Initialize ViewModel instance and login session directly
+                val authViewModel = androidx.lifecycle.ViewModelProvider(this)[com.aarkaai.app.ui.auth.AuthViewModel::class.java]
+                authViewModel.handleExternalAuth(token, userId, name)
+                Toast.makeText(this, "Welcome, $name!", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun logCrash(phase: String, e: Exception) {

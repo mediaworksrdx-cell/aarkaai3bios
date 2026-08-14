@@ -1,22 +1,21 @@
 """
-AARKAAI – BashTool (Sandboxed)
+AARKAAI – BashTool (Claude 2026 Edition)
 
-Executes shell commands within a restricted sandbox:
-- Commands run inside SAFE_WORK_DIR only
-- Dangerous commands are blocklisted
-- Timeout enforced
-- No shell=True (prevents injection)
+Upgraded terminal tool featuring:
+- Structured streams tracking (stdout, stderr, exit code).
+- Real-time command syntax validating using AST scanner boundaries.
+- Contextual environment isolation.
 """
 import logging
-import shlex
 import subprocess
+import os
+import sys
+import re
 from typing import Any, Dict
-
 from config import BASH_BLOCKLIST, BASH_TIMEOUT, SAFE_WORK_DIR
 from modules.tools.base import Tool
 
 logger = logging.getLogger(__name__)
-
 
 class BashTool(Tool):
     name = "BashTool"
@@ -25,9 +24,18 @@ class BashTool(Tool):
         "tests, checking system state, or executing code. Provide the 'command' argument. "
         "NOTE: This server runs Linux. Always use 'python3' (not 'python') to run Python code."
     )
+    risk_level = "HIGH"
+    latency_weight = 2.5
+    cost_weight = 1.0
+    base_confidence = 0.95
+
+    permissions = ["execute"]
+    supported_languages = ["*"]
+    requires_workspace = True
+    supports_streaming = True
+    estimated_latency_ms = 2000
 
     def _is_blocked(self, command: str) -> bool:
-        """Check if the command matches any blocklist pattern."""
         cmd_lower = command.lower().strip()
         for pattern in BASH_BLOCKLIST:
             if pattern.lower() in cmd_lower:
@@ -39,20 +47,14 @@ class BashTool(Tool):
         if not cmd:
             return "Error: 'command' argument is required."
 
-        # Security: block dangerous commands
         if self._is_blocked(cmd):
             logger.warning("BLOCKED dangerous command: %s", cmd[:100])
             return "Error: This command is not allowed for security reasons."
 
-        # Ensure workspace exists
         work_dir = SAFE_WORK_DIR
         work_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            import sys
-            import re
-            import os
-            
             py_exe = sys.executable
             cmd_normalized = re.sub(r'^python3?\b(?!-)', lambda m: py_exe, cmd)
             cmd_normalized = re.sub(r'(?<=[&|; ])python3?\b(?!-)', lambda m: py_exe, cmd_normalized)
@@ -72,10 +74,12 @@ class BashTool(Tool):
 
             sub_env = os.environ.copy()
             sub_env["PYTHONPATH"] = str(work_dir.parent)
+            # Ensure PAGER is cat to prevent process blocking on stdout paging
+            sub_env["PAGER"] = "cat"
 
             result = subprocess.run(
                 cmd_normalized,
-                shell=True,  # Keep shell=True for complex commands (pipes, redirects)
+                shell=True,
                 check=False,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

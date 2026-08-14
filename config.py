@@ -6,18 +6,34 @@ See .env.example for the full template.
 """
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env file automatically
+load_dotenv()
 
 # ─── Environment ──────────────────────────────────────────────────────────────
 ENVIRONMENT = os.getenv("AARKAAI_ENV", "development")  # "development" | "production"
 IS_PRODUCTION = ENVIRONMENT == "production"
+HOST = os.getenv("AARKAAI_HOST", "0.0.0.0")
+PORT = int(os.getenv("AARKAAI_PORT", "5000"))
+LOG_LEVEL = os.getenv("AARKAAI_LOG_LEVEL", "INFO")
+WORKERS = int(os.getenv("AARKAAI_WORKERS", "1"))
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "aarkaa-3b"
 DB_PATH = BASE_DIR / "aarkaai.db"
+SAFE_WORK_DIR = BASE_DIR / "workspace"
+
+# ─── Base URL & Auth Keys ──────────────────────────────────────────────────
+BASE_URL = os.getenv("AARKAAI_BASE_URL", "https://synthetixanalytics.com")
+GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID", "")
+GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET", "")
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 DB_URL = os.getenv("AARKAAI_DB_URL", f"sqlite:///{DB_PATH}")
+MONGODB_URI = os.getenv("MONGODB_URI", "")
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "aarkaai")
 
 # ─── Security & Authentication ──────────────────────────────────────────────────
 SECRET_KEY = os.getenv("AARKAAI_SECRET_KEY", "dev-secret-key-do-not-use-in-prod-change-me")
@@ -25,6 +41,32 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("AARKAAI_ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))  # 7 days default
 API_KEY = os.getenv("AARKAAI_API_KEY", "")  # Empty = no global auth (dev only)
 API_KEY_HEADER = "X-API-Key"
+
+# ─── External AI & Search Provider Keys ───────────────────────────────────────────────
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")  # Not used for Vertex AI; kept for legacy fallback only
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
+
+# ─── Vertex AI / GCP Credentials ──────────────────────────────────────────────
+# Path to the GCP service account JSON key file.
+# The google-genai SDK (and all google-cloud-* libraries) will automatically
+# pick this up via Application Default Credentials (ADC) when set.
+# MUST be set via environment variable — no hardcoded fallback.
+GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+if GOOGLE_APPLICATION_CREDENTIALS:
+    os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", GOOGLE_APPLICATION_CREDENTIALS)
+
+VERTEX_PROJECT = os.getenv("VERTEX_PROJECT", "orbital-heaven-504004-s2")
+VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
+
+
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+
+GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY", "")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
+
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")  # Must be a valid Vertex AI model ID
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
 
 # Guard against insecure default secret key in production
 _DEFAULT_KEY = "dev-secret-key-do-not-use-in-prod-change-me"
@@ -34,8 +76,26 @@ if ENVIRONMENT == "production" and SECRET_KEY == _DEFAULT_KEY:
         "Set a strong random secret key via the AARKAAI_SECRET_KEY environment variable."
     )
 
+# Warn if GCP credentials are missing in production
+if IS_PRODUCTION and not GOOGLE_APPLICATION_CREDENTIALS:
+    import warnings
+    warnings.warn(
+        "GOOGLE_APPLICATION_CREDENTIALS not set — Vertex AI features will be unavailable.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+
+# ─── OAuth Redirect Base URL ──────────────────────────────────────────────────
+OAUTH_REDIRECT_BASE_URL = os.getenv("AARKAAI_OAUTH_REDIRECT_URL", BASE_URL)
+
 # Routes that don't require API key authentication (or JWT)
-PUBLIC_ROUTES = {"/", "/health", "/docs", "/openapi.json", "/redoc", "/auth/register", "/auth/login", "/download"}
+PUBLIC_ROUTES = {
+    "/", "/health", "/docs", "/openapi.json", "/redoc",
+    "/auth/register", "/auth/login",
+    "/auth/github/login", "/auth/github/callback",
+    "/auth/google/login", "/auth/google/callback", "/auth/google/verify", "/auth/google",
+    "/download",
+}
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 _origins_env = os.getenv("AARKAAI_ALLOWED_ORIGINS", "")
@@ -51,8 +111,8 @@ RATE_LIMIT_RPM = int(os.getenv("AARKAAI_RATE_LIMIT_RPM", "30"))  # Requests per 
 RATE_LIMIT_ENABLED = IS_PRODUCTION or os.getenv("AARKAAI_RATE_LIMIT_ENABLED", "false").lower() == "true"
 
 # ─── Input Validation ────────────────────────────────────────────────────────
-MAX_QUERY_LENGTH = int(os.getenv("AARKAAI_MAX_QUERY_LENGTH", "2000"))
-MAX_TOKENS = int(os.getenv("AARKAAI_MAX_TOKENS", "8000"))
+MAX_QUERY_LENGTH = int(os.getenv("AARKAAI_MAX_QUERY_LENGTH", "32000"))
+MAX_TOKENS = int(os.getenv("AARKAAI_MAX_TOKENS", "1536"))
 
 # ─── Embedding Model ─────────────────────────────────────────────────────────
 EMBEDDING_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
@@ -80,7 +140,7 @@ DOMAIN_LABELS = [
     "web_search",
 ]
 
-CONFIDENCE_THRESHOLD = 0.7  # Above this → return AARKAA-3B primary answer directly
+CONFIDENCE_THRESHOLD = 1.1  # 1.1 guarantees all final answers are generated by the 7B model (3B acts purely as router/helper)
 
 # ─── Auto-Learning ───────────────────────────────────────────────────────────
 AUTO_LEARN_INTERVAL = 15  # Trigger auto-learn every N messages
@@ -98,83 +158,35 @@ COMMODITY_TICKERS = {
     "gold": "GC=F", "silver": "SI=F", "platinum": "PL=F", "palladium": "PA=F",
     # Energy
     "oil": "CL=F", "crude": "CL=F", "crude oil": "CL=F", "wti": "CL=F",
-    "brent": "BZ=F", "brent crude": "BZ=F",
-    "natural gas": "NG=F", "heating oil": "HO=F", "gasoline": "RB=F",
-    # Industrial metals
-    "copper": "HG=F", "aluminium": "ALI=F", "aluminum": "ALI=F",
-    "zinc": "ZN=F", "nickel": "NI=F", "tin": "TIN=F", "lead": "LE=F",
-    # Agricultural
-    "corn": "ZC=F", "wheat": "ZW=F", "soybean": "ZS=F", "soybeans": "ZS=F",
-    "rice": "ZR=F", "oats": "ZO=F",
-    "sugar": "SB=F", "coffee": "KC=F", "cocoa": "CC=F", "cotton": "CT=F",
-    "orange juice": "OJ=F",
-    # Livestock
-    "cattle": "LE=F", "live cattle": "LE=F", "lean hogs": "HE=F", "feeder cattle": "GF=F",
+    "brent": "BZ=F", "natural gas": "NG=F", "gas": "NG=F",
+    # Agriculture
+    "wheat": "ZW=F", "corn": "ZC=F", "soybeans": "ZS=F", "sugar": "SB=F", "coffee": "KC=F",
+    # Industrial
+    "copper": "HG=F",
 }
+
+DEFAULT_CURRENCY = "USD"
+
+# Forex pair mapping
 FOREX_PAIRS = {
-    # Major pairs
-    "eurusd": "EURUSD=X", "eur/usd": "EURUSD=X", "euro dollar": "EURUSD=X",
-    "gbpusd": "GBPUSD=X", "gbp/usd": "GBPUSD=X", "pound dollar": "GBPUSD=X",
-    "usdjpy": "USDJPY=X", "usd/jpy": "USDJPY=X", "dollar yen": "USDJPY=X",
-    "usdchf": "USDCHF=X", "usd/chf": "USDCHF=X",
+    "eurusd": "EURUSD=X", "eur/usd": "EURUSD=X",
+    "gbpusd": "GBPUSD=X", "gbp/usd": "GBPUSD=X",
+    "usdjpy": "JPY=X",    "usd/jpy": "JPY=X",
+    "usdinr": "INR=X",    "usd/inr": "INR=X",
     "audusd": "AUDUSD=X", "aud/usd": "AUDUSD=X",
-    "usdcad": "USDCAD=X", "usd/cad": "USDCAD=X",
-    "nzdusd": "NZDUSD=X", "nzd/usd": "NZDUSD=X",
-    # INR pairs (India focused)
-    "usdinr": "USDINR=X", "usd/inr": "USDINR=X", "dollar rupee": "USDINR=X",
-    "usd to inr": "USDINR=X", "dollar to rupee": "USDINR=X",
-    "inr": "USDINR=X", "rupee": "USDINR=X",
-    "eurinr": "EURINR=X", "eur/inr": "EURINR=X", "euro rupee": "EURINR=X",
-    "gbpinr": "GBPINR=X", "gbp/inr": "GBPINR=X", "pound rupee": "GBPINR=X",
-    "jpyinr": "JPYINR=X", "jpy/inr": "JPYINR=X", "yen rupee": "JPYINR=X",
-    "aedinr": "AEDINR=X", "aed/inr": "AEDINR=X", "aed to inr": "AEDINR=X", "aed": "AEDINR=X", "dirham": "AEDINR=X",
-    # Cross pairs
-    "eurgbp": "EURGBP=X", "eur/gbp": "EURGBP=X",
-    "eurjpy": "EURJPY=X", "eur/jpy": "EURJPY=X",
-    "gbpjpy": "GBPJPY=X", "gbp/jpy": "GBPJPY=X",
-    "eurchf": "EURCHF=X", "eur/chf": "EURCHF=X",
-    "audjpy": "AUDJPY=X", "aud/jpy": "AUDJPY=X",
-    "cadjpy": "CADJPY=X", "cad/jpy": "CADJPY=X",
-    # Exotic
-    "usdsgd": "USDSGD=X", "usd/sgd": "USDSGD=X",
-    "usdhkd": "USDHKD=X", "usd/hkd": "USDHKD=X",
-    "usdcny": "USDCNY=X", "usd/cny": "USDCNY=X", "dollar yuan": "USDCNY=X",
-    "usdtry": "USDTRY=X", "usd/try": "USDTRY=X",
-    "usdzar": "USDZAR=X", "usd/zar": "USDZAR=X",
-    "usdmxn": "USDMXN=X", "usd/mxn": "USDMXN=X",
-    "usdrub": "USDRUB=X", "usd/rub": "USDRUB=X",
-    "usdaed": "USDAED=X", "usd/aed": "USDAED=X", "dollar dirham": "USDAED=X",
-    "usdsar": "USDSAR=X", "usd/sar": "USDSAR=X",
-    # DXY index
-    "dxy": "DX-Y.NYB", "dollar index": "DX-Y.NYB", "us dollar index": "DX-Y.NYB",
 }
 
-# ─── Web Search ───────────────────────────────────────────────────────────────
-WEB_SEARCH_MAX_RESULTS = 5
-WIKIPEDIA_SENTENCES = 5
-
-# ─── Tool Sandboxing ─────────────────────────────────────────────────────────
-# Agent tools can only operate within this directory
-SAFE_WORK_DIR = Path(os.getenv("AARKAAI_SAFE_DIR", str(BASE_DIR / "workspace")))
-BASH_TIMEOUT = int(os.getenv("AARKAAI_BASH_TIMEOUT", "30"))
-
-# Commands that are NEVER allowed through BashTool
+# ─── Security Blocklist for Agent Tools ─────────────────────────────────────
+BASH_TIMEOUT = float(os.getenv("AARKAAI_BASH_TIMEOUT", "30.0"))
 BASH_BLOCKLIST = [
-    "rm -rf /", "rm -rf /*", "mkfs", "dd if=",
-    "shutdown", "reboot", "halt", "poweroff",
-    "chmod 777", "curl | bash", "wget | bash",
-    "curl | sh", "wget | sh", "> /dev/sda",
-    ":(){ :|:& };:", "fork bomb",
-    "passwd", "useradd", "userdel", "groupadd",
-    "iptables", "ufw", "systemctl disable",
+    "rm -rf /", "rm -rf /*", "mkfs", "dd if=", ":(){ :|:& };:", 
+    "chmod -R 777 /", "shutdown", "reboot", "poweroff"
 ]
 
-# ─── Server ───────────────────────────────────────────────────────────────────
-BASE_URL = os.getenv("AARKAAI_BASE_URL", "http://43.204.153.162:5000")
-HOST = os.getenv("AARKAAI_HOST", "0.0.0.0")
-PORT = int(os.getenv("AARKAAI_PORT", "5000"))
-WORKERS = int(os.getenv("AARKAAI_WORKERS", "1"))  # uvicorn workers (keep 1 for llama.cpp)
-
-# ─── Logging ──────────────────────────────────────────────────────────────────
-LOG_LEVEL = os.getenv("AARKAAI_LOG_LEVEL", "INFO").upper()
-LOG_FORMAT_JSON = IS_PRODUCTION  # JSON logs in production for parsing
+# ─── Upload Restrictions ─────────────────────────────────────────────────────
+MAX_UPLOAD_SIZE_MB = int(os.getenv("AARKAAI_MAX_UPLOAD_SIZE_MB", "10"))
+MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+ALLOWED_UPLOAD_EXTENSIONS = {
+    ".pdf", ".csv", ".xlsx", ".xls", ".txt", ".json", ".md",
+    ".png", ".jpg", ".jpeg", ".docx", ".html",
+}

@@ -98,4 +98,4 @@ Deployment is automated via SSH/SCP pipelines:
 ```bash
 python scratch/deploy.py
 ```
-This packages the core engine, dependency lists, database migrations, and agent configurations, uploads them to the AWS Lightsail node (`43.204.153.162`), configures the target virtual environment, and restarts the systemd service.
+This packages the core engine, dependency lists, database migrations, and agent configurations, uploads them to the AWS Lightsail node (`16.170.206.243`), configures the target virtual environment, and restarts the systemd service.

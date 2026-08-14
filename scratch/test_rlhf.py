@@ -1,6 +1,6 @@
 import requests
 
-URL = "http://43.204.153.162:5000/rlhf"
+URL = "http://16.170.206.243:5000/rlhf"
 
 # Payload 1: String conversation_id (like the frontend sessionId)
 payload_str = {

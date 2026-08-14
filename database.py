@@ -70,6 +70,7 @@ class UserAccount(Base):
     password_hash = Column(String(256), nullable=False)
     name = Column(String(128), nullable=True)
     is_active = Column(Integer, default=1)  # 1 for active, 0 for disabled
+    role = Column(String(32), default="user", nullable=False)  # "user" | "admin"
     created_at = Column(DateTime, default=_utcnow)
 
 
@@ -153,6 +154,75 @@ class RLHFFeedback(Base):
     rating = Column(Integer, nullable=False)  # e.g., 1 for positive, -1 for negative
     correction = Column(Text, nullable=True)  # explicit text correction
     timestamp = Column(DateTime, default=_utcnow)
+
+
+class TaskGoal(Base):
+    """Persistent task goals for autonomous execution (Agent state tracking)."""
+    
+    __tablename__ = "task_goals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(128), nullable=False, index=True)
+    session_id = Column(String(64), nullable=False, default="default")
+    goal_text = Column(Text, nullable=False)
+    task_dag = Column(Text, nullable=False)        # JSON string storing task status, parameters, deps, risk levels
+    scratchpad = Column(Text, default="{}")        # JSON string for multi-level working memory facts/assumptions
+    status = Column(String(32), default="pending")  # pending/running/completed/failed/paused (for approval gate)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class PortfolioHolding(Base):
+    """User portfolio holdings."""
+    __tablename__ = "portfolio_holdings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(128), nullable=False, index=True)
+    symbol = Column(String(32), nullable=False)
+    quantity = Column(Float, nullable=False)
+    avg_price = Column(Float, nullable=False)
+    added_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
+class WatchlistItem(Base):
+    """User watchlist items."""
+    __tablename__ = "watchlist_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(128), nullable=False, index=True)
+    symbol = Column(String(32), nullable=False)
+    added_at = Column(DateTime, default=_utcnow)
+
+
+class MarketAlert(Base):
+    """User market alerts."""
+    __tablename__ = "market_alerts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(128), nullable=False, index=True)
+    symbol = Column(String(32), nullable=False)
+    condition = Column(String(32), nullable=False)  # 'above', 'below', 'crosses_above', 'crosses_below', 'pct_change'
+    threshold = Column(Float, nullable=False)
+    is_active = Column(Integer, default=1)  # SQLite doesn't have native Boolean
+    triggered_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    notes = Column(String(256), nullable=True)
+
+
+class UserSettings(Base):
+    """Per-user preferences for model selection, response style, and UI configuration."""
+    __tablename__ = "user_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(128), ForeignKey("users.id"), unique=True, nullable=False, index=True)
+    default_model = Column(String(64), default="aarkaa-7b")
+    response_style = Column(String(32), default="balanced")  # concise | balanced | detailed
+    theme = Column(String(16), default="dark")               # dark | light | auto
+    language = Column(String(8), default="en")               # ISO 639-1
+    streaming_enabled = Column(Integer, default=1)            # 1 = True, 0 = False (SQLite compat)
+    reasoning_depth = Column(String(16), default="balanced")  # fast | balanced | deep
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

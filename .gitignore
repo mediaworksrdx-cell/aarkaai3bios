@@ -1,10 +1,33 @@
 *.pem
+*-sa-key.json
+*service_account*.json
+orbital-heaven-*.json
 *.gguf
 *.db
 __pycache__/
 *.pyc
+.env
 *.env
 .env*
+.env.production*
+
+# Scratch/utility test scripts (contain hardcoded test credentials)
+scratch/test_remote_*.py
+scratch/test_pdf_remote.py
+scratch/test_portfolio_remote.py
+scratch/test_previous_message_pdf.py
+scratch/run_remote_verify.py
+scratch/verify_cpu_idle.py
+scratch/verify_factual_query.py
+scratch/trigger_remote_test.py
+
+# GCP service account keys
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+
+# Existing exclusions
 scratch/run_conversion*.py
 scratch/download_model.py
 scratch/download_and_convert.py
@@ -16,3 +39,9 @@ scratch/run_model_conversion.py
 list_hf.py
 merge_lora.py
 test_sd.py
+
+# Build/runtime artifacts
+*.tar.gz
+*.zip
+load_results_*.json
+load_test_results.json

@@ -41,6 +41,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 import modules.auth
 from config import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
     ALLOWED_ORIGINS,
     BASE_URL,
     ENVIRONMENT,
@@ -53,14 +54,21 @@ from config import (
 from schemas import (
     AdminKnowledgeRequest,
     AdminUserMemoryRequest,
+    GoogleAuthRequest,
+    LogoutRequest,
     RLHFRequest,
+    RefreshRequest,
     HealthResponse,
     PromptRequest,
     PromptResponse,
+    SkillModel,
     StrategyRequest,
     StrategyResponse,
+    TestRequestModel,
     TokenResponse,
     UserCreate,
+    UserSettingsUpdate,
+    UserSettingsResponse,
 )
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
@@ -153,6 +161,14 @@ def _init_modules() -> None:
     except Exception as exc:
         _module_status["rag"] = f"error: {exc}"
         logger.error("✗ RAG init failed: %s", exc)
+
+    # 5b. Architecture Knowledge Indexing (into RAG)
+    try:
+        from modules.architecture_knowledge import index_architecture_knowledge
+        index_architecture_knowledge(embed_fn)
+        logger.info("✓ Architecture knowledge indexed")
+    except Exception as exc:
+        logger.warning("✗ Architecture knowledge indexing failed: %s", exc)
 
     # 6. Auto-Learn
     try:
@@ -302,12 +318,16 @@ app.add_middleware(RateLimitMiddleware)
 from middleware import APIKeyMiddleware
 app.add_middleware(APIKeyMiddleware)
 
-# 4. CORS
+# 4. Response caching (POST /prompt → Redis, TTL=1h)
+from middleware import ResponseCacheMiddleware
+app.add_middleware(ResponseCacheMiddleware)
+
+# 5. CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -324,19 +344,48 @@ async def error_handler(request: Request, call_next):
         _metrics["requests_failed"] += 1
         return JSONResponse(
             status_code=500,
-            content={"detail": f"Internal server error: {type(exc).__name__}"},
+            content={"detail": "Internal server error. Please try again or contact support."},
         )
+
+
+@app.exception_handler(fastapi.exceptions.RequestValidationError)
+async def validation_exception_handler(request: Request, exc: fastapi.exceptions.RequestValidationError):
+    exc_str = str(exc).encode("ascii", "replace").decode("ascii")
+    logger.error("Request validation failed: %s", exc_str)
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+    )
 
 
 # ─── Authentication Endpoints ───────────────────────────────────────────────────
 
 @app.post("/auth/register", response_model=TokenResponse, tags=["auth"])
 def register_user(req: UserCreate):
-    """Register a new user account."""
+    """Register a new user account. Returns access + refresh tokens."""
     import uuid
-    from database import SessionLocal, UserAccount
-    from modules.auth import get_password_hash, create_access_token
+    import config
+    from modules.auth import get_password_hash, create_access_token, create_refresh_token
     
+    if config.MONGODB_URI:
+        from modules.mongo_repository import UserRepo
+        existing_doc = UserRepo.get_by_email(req.email)
+        if existing_doc:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        user_id = str(uuid.uuid4())
+        pwd_hash = get_password_hash(req.password)
+        UserRepo.create_user(user_id=user_id, email=req.email, password_hash=pwd_hash, name=req.name)
+        access_token = create_access_token(data={"sub": user_id})
+        refresh_token = create_refresh_token(data={"sub": user_id})
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "user_id": user_id,
+            "name": req.name,
+        }
+
+    from database import SessionLocal, UserAccount
     db = SessionLocal()
     try:
         # Check if email exists
@@ -354,19 +403,44 @@ def register_user(req: UserCreate):
         db.add(new_user)
         db.commit()
         
-        # Create token
+        # Create dual tokens
         access_token = create_access_token(data={"sub": user_id})
-        return {"access_token": access_token, "token_type": "bearer", "user_id": user_id, "name": req.name}
+        refresh_token = create_refresh_token(data={"sub": user_id})
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "user_id": user_id,
+            "name": req.name,
+        }
     finally:
         db.close()
 
 
 @app.post("/auth/login", response_model=TokenResponse, tags=["auth"])
 def login_user(req: UserCreate):
-    """Login and get a JWT token. Accepts JSON body with email + password."""
+    """Login and get access + refresh JWT tokens."""
+    import config
+    from modules.auth import verify_password, create_access_token, create_refresh_token
+
+    if config.MONGODB_URI:
+        from modules.mongo_repository import UserRepo
+        user_doc = UserRepo.get_by_email(req.email)
+        if not user_doc or not verify_password(req.password, user_doc.get("password_hash", "")):
+            raise HTTPException(status_code=401, detail="Incorrect email or password")
+        user_id = user_doc["id"]
+        name = user_doc.get("name", "")
+        access_token = create_access_token(data={"sub": user_id})
+        refresh_token = create_refresh_token(data={"sub": user_id})
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "user_id": user_id,
+            "name": name,
+        }
+
     from database import SessionLocal, UserAccount
-    from modules.auth import verify_password, create_access_token
-    
     db = SessionLocal()
     try:
         user = db.query(UserAccount).filter(UserAccount.email == req.email).first()
@@ -374,7 +448,454 @@ def login_user(req: UserCreate):
             raise HTTPException(status_code=401, detail="Incorrect email or password")
             
         access_token = create_access_token(data={"sub": user.id})
-        return {"access_token": access_token, "token_type": "bearer", "user_id": user.id, "name": user.name}
+        refresh_token = create_refresh_token(data={"sub": user.id})
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "user_id": user.id,
+            "name": user.name,
+        }
+    finally:
+        db.close()
+
+@app.post("/auth/visitor-token", response_model=TokenResponse, tags=["auth"])
+def issue_visitor_token():
+    """Issue a temporary anonymous visitor JWT without requiring credentials.
+    This eliminates the need to embed any password in the frontend bundle."""
+    import uuid
+    import config
+    from modules.auth import get_password_hash, create_access_token, verify_password
+    import os
+
+    visitor_email = os.getenv("VISITOR_EMAIL", "visitor@aarkaai.com")
+    visitor_password = os.getenv("VISITOR_PASSWORD", "")
+    if not visitor_password:
+        # Generate deterministic dev-only password from SECRET_KEY (never hardcoded)
+        import hashlib
+        from config import SECRET_KEY
+        visitor_password = hashlib.sha256(f"visitor-{SECRET_KEY}".encode()).hexdigest()[:24]
+
+    if config.MONGODB_URI:
+        from modules.mongo_repository import UserRepo
+        user_doc = UserRepo.get_by_email(visitor_email)
+        if user_doc:
+            user_id = user_doc["id"]
+        else:
+            user_id = str(uuid.uuid4())
+            pwd_hash = get_password_hash(visitor_password)
+            UserRepo.create_user(user_id=user_id, email=visitor_email, password_hash=pwd_hash, name="Web Visitor")
+        access_token = create_access_token(data={"sub": user_id})
+        return {"access_token": access_token, "token_type": "bearer", "user_id": user_id, "name": "Web Visitor"}
+
+    from database import SessionLocal, UserAccount
+    db = SessionLocal()
+    try:
+        user = db.query(UserAccount).filter(UserAccount.email == visitor_email).first()
+        if not user:
+            user_id = str(uuid.uuid4())
+            new_user = UserAccount(
+                id=user_id,
+                email=visitor_email,
+                password_hash=get_password_hash(visitor_password),
+                name="Web Visitor"
+            )
+            db.add(new_user)
+            db.commit()
+        else:
+            user_id = user.id
+        access_token = create_access_token(data={"sub": user_id})
+        return {"access_token": access_token, "token_type": "bearer", "user_id": user_id, "name": "Web Visitor"}
+    finally:
+        db.close()
+
+# ─── Token Refresh & Logout ──────────────────────────────────────────────────
+
+@app.post("/auth/refresh", response_model=TokenResponse, tags=["auth"])
+def refresh_token_endpoint(req: RefreshRequest):
+    """Exchange a valid refresh token for a new short-lived access token."""
+    from modules.auth import refresh_access_token
+    return refresh_access_token(req.refresh_token)
+
+
+@app.post("/auth/logout", tags=["auth"])
+def logout_endpoint(req: LogoutRequest):
+    """Revoke access and/or refresh tokens (adds JTI to Redis blacklist)."""
+    import jwt as pyjwt
+    from config import SECRET_KEY, JWT_ALGORITHM
+    from modules.auth import revoke_token
+
+    revoked = []
+    for token_str in [req.access_token, req.refresh_token]:
+        if not token_str:
+            continue
+        try:
+            payload = pyjwt.decode(token_str, SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            jti = payload.get("jti")
+            if jti and revoke_token(jti):
+                revoked.append(payload.get("type", "unknown"))
+        except pyjwt.PyJWTError:
+            pass  # Silently skip invalid/expired tokens
+
+    return {"detail": f"Revoked {len(revoked)} token(s)", "revoked_types": revoked}
+
+
+# ─── GitHub OAuth ────────────────────────────────────────────────────────────
+
+@app.get("/auth/github/login", tags=["auth"])
+def github_login(request: Request):
+    """Redirect to GitHub OAuth screen with CSRF state parameter."""
+    import secrets
+    from config import GITHUB_CLIENT_ID
+    if not GITHUB_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="GitHub Client ID is not configured.")
+    state = secrets.token_urlsafe(32)
+    # Store state in a short-lived cookie for validation in callback
+    redirect_uri = "https://github.com/login/oauth/authorize"
+    scope = "user:email read:user"
+    response = fastapi.responses.RedirectResponse(
+        url=f"{redirect_uri}?client_id={GITHUB_CLIENT_ID}&scope={scope}&state={state}"
+    )
+    response.set_cookie(
+        key="oauth_state", value=state, max_age=600, httponly=True,
+        samesite="lax", secure=True,
+    )
+    return response
+
+@app.get("/auth/github/callback", tags=["auth"])
+async def github_callback(code: str, state: str, request: Request):
+    """Exchange code for GitHub profile, validate CSRF state, register or sign in user."""
+    import httpx
+    import uuid
+    from config import GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, OAUTH_REDIRECT_BASE_URL
+    from database import SessionLocal, UserAccount
+    from modules.auth import create_access_token
+
+    # Validate CSRF state
+    stored_state = request.cookies.get("oauth_state")
+    if not stored_state or stored_state != state:
+        raise HTTPException(status_code=403, detail="OAuth state mismatch — possible CSRF attack.")
+    
+    if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="GitHub OAuth credentials not configured.")
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        token_resp = await client.post(
+            "https://github.com/login/oauth/access_token",
+            data={
+                "client_id": GITHUB_CLIENT_ID,
+                "client_secret": GITHUB_CLIENT_SECRET,
+                "code": code
+            },
+            headers={"Accept": "application/json"}
+        )
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            error_desc = token_data.get("error_description", "Failed to retrieve GitHub access token.")
+            raise HTTPException(status_code=400, detail=error_desc)
+
+        user_resp = await client.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+        user_profile = user_resp.json()
+        github_id = user_profile.get("id")
+        name = user_profile.get("name") or user_profile.get("login") or "GitHub User"
+        email = user_profile.get("email")
+
+        # If primary email is private in GitHub profile, fetch user emails list
+        if not email:
+            try:
+                emails_resp = await client.get(
+                    "https://api.github.com/user/emails",
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+                if emails_resp.status_code == 200:
+                    emails_data = emails_resp.json()
+                    primary_email = next((e["email"] for e in emails_data if e.get("primary")), None)
+                    email = primary_email or (emails_data[0]["email"] if emails_data else None)
+            except Exception as exc:
+                logger.warning("Could not fetch private GitHub emails: %s", exc)
+
+        if not email:
+            email = f"{user_profile.get('login', github_id)}@github.com"
+
+        import config
+        if config.MONGODB_URI:
+            from modules.mongo_repository import UserRepo
+            mongo_user = UserRepo.get_by_email(email)
+            if not mongo_user:
+                user_id = str(uuid.uuid4())
+                UserRepo.create_user(user_id=user_id, email=email, password_hash="GITHUB_OAUTH_USER", name=name)
+            else:
+                user_id = mongo_user["id"]
+
+            jwt_token = create_access_token(data={"sub": user_id})
+            cookie_max_age = ACCESS_TOKEN_EXPIRE_MINUTES * 60
+
+            user_agent = request.headers.get("user-agent", "").lower()
+            if "android" in user_agent or "okhttp" in user_agent or "mobile" in user_agent:
+                response = fastapi.responses.RedirectResponse(
+                    url=f"aarkaai://auth-callback?auth=success&user_id={user_id}&name={name}"
+                )
+            else:
+                response = fastapi.responses.RedirectResponse(
+                    url=f"{OAUTH_REDIRECT_BASE_URL}/aarkaai?auth=success&name={name}"
+                )
+            response.set_cookie(
+                key="aarkaai_token", value=jwt_token,
+                max_age=cookie_max_age, httponly=True,
+                secure=True, samesite="lax", path="/",
+            )
+            return response
+
+        db = SessionLocal()
+        try:
+            user = db.query(UserAccount).filter(UserAccount.email == email).first()
+            if not user:
+                user_id = str(uuid.uuid4())
+                user = UserAccount(
+                    id=user_id,
+                    email=email,
+                    password_hash="GITHUB_OAUTH_USER",
+                    name=name
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+            else:
+                user_id = user.id
+
+            jwt_token = create_access_token(data={"sub": user_id})
+            cookie_max_age = ACCESS_TOKEN_EXPIRE_MINUTES * 60
+
+            user_agent = request.headers.get("user-agent", "").lower()
+            if "android" in user_agent or "okhttp" in user_agent or "mobile" in user_agent:
+                response = fastapi.responses.RedirectResponse(
+                    url=f"aarkaai://auth-callback?auth=success&user_id={user_id}&name={name}"
+                )
+            else:
+                response = fastapi.responses.RedirectResponse(
+                    url=f"{OAUTH_REDIRECT_BASE_URL}/aarkaai?auth=success&name={name}"
+                )
+            response.set_cookie(
+                key="aarkaai_token", value=jwt_token,
+                max_age=cookie_max_age, httponly=True,
+                secure=True, samesite="lax", path="/",
+            )
+            return response
+        finally:
+            db.close()
+
+
+# ─── Google OAuth ────────────────────────────────────────────────────────────
+
+def _get_google_redirect_uri(request: Request) -> str:
+    """Construct redirect_uri for Google OAuth."""
+    host = request.headers.get("host", "synthetixanalytics.com")
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    return f"{scheme}://{host}/auth/google/callback"
+
+
+@app.get("/auth/google/login", tags=["auth"])
+def google_login(request: Request):
+    """Redirect to Google OAuth 2.0 consent screen with PKCE."""
+    import secrets
+    import hashlib
+    import base64
+    from config import GOOGLE_CLIENT_ID
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="Google Client ID is not configured.")
+
+    # Generate PKCE code_verifier and code_challenge
+    code_verifier = secrets.token_urlsafe(64)
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode("ascii")).digest()
+    ).rstrip(b"=").decode("ascii")
+
+    state = secrets.token_urlsafe(32)
+    redirect_uri = _get_google_redirect_uri(request)
+    scope = "openid email profile"
+    google_auth_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth"
+        f"?client_id={GOOGLE_CLIENT_ID}"
+        f"&redirect_uri={redirect_uri}"
+        "&response_type=code"
+        f"&scope={scope}"
+        "&access_type=offline"
+        "&prompt=consent"
+        f"&state={state}"
+        f"&code_challenge={code_challenge}"
+        "&code_challenge_method=S256"
+    )
+    response = fastapi.responses.RedirectResponse(url=google_auth_url)
+    response.set_cookie(
+        key="oauth_state", value=state, max_age=600, httponly=True,
+        samesite="lax", secure=True,
+    )
+    response.set_cookie(
+        key="pkce_verifier", value=code_verifier, max_age=600, httponly=True,
+        samesite="lax", secure=True,
+    )
+    return response
+
+
+@app.get("/auth/google/callback", tags=["auth"])
+async def google_callback(code: str, state: str, request: Request):
+    """Exchange OAuth code for Google user profile with PKCE verification."""
+    import httpx
+    import uuid
+    from config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OAUTH_REDIRECT_BASE_URL
+    from database import SessionLocal, UserAccount
+    from modules.auth import create_access_token
+
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Google OAuth credentials not configured.")
+
+    # Validate CSRF state
+    stored_state = request.cookies.get("oauth_state")
+    if not stored_state or stored_state != state:
+        raise HTTPException(status_code=403, detail="OAuth state mismatch — possible CSRF attack.")
+
+    # Retrieve PKCE code_verifier
+    code_verifier = request.cookies.get("pkce_verifier", "")
+
+    redirect_uri = _get_google_redirect_uri(request)
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        # 1. Exchange code for access token
+        token_resp = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+                "code_verifier": code_verifier,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
+        )
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        id_token = token_data.get("id_token")
+
+        if not access_token and not id_token:
+            error_desc = token_data.get("error_description", "Failed to retrieve Google token.")
+            raise HTTPException(status_code=400, detail=error_desc)
+
+        # 2. Get user profile from Google
+        user_info_resp = await client.get(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+        profile = user_info_resp.json()
+
+        email = profile.get("email")
+        name = profile.get("name") or profile.get("given_name") or "Google User"
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Could not retrieve email from Google profile.")
+
+        # 3. Authenticate or create user in DB
+        db = SessionLocal()
+        try:
+            user = db.query(UserAccount).filter(UserAccount.email == email).first()
+            if not user:
+                user_id = str(uuid.uuid4())
+                user = UserAccount(
+                    id=user_id,
+                    email=email,
+                    password_hash="GOOGLE_OAUTH_USER",
+                    name=name
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+
+            jwt_token = create_access_token(data={"sub": user.id})
+            cookie_max_age = ACCESS_TOKEN_EXPIRE_MINUTES * 60
+
+            user_agent = request.headers.get("user-agent", "").lower()
+            if "android" in user_agent or "okhttp" in user_agent or "mobile" in user_agent:
+                response = fastapi.responses.RedirectResponse(
+                    url=f"aarkaai://auth-callback?auth=success&user_id={user.id}&name={name}"
+                )
+            else:
+                response = fastapi.responses.RedirectResponse(
+                    url=f"{OAUTH_REDIRECT_BASE_URL}/aarkaai?auth=success&name={name}"
+                )
+            response.set_cookie(
+                key="aarkaai_token", value=jwt_token,
+                max_age=cookie_max_age, httponly=True,
+                secure=True, samesite="lax", path="/",
+            )
+            return response
+        finally:
+            db.close()
+
+
+@app.post("/auth/google/verify", tags=["auth"])
+@app.post("/auth/google", tags=["auth"])
+async def google_token_verify(payload: GoogleAuthRequest):
+    """Directly verify a Google ID token or Access Token from frontend / mobile SDK."""
+    import httpx
+    import uuid
+    from database import SessionLocal, UserAccount
+    from modules.auth import create_access_token
+
+    if not payload.id_token and not payload.access_token:
+        raise HTTPException(status_code=400, detail="Either id_token or access_token must be provided.")
+
+    email = None
+    name = "Google User"
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        if payload.id_token:
+            token_info_resp = await client.get(
+                f"https://oauth2.googleapis.com/tokeninfo?id_token={payload.id_token}"
+            )
+            if token_info_resp.status_code == 200:
+                data = token_info_resp.json()
+                email = data.get("email")
+                name = data.get("name") or data.get("given_name") or name
+
+        if not email and payload.access_token:
+            user_info_resp = await client.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {payload.access_token}"}
+            )
+            if user_info_resp.status_code == 200:
+                data = user_info_resp.json()
+                email = data.get("email")
+                name = data.get("name") or data.get("given_name") or name
+
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid Google token or unable to verify identity.")
+
+    db = SessionLocal()
+    try:
+        user = db.query(UserAccount).filter(UserAccount.email == email).first()
+        if not user:
+            user_id = str(uuid.uuid4())
+            user = UserAccount(
+                id=user_id,
+                email=email,
+                password_hash="GOOGLE_OAUTH_USER",
+                name=name
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+        jwt_token = create_access_token(data={"sub": user.id})
+        return {
+            "access_token": jwt_token,
+            "token_type": "bearer",
+            "user_id": user.id,
+            "name": user.name
+        }
     finally:
         db.close()
 
@@ -477,32 +998,56 @@ def download_file(filename: str):
 
 
 @app.post("/upload", tags=["core"])
-async def upload_file(file: fastapi.UploadFile = fastapi.File(...)):
+async def upload_file(
+    file: fastapi.UploadFile = fastapi.File(...),
+    current_user=fastapi.Depends(modules.auth.get_current_user),
+):
     """
     Upload a document/file to AARKAAI's sandboxed SAFE_WORK_DIR (workspace).
+    Requires JWT auth. Enforces file size and extension whitelist.
     """
     from pathlib import Path
-    from config import SAFE_WORK_DIR
-    import shutil
+    from config import SAFE_WORK_DIR, MAX_UPLOAD_SIZE_BYTES, ALLOWED_UPLOAD_EXTENSIONS
 
     # Sanitize the filename to prevent traversal attacks
     filename = Path(file.filename).name
     if not filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
+    # Extension whitelist
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{ext}' not allowed. Accepted: {', '.join(sorted(ALLOWED_UPLOAD_EXTENSIONS))}",
+        )
+
     safe_dir = Path(SAFE_WORK_DIR).resolve()
     target_path = safe_dir / filename
+    total_bytes = 0
 
     try:
         with open(target_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            while chunk := await file.read(8192):
+                total_bytes += len(chunk)
+                if total_bytes > MAX_UPLOAD_SIZE_BYTES:
+                    buffer.close()
+                    target_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds maximum upload size of {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)}MB.",
+                    )
+                buffer.write(chunk)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to save uploaded file: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(exc)}")
+        raise HTTPException(status_code=500, detail="Failed to save file.")
 
     return {
         "status": "success",
         "filename": filename,
+        "size_bytes": total_bytes,
         "path": f"/download/{filename}",
     }
 
@@ -515,30 +1060,48 @@ def get_user_subscription(current_user=fastapi.Depends(modules.auth.get_current_
 
 
 @app.post("/subscription/upgrade", tags=["premium"])
-def upgrade_user_subscription(current_user=fastapi.Depends(modules.auth.get_current_user)):
-    """Upgrade the current user to premium tier."""
+def upgrade_user_subscription(current_user=fastapi.Depends(modules.auth.require_admin)):
+    """Upgrade a user to premium tier. Requires admin role."""
     from modules.subscription import upgrade_user
     try:
         upgrade_user(current_user.id, months=1)
         return {"status": "success", "message": "User upgraded to premium."}
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Upgrade failed. Contact support.")
 
 
 
 @app.get("/metrics", tags=["info"])
-async def metrics(current_user=fastapi.Depends(modules.auth.get_current_user)):
+async def metrics(current_user=fastapi.Depends(modules.auth.require_admin)):
     """Operational metrics for monitoring (requires auth)."""
+    import threading
+    from modules.aarkaa_engine import get_status_metadata
+    
     total = _metrics["requests_total"]
+    failed = _metrics["requests_failed"]
     avg_time = (
         round(_metrics["total_processing_time"] / total, 3) if total > 0 else 0
     )
+    success_ratio = (
+        round((total - failed) / total, 4) if total > 0 else 1.0
+    )
+    
+    # Expose detailed engine states dynamically
+    try:
+        engine_status = get_status_metadata()
+    except Exception as exc:
+        engine_status = {"error": str(exc)}
+
     return {
         "requests_total": total,
-        "requests_failed": _metrics["requests_failed"],
+        "requests_failed": failed,
+        "success_ratio": success_ratio,
         "avg_processing_time": avg_time,
+        "total_processing_time": round(_metrics["total_processing_time"], 3),
         "startup_time": _metrics["startup_time"],
         "environment": ENVIRONMENT,
+        "active_threads": threading.active_count(),
+        "engine": engine_status,
         "modules": _module_status,
     }
 
@@ -571,7 +1134,7 @@ def prompt(
         logger.error("Pipeline error: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Processing failed: {type(exc).__name__}: {str(exc)}",
+            detail="Processing failed. Please try again or contact support.",
         )
 
 
@@ -592,7 +1155,7 @@ async def prompt_stream(
 
     async def event_generator():
         try:
-            async for chunk in stream_query(query=req.query, user_id=current_user.id, session_id=req.session_id, mode=mode):
+            async for chunk in stream_query(query=req.query, user_id=current_user.id, session_id=req.session_id, mode=mode, model_override=req.model_override):
                 yield f"data: {json.dumps(chunk)}\n\n"
         except Exception as exc:
             logger.error("Streaming error: %s", exc, exc_info=True)
@@ -669,7 +1232,7 @@ def get_strategy(
 @app.post("/admin/knowledge", tags=["admin"])
 def admin_add_knowledge(
     req: AdminKnowledgeRequest,
-    current_user=fastapi.Depends(modules.auth.get_current_user),
+    current_user=fastapi.Depends(modules.auth.require_admin),
 ):
     """Add a new entry to the RAG knowledge base. Requires JWT auth."""
     from modules import rag
@@ -683,7 +1246,7 @@ def admin_add_knowledge(
 @app.post("/admin/user-memory", tags=["admin"])
 def admin_set_user_memory(
     req: AdminUserMemoryRequest,
-    current_user=fastapi.Depends(modules.auth.get_current_user),
+    current_user=fastapi.Depends(modules.auth.require_admin),
 ):
     """Set a memory or system prompt for a user. Requires JWT auth."""
     from modules import memory
@@ -743,12 +1306,6 @@ def submit_rlhf_feedback(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-from pydantic import BaseModel
-
-class SkillModel(BaseModel):
-    name: str
-    content: str
-
 @app.get("/skills", tags=["skills"])
 def api_list_skills(current_user=fastapi.Depends(modules.auth.get_current_user)):
     """List all available skills (names and descriptions)."""
@@ -796,8 +1353,6 @@ def api_update_skill(name: str, req: SkillModel, current_user=fastapi.Depends(mo
         raise HTTPException(status_code=400, detail=result)
     return {"status": "success", "message": result}
 
-class TestRequestModel(BaseModel):
-    prompt: str
 
 @app.post("/skills/{name}/test", tags=["skills"])
 def api_test_skill(name: str, req: TestRequestModel, current_user=fastapi.Depends(modules.auth.get_current_user)):
@@ -842,8 +1397,49 @@ def api_delete_skill(name: str, current_user=fastapi.Depends(modules.auth.get_cu
     return {"status": "success", "message": result}
 
 
+@app.get("/skills/{name}/versions", tags=["skills"])
+def api_skill_versions(name: str, current_user=fastapi.Depends(modules.auth.get_current_user)):
+    """List version history for a custom skill."""
+    from modules.tools.skill_tools import get_registry
+    registry = get_registry()
+    if not registry:
+        raise HTTPException(status_code=500, detail="Skill registry not initialized.")
+    user_id = str(current_user.id)
+    versions = registry.get_skill_versions(name, user_id=user_id)
+    return {"name": name, "versions": versions}
+
+
+# ─── User Settings ───────────────────────────────────────────────────────────
+
+
+@app.get("/settings", response_model=UserSettingsResponse, tags=["settings"])
+def api_get_settings(current_user=fastapi.Depends(modules.auth.get_current_user)):
+    """Retrieve the current user's settings (model, style, theme, language, etc.)."""
+    from modules.user_settings import get_user_settings
+    return get_user_settings(str(current_user.id))
+
+
+@app.put("/settings", response_model=UserSettingsResponse, tags=["settings"])
+def api_update_settings(
+    req: UserSettingsUpdate,
+    current_user=fastapi.Depends(modules.auth.get_current_user),
+):
+    """Update the current user's settings. Only provided fields are changed."""
+    from modules.user_settings import update_user_settings
+
+    # Build kwargs from only the fields that were explicitly provided
+    updates = req.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No settings provided to update.")
+
+    try:
+        return update_user_settings(str(current_user.id), **updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 @app.get("/admin/stats", tags=["admin"])
-def admin_get_stats(current_user=fastapi.Depends(modules.auth.get_current_user)):
+def admin_get_stats(current_user=fastapi.Depends(modules.auth.require_admin)):
     """Get basic database stats. Requires JWT auth."""
     from database import (
         SessionLocal,

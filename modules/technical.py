@@ -304,3 +304,167 @@ def format_technical_summary(symbol: str, indicators: dict, signal: str) -> str:
         f"  ATR (14): {currency}{indicators['atr']}\n"
         f"  Volume: {indicators['volume']:,} ({vol_desc}, {indicators['volume_ratio']:.1f}x avg)\n"
     )
+
+def _sma(series: pd.Series, period: int) -> pd.Series:
+    """Simple Moving Average."""
+    return series.rolling(window=period).mean()
+
+def _adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """Average Directional Index — trend strength indicator."""
+    plus_dm = high.diff()
+    minus_dm = low.diff()
+    plus_dm[plus_dm < 0] = 0
+    minus_dm[minus_dm > 0] = 0
+    minus_dm = minus_dm.abs()
+    
+    # Directional Movement
+    plus_dm = plus_dm.where(plus_dm > minus_dm, 0.0)
+    minus_dm = minus_dm.where(minus_dm > plus_dm, 0.0)
+    
+    # True Range
+    tr = pd.concat([
+        high - low,
+        (high - close.shift(1)).abs(),
+        (low - close.shift(1)).abs()
+    ], axis=1).max(axis=1)
+    
+    # Wilder's smoothing
+    def wilder_smooth(s, n):
+        res = pd.Series(index=s.index, dtype=float)
+        if len(s) < n:
+            return res
+        res.iloc[n-1] = s.iloc[:n].sum()
+        for i in range(n, len(s)):
+            res.iloc[i] = res.iloc[i-1] - (res.iloc[i-1]/n) + s.iloc[i]
+        return res
+        
+    atr = wilder_smooth(tr, period)
+    plus_di = 100 * (wilder_smooth(plus_dm, period) / atr)
+    minus_di = 100 * (wilder_smooth(minus_dm, period) / atr)
+    
+    dx = (plus_di - minus_di).abs() / (plus_di + minus_di) * 100
+    adx = wilder_smooth(dx, period)
+    return adx
+
+def _supertrend(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 10, multiplier: float = 3.0) -> tuple[pd.Series, pd.Series]:
+    """Supertrend indicator. Returns (supertrend_line, direction).
+    direction: 1 = bullish, -1 = bearish."""
+    hl2 = (high + low) / 2
+    atr = _atr(high, low, close, period)
+    
+    upperband = hl2 + (multiplier * atr)
+    lowerband = hl2 - (multiplier * atr)
+    
+    supertrend = pd.Series(index=close.index, dtype=float)
+    direction = pd.Series(index=close.index, dtype=int)
+    
+    for i in range(period, len(close)):
+        if close.iloc[i] > upperband.iloc[i-1]:
+            direction.iloc[i] = 1
+        elif close.iloc[i] < lowerband.iloc[i-1]:
+            direction.iloc[i] = -1
+        else:
+            direction.iloc[i] = direction.iloc[i-1]
+            
+        if direction.iloc[i] == 1 and lowerband.iloc[i] < lowerband.iloc[i-1]:
+            lowerband.iloc[i] = lowerband.iloc[i-1]
+        if direction.iloc[i] == -1 and upperband.iloc[i] > upperband.iloc[i-1]:
+            upperband.iloc[i] = upperband.iloc[i-1]
+            
+        if direction.iloc[i] == 1:
+            supertrend.iloc[i] = lowerband.iloc[i]
+        else:
+            supertrend.iloc[i] = upperband.iloc[i]
+            
+    return supertrend, direction
+
+def _vwap(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series) -> pd.Series:
+    """Volume Weighted Average Price (intraday cumulative)."""
+    typical_price = (high + low + close) / 3
+    return (typical_price * volume).cumsum() / volume.cumsum()
+
+def detect_candlestick_patterns(df: pd.DataFrame) -> list[dict]:
+    """Detect basic candlestick patterns from OHLC data.
+    Patterns: doji, hammer, inverted_hammer, bullish_engulfing, bearish_engulfing,
+    morning_star, evening_star, shooting_star.
+    Returns list of {pattern, date, signal (bullish/bearish), confidence}."""
+    patterns = []
+    
+    for i in range(2, len(df)):
+        O, H, L, C = df['Open'].iloc[i], df['High'].iloc[i], df['Low'].iloc[i], df['Close'].iloc[i]
+        O1, H1, L1, C1 = df['Open'].iloc[i-1], df['High'].iloc[i-1], df['Low'].iloc[i-1], df['Close'].iloc[i-1]
+        date = str(df.index[i])
+        
+        body = abs(C - O)
+        total_range = H - L
+        if total_range == 0: total_range = 0.001
+        
+        # Doji
+        if body <= 0.1 * total_range:
+            patterns.append({"pattern": "doji", "date": date, "signal": "neutral", "confidence": 0.5})
+            
+        # Hammer
+        if C > O and (O - L) >= 2 * body and (H - C) <= 0.1 * total_range:
+            patterns.append({"pattern": "hammer", "date": date, "signal": "bullish", "confidence": 0.7})
+            
+        # Bullish Engulfing
+        if C1 < O1 and C > O and O <= C1 and C >= O1:
+            patterns.append({"pattern": "bullish_engulfing", "date": date, "signal": "bullish", "confidence": 0.8})
+            
+        # Bearish Engulfing
+        if C1 > O1 and C < O and O >= C1 and C <= O1:
+            patterns.append({"pattern": "bearish_engulfing", "date": date, "signal": "bearish", "confidence": 0.8})
+            
+    return patterns
+
+def compute_extended_indicators(symbol: str, period: str = "6mo") -> dict:
+    """Compute all indicators including new ones (SMA, ADX, Supertrend, VWAP).
+    Returns the existing compute_indicators() dict plus:
+    sma_20, sma_50, sma_200, adx, supertrend_value, supertrend_direction, vwap,
+    patterns (from detect_candlestick_patterns)."""
+    base_data = compute_indicators(symbol, period)
+    if not base_data:
+        return {}
+        
+    try:
+        tk = yf.Ticker(symbol)
+        hist = tk.history(period=period)
+        if hist.empty:
+            return base_data
+            
+        close = hist["Close"]
+        high = hist["High"]
+        low = hist["Low"]
+        volume = hist["Volume"]
+        
+        sma20 = round(float(_sma(close, 20).iloc[-1]), 2)
+        sma50 = round(float(_sma(close, 50).iloc[-1]), 2)
+        sma200 = round(float(_sma(close, 200).iloc[-1]), 2) if len(close) >= 200 else None
+        
+        adx_series = _adx(high, low, close)
+        adx_val = round(float(adx_series.iloc[-1]), 2) if not pd.isna(adx_series.iloc[-1]) else None
+        
+        st, st_dir = _supertrend(high, low, close)
+        st_val = round(float(st.iloc[-1]), 2) if not pd.isna(st.iloc[-1]) else None
+        st_dir_val = int(st_dir.iloc[-1]) if not pd.isna(st_dir.iloc[-1]) else 0
+        
+        vwap_series = _vwap(high, low, close, volume)
+        vwap_val = round(float(vwap_series.iloc[-1]), 2) if not pd.isna(vwap_series.iloc[-1]) else None
+        
+        patterns = detect_candlestick_patterns(hist)
+        
+        extended = {
+            "sma_20": sma20,
+            "sma_50": sma50,
+            "sma_200": sma200,
+            "adx": adx_val,
+            "supertrend_value": st_val,
+            "supertrend_direction": st_dir_val,
+            "vwap": vwap_val,
+            "patterns": patterns[-5:]  # return last 5 patterns
+        }
+        
+        return {**base_data, **extended}
+    except Exception as exc:
+        logger.error("compute_extended_indicators failed for %s: %s", symbol, exc)
+        return base_data

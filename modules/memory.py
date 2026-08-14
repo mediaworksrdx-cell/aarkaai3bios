@@ -42,6 +42,23 @@ def store_conversation(
     source: str = "aarkaa-3b",
 ) -> None:
     """Store a conversation turn."""
+    import config
+    if config.MONGODB_URI:
+        from modules.mongo_repository import ConversationRepo, PersonalChatRepo
+        ConversationRepo.add_entry(
+            user_id=user_id,
+            session_id=session_id,
+            query=query,
+            response=response,
+            intent=intent,
+            confidence=confidence,
+            source=source,
+        )
+        PersonalChatRepo.add_message(user_id=user_id, session_id=session_id, message=query, role="user")
+        PersonalChatRepo.add_message(user_id=user_id, session_id=session_id, message=response, role="assistant")
+        logger.debug("Stored conversation in MongoDB for user %s", user_id)
+        return
+
     session: Session = SessionLocal()
     try:
         entry = ConversationHistory(
@@ -70,6 +87,23 @@ def store_conversation(
 
 def get_recent_conversations(user_id: str, limit: int = 15) -> list[dict]:
     """Fetch the most recent conversations for a user."""
+    import config
+    if config.MONGODB_URI:
+        from modules.mongo_repository import ConversationRepo
+        docs = ConversationRepo.get_history(user_id=user_id, limit=limit)
+        return [
+            {
+                "id": str(r.get("_id", r.get("id"))),
+                "query": r.get("query", ""),
+                "response": r.get("response", ""),
+                "intent": r.get("intent", "general"),
+                "confidence": r.get("confidence", 0.0),
+                "source": r.get("source", "aarkaa-3b"),
+                "timestamp": r["timestamp"].isoformat() if isinstance(r.get("timestamp"), datetime) else r.get("timestamp"),
+            }
+            for r in reversed(docs)
+        ]
+
     session: Session = SessionLocal()
     try:
         rows = (
@@ -97,6 +131,12 @@ def get_recent_conversations(user_id: str, limit: int = 15) -> list[dict]:
 
 def get_conversation_count(user_id: str) -> int:
     """Total conversations for a user."""
+    import config
+    if config.MONGODB_URI:
+        from modules.mongo_repository import ConversationRepo
+        coll = ConversationRepo.get_collection()
+        return coll.count_documents({"user_id": user_id}) if coll is not None else 0
+
     session: Session = SessionLocal()
     try:
         return (
@@ -113,6 +153,12 @@ def get_conversation_count(user_id: str) -> int:
 
 def get_chat_context(user_id: str, session_id: str, limit: int = 10) -> list[dict]:
     """Get recent chat messages for context window."""
+    import config
+    if config.MONGODB_URI:
+        from modules.mongo_repository import PersonalChatRepo
+        docs = PersonalChatRepo.get_messages(user_id=user_id, session_id=session_id, limit=limit * 2)
+        return [{"role": r.get("role"), "message": r.get("message")} for r in docs]
+
     session: Session = SessionLocal()
     try:
         rows = (
@@ -254,6 +300,20 @@ def update_user_profile(
 
 # ─── RLHF ────────────────────────────────────────────────────────────────────
 
+from pydantic import BaseModel, Field, field_validator
+
+class RLHFCorrectionSchema(BaseModel):
+    correction: str = Field(..., min_length=5, max_length=1000)
+
+    @field_validator("correction")
+    @classmethod
+    def check_safety(cls, v: str) -> str:
+        forbidden = ["/run", "sudo ", "rm -rf", "exec ", "mkfs", "dd if="]
+        v_low = v.lower()
+        if any(cmd in v_low for cmd in forbidden):
+            raise ValueError("Safety violation: Input contains prohibited system commands.")
+        return v
+
 
 def store_rlhf_feedback(
     user_id: str,
@@ -262,6 +322,10 @@ def store_rlhf_feedback(
     correction: Optional[str] = None,
 ) -> None:
     """Store RLHF feedback and optionally auto-learn from explicit text corrections."""
+    if correction:
+        # Validate correction via Pydantic schema
+        RLHFCorrectionSchema(correction=correction)
+
     session: Session = SessionLocal()
     try:
         feedback = RLHFFeedback(
@@ -290,6 +354,7 @@ def store_rlhf_feedback(
     except Exception as exc:
         session.rollback()
         logger.error("store_rlhf_feedback failed: %s", exc)
+        raise exc
     finally:
         session.close()
 

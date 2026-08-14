@@ -22,7 +22,8 @@ DOMAIN_TEMPLATES = {
     "manufacturing": "indigo",
     "supplychain": "indigo",
     "pharma": "crimson",
-    "energy": "amber"
+    "energy": "amber",
+    "general": "indigo"
 }
 
 # The Domain Registry containing 15 specialized domains
@@ -987,6 +988,66 @@ DOMAIN_REGISTRY = {
             "Operational Efficiency & Architecture": "The operational infrastructure supporting the smart grid is engineered to maximize transmission efficiency, minimize grid synchronization latencies, and ensure stable voltage levels. Modern grid networks rely on high-voltage DC lines, automated substation controllers, and decentralized energy resource management systems (DERMS).",
             "Risk Analysis, Vulnerability & Strategic Outlook": "A comprehensive risk assessment of the grid network identifies several critical vulnerability vectors. Chief among these risks are extreme weather disruptions to wind/solar fields, cybersecurity attacks targeting distribution substations, and shifting regulatory compliance standards. Implementing a robust risk mitigation framework is essential, combining diversified storage assets and real-time frequency monitors."
         }
+    },
+    "general": {
+        "name": "Historical, Cultural & General Research Studies",
+        "template": "indigo",
+        "cover_kpis": [
+            {"label": "Historical Span", "val": "Centuries Old"},
+            {"label": "Annual Visitation", "val": "Millions Ann."},
+            {"label": "Heritage Index", "val": "Global Grade"}
+        ],
+        "dashboard_kpis": [
+            {"label": "Cultural Value", "val": "High Grade", "change": "▲ Preservation Max", "status": ""},
+            {"label": "Annual Visitors", "val": "50M+ Est.", "change": "▲ +12% Growth", "status": ""},
+            {"label": "Historical Age", "val": "1000+ Yrs", "change": "Continuous Heritage", "status": ""},
+            {"label": "Ecosystem Health", "val": "Outstanding", "change": "Low Structural Risk", "status": "purple"}
+        ],
+        "brand_logos": [
+            {"name": "HIST", "type": "rect", "color": "#6366F1"},
+            {"name": "ARCH", "type": "diamond", "color": "#10B981"},
+            {"name": "CULT", "type": "polygon", "color": "#EF4444"}
+        ],
+        "swot": {
+            "s": "Rich historical evidence, profound cultural significance, and global heritage status.",
+            "w": "Exposure to weathering, structural wear, and dense pedestrian visitor throughput.",
+            "o": "Digital archiving, structural restorations, and heritage preservation initiatives.",
+            "t": "Environmental pollution, structural degradation, and architectural obsolescence."
+        },
+        "visual_svg": """
+        <svg width="100%" height="80" viewBox="0 0 200 120" style="max-height: 80px; background: #F8FAFC; border-radius: 4px;">
+            <polygon points="100,20 60,60 140,60" fill="#6366F1" opacity="0.9"/>
+            <rect x="70" y="60" width="60" height="40" fill="#818CF8"/>
+            <rect x="90" y="80" width="20" height="20" fill="#FFFFFF"/>
+            <circle cx="100" cy="45" r="4" fill="#F59E0B"/>
+            <text x="100" y="115" font-family="sans-serif" font-size="8" font-weight="bold" fill="#0F172A" text-anchor="middle">Historical Heritage</text>
+        </svg>
+        """,
+        "timeline": [
+            {"time": "Archival Research", "desc": "Comprehensive digital preservation and structural audits successfully conducted."},
+            {"time": "Heritage Restoration", "desc": "Long-term architectural fortification and visitor safety pipelines established."}
+        ],
+        "table": {
+            "headers": ["Historical Era", "Reconstruction Event", "Primary Patron", "Status"],
+            "rows": [
+                ["18th Century", "Major Reconstruction", "Queen Ahilyabai Holkar", "Standing"],
+                ["19th Century", "Gold Plating Spire", "Maharaja Ranjit Singh", "Standing"]
+            ]
+        },
+        "charts": {
+            "bar": {"title": "Annual Visitor Inflow Metrics", "ylabel": "Visitors (Millions)"},
+            "line": {"title": "Structural Integrity and Restoration Over Time"},
+            "donut": {"title": "Ecosystem Demographics & Visitor Segments"},
+            "hbar": {"title": "Architectural Fortification Indices"},
+            "area": {"title": "Cumulative Environmental Risk Profile"}
+        },
+        "fallbacks": {
+            "Executive Summary & Framework": "The comprehensive exploration of this topic outlines a multi-dimensional perspective on historical timelines, cultural preservation, and architectural significance. Navigating these complex dynamics requires a rigorous, objective approach that respects both documented evidence and long-standing traditions. By establishing a solid analytical framework, researchers can better understand the interplay of historical events and cultural impacts, securing a comprehensive foundation for future scholarship.",
+            "Market Analysis & Sector Segmentation": "A detailed structural analysis of the historical and cultural landscape reveals key evolutionary phases shaped by societal changes, leadership eras, and architectural developments. Comparing different periods provides deep insights into how structures and traditions have adapted over time. Understanding these shifts requires examining archaeological records, archival documentations, and architectural achievements.",
+            "Quantitative Performance & Revenue Velocity": "Evaluating historical data and modern metrics demonstrates the profound long-term impact of heritage sites on cultural identity and local ecosystems. Key indicators, including preservation indices, visitor flow rates, and educational programs, show high levels of engagement and value retention. This long-term durability is supported by robust restoration practices and continuous community support.",
+            "Operational Efficiency & Architecture": "The physical and operational architecture supporting this historical subject focuses on structural preservation, public accessibility, and environmental protection. Managing high-density visitations requires sophisticated coordination mechanisms, combining robust crowd routing systems, digital ticketing, and structural safety monitors to ensure long-term stability and protection.",
+            "Risk Analysis, Vulnerability & Strategic Outlook": "A comprehensive risk assessment of this cultural asset identifies several critical vulnerability vectors. Chief among these risks are weathering, structural fatigue, and balancing high visitation rates with active conservation efforts. Implementing a robust preservation strategy is essential for mitigating these threats, combining state-of-the-art structural restoration with continuous environmental monitoring."
+        }
     }
 }
 
@@ -1012,11 +1073,12 @@ def detect_domain(topic: str) -> str:
         ("manufacturing", ["manufacturing", "factory", "industrial", "production line", "machinery", "automation", "oee", "plant"]),
         ("supplychain", ["supply chain", "logistics", "shipping", "freight", "warehouse", "inventory", "procurement", "distribution"]),
         ("pharma", ["pharma", "clinical trial", "drug", "fda", "biotech", "vaccine", "pathogen", "molecular"]),
-        ("energy", ["energy", "power grid", "utilities", "electricity", "solar panel", "wind turbine", "oil", "gas", "nuclear", "hydroelectric"])
+        ("energy", ["energy", "power grid", "utilities", "electricity", "solar panel", "wind turbine", "oil", "gas", "nuclear", "hydroelectric"]),
+        ("general", ["temple", "church", "mosque", "sacred", "historic", "cultural", "religion", "art", "music", "philosophy", "tourism", "ancient", "rebuilding", "restoration"])
     ]
     
     for domain_key, keywords in rules:
         if any(k in t_lower for k in keywords):
             return domain_key
             
-    return "corporate"
+    return "general"

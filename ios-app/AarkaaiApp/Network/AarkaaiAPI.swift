@@ -14,7 +14,7 @@ class AarkaaiAPI {
     private init() {}
     
     // Change this to your production backend URL
-    var baseURL: String = "http://43.204.153.162:5000" // Production backend URL
+    var baseURL: String = "http://16.170.206.243:5000" // Production backend URL
     
     func register(request: AuthRequest) async throws -> AuthResponse {
         return try await performRequest(path: "/auth/register", method: "POST", body: request)

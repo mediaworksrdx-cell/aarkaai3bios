@@ -121,10 +121,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 var tokenHeader = if (bearerToken.startsWith("Bearer ")) bearerToken else "Bearer $bearerToken"
+                val currentSessionId = _uiState.value.activeConversationId
                 val response = try {
                     RetrofitClient.api.sendPrompt(
                         token = tokenHeader,
-                        request = PromptRequest(query = query)
+                        request = PromptRequest(query = query, session_id = currentSessionId)
                     )
                 } catch (e: retrofit2.HttpException) {
                     if (e.code() == 401 || e.code() == 403) {
@@ -133,7 +134,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             tokenHeader = if (newToken.startsWith("Bearer ")) newToken else "Bearer $newToken"
                             RetrofitClient.api.sendPrompt(
                                 token = tokenHeader,
-                                request = PromptRequest(query = query)
+                                request = PromptRequest(query = query, session_id = currentSessionId)
                             )
                         } else {
                             throw e

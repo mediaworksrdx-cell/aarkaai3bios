@@ -6,7 +6,7 @@ import requests
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 PEM_KEY = r"C:\Users\daarv\Downloads\aarkaai3b.pem"
-HOST = "3.223.192.194"
+HOST = "16.170.206.243"
 PORT = 22
 USER = "ec2-user"
 REMOTE_DIR = "/workspace/aarkaai3b"
@@ -34,12 +34,53 @@ FILES_TO_PACK = [
     "modules/semantic_filter.py",
     "modules/rag.py",
     "modules/coordinator.py",
+    "modules/cvr_pipeline.py",
+    "modules/repair_agents.py",
+    "modules/repo_indexer.py",
     "modules/gamma_domains.py",
     "modules/gamma_charts.py",
     "modules/tools/__init__.py",
     "modules/tools/base.py",
     "modules/tools/bash.py",
     "modules/tools/fs.py",
+    "modules/tools/git_tool.py",
+    "modules/tools/ast_tool.py",
+    "modules/tools/memory_tool.py",
+    "modules/tools/lsp_tool.py",
+    "modules/tools/search_tool.py",
+    "modules/tools/file_tool.py",
+    "modules/tools/build_tool.py",
+    "modules/tools/test_tool.py",
+    "modules/tools/deploy_tool.py",
+    "modules/tools/security_tool.py",
+    "modules/tools/coverage_tool.py",
+    "modules/tools/profiler_tool.py",
+    "modules/tools/planner_tool.py",
+    "modules/tools/linter_tool.py",
+    "modules/tools/formatter_tool.py",
+    "modules/tools/debugger_tool.py",
+    "modules/tools/patch_tool.py",
+    "modules/tools/snapshot_tool.py",
+    "modules/tools/health_tool.py",
+    "modules/tools/rag_tool.py",
+    "modules/tools/verifier_tool.py",
+    "modules/tools/repair_tool.py",
+    "modules/tools/monitor_tool.py",
+    "modules/tools/symbol_tool.py",
+    "modules/tools/xref_tool.py",
+    "modules/tools/call_graph_tool.py",
+    "modules/tools/dependency_tool.py",
+    "modules/tools/docker_tool.py",
+    "modules/tools/db_migrate_tool.py",
+    "modules/tools/pkg_manager_tool.py",
+    "modules/tools/browser_tool.py",
+    "modules/tools/cicd_tool.py",
+    "modules/tools/benchmark_tool.py",
+    "modules/tools/code_review_tool.py",
+    "modules/tools/doc_gen_tool.py",
+    "modules/tools/coordinator_tool.py",
+    "modules/tools/confidence_tool.py",
+    "modules/tools/human_input.py",
     "modules/tools/skill_tools.py",
     "modules/tools/web.py",
     "modules/agents/__init__.py",
@@ -77,9 +118,19 @@ FILES_TO_PACK = [
     "scratch/test_remote_html_render.py",
     "scratch/test_memory_retention.py",
     "scratch/verify_cpu_idle.py",
+    "scratch/insert_expert_sysdesign.py",
+    "scratch/run_remote_verify.py",
+    "scratch/trigger_remote_test.py",
     "requirements.txt",
     "remote_deploy.sh",
+    "migrate_add_role.py",
+    "nginx_site.conf",
+    "nginx_timeout.conf",
+    "FinGenIQ_route.ts",
+    ".env.production.template",
 ]
+
+
 
 # ─── Step 1: Package Files into ZIP ──────────────────────────────────────────
 print("Step 1: Packaging updated files...")
