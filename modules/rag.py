@@ -381,3 +381,6 @@ def get_entry_count() -> int:
     except Exception:
         return 0
 
+# Alias for search
+retrieve = search
+

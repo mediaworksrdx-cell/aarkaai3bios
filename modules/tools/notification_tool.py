@@ -29,17 +29,17 @@ class NotificationTool(Tool):
                 if condition not in self.VALID_CONDITIONS:
                     return f"Error: Invalid condition. Must be one of {self.VALID_CONDITIONS}"
                 return str(notifications.create_alert(user_id, symbol, condition, threshold, notes))
-            elif action == "check_alerts":
+            elif action in ("check_alerts", "check"):
                 user_id = params.get("user_id")
                 return str(notifications.check_alerts(user_id))
-            elif action == "list_alerts":
+            elif action in ("list_alerts", "list", "default"):
                 user_id = params.get("user_id")
                 return str(notifications.get_active_alerts(user_id))
-            elif action == "cancel_alert":
+            elif action in ("cancel_alert", "cancel", "delete"):
                 user_id = params.get("user_id")
                 alert_id = params.get("alert_id")
                 return str(notifications.cancel_alert(user_id, alert_id))
-            elif action == "market_events":
+            elif action in ("market_events", "events"):
                 return str(notifications.get_upcoming_market_events())
             return f"Unknown action: {action}"
         except Exception as e:
