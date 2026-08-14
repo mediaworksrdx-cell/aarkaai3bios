@@ -48,6 +48,18 @@ class FinancialNewsTool(Tool):
                 else:
                     return str(modules.web_search.get_web_context(query + ' RBI SEBI regulatory update'))
                     
+            elif action in ("search", "default", "news"):
+                query = params.get("query", "")
+                symbol = params.get("symbol", "")
+                if symbol:
+                    if hasattr(modules.web_search, "search_company_announcements"):
+                        return str(modules.web_search.search_company_announcements(symbol))
+                    return str(modules.web_search.get_web_context(symbol + ' latest news announcements'))
+                q = query if query else "latest financial and stock market news"
+                if hasattr(modules.web_search, "search_financial_news"):
+                    return str(modules.web_search.search_financial_news(q))
+                return str(modules.web_search.get_web_context(q + ' financial news'))
+
             return f"Unknown action: {action}"
         except Exception as e:
             logger.error(f"Error in FinancialNewsTool: {str(e)}")

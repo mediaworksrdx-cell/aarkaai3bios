@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict
 from modules.tools.base import Tool
 import modules.technical
+import modules.finance
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,6 @@ class TechnicalAnalysisTool(Tool):
                     df = params.get("df", None)
                     if df is None:
                         # Attempt to fetch basic dataframe if not provided
-                        import modules.finance
                         df = modules.finance.get_ohlcv_history(symbol, period, "1d")
                     res = modules.technical.detect_candlestick_patterns(df)
                     return f"Candlestick Patterns for {symbol}:\n{str(res)}"
@@ -62,6 +62,13 @@ class TechnicalAnalysisTool(Tool):
                     res = modules.technical.compute_indicators(symbol, period)
                 return f"Extended Technical Indicators for {symbol}:\n{str(res)}"
                 
+            elif action == "default" and symbol:
+                indicators = modules.technical.compute_indicators(symbol, period)
+                signal_data = ""
+                if hasattr(modules.technical, "get_signal"):
+                    signal_data = modules.technical.get_signal(indicators)
+                return modules.technical.format_technical_summary(symbol, indicators, signal_data)
+
             return f"Unknown action: {action}"
         except Exception as e:
             logger.error(f"Error in TechnicalAnalysisTool: {str(e)}")

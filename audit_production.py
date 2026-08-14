@@ -117,14 +117,14 @@ test("sip(negative)", lambda: calculate_sip(-100, -5, -1))
 print("\n=== 7. SubagentResult Edge Cases ===")
 from modules.subagents.base import SubagentResult
 
-test("SubagentResult(empty)", lambda: SubagentResult(agent_name="", output=""))
-test("SubagentResult(valid).is_valid", lambda: assert_true(SubagentResult(agent_name="t", output="hi").is_valid))
-test("SubagentResult(error).is_valid", lambda: assert_false(SubagentResult(agent_name="t", output="hi", error="e").is_valid))
-
 def assert_true(v):
     assert v, f"Expected True, got {v}"
 def assert_false(v):
     assert not v, f"Expected False, got {v}"
+
+test("SubagentResult(empty)", lambda: SubagentResult(agent_name="", output=""))
+test("SubagentResult(valid).is_valid", lambda: assert_true(SubagentResult(agent_name="t", output="hi").is_valid))
+test("SubagentResult(error).is_valid", lambda: assert_false(SubagentResult(agent_name="t", output="hi", error="e").is_valid))
 
 # ═══════════════════════════════════════════════════════════════
 print("\n=== 8. Security Quick Checks ===")
@@ -148,7 +148,7 @@ print(f"RESULTS: {passed} passed, {failed} failed")
 if warnings:
     print(f"\nWARNINGS ({len(warnings)}):")
     for w in warnings:
-        print(f"  ⚠ {w}")
+        print(f"  [WARN] {w}")
 if failed == 0 and not warnings:
     print("All checks PASSED! [OK]")
 print(f"{'='*60}")

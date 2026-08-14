@@ -1138,6 +1138,94 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # Track the active request domain for engine model routing
     aarkaa_engine.request_domain.set(domain)
 
+    # ── 1a. Hybrid Query Router (feature-flagged) ─────────────────────────
+    # When enabled, decomposes the query into typed sub-queries, executes
+    # them in parallel across data sources, fuses context, then synthesizes.
+    # Falls back to the existing waterfall pipeline if the router returns
+    # an empty answer or if HQR_ENABLED is False.
+    from config import HQR_ENABLED
+    if HQR_ENABLED and not is_greeting and not is_reasoning and mode != "benchmark":
+        try:
+            from modules.query_understanding import analyze as hqr_analyze
+            from modules.hybrid_router import execute_hybrid
+
+            # Fetch chat history for context
+            hqr_chat_ctx = None
+            try:
+                hqr_chat_ctx = memory.get_chat_context(user_id, session_id, limit=15)
+            except Exception:
+                pass
+
+            # Fetch user facts
+            hqr_user_facts = ""
+            try:
+                hqr_user_facts = memory.get_user_facts_prompt(user_id)
+            except Exception:
+                pass
+
+            # Step 1: Decompose query into a plan
+            plan = hqr_analyze(
+                query=query,
+                domain=domain,
+                intent=intent,
+                detected_language=detected_lang,
+                user_id=user_id,
+                chat_context=hqr_chat_ctx,
+            )
+
+            # Skip HQR for model-only plans (greetings, puzzles) — let the
+            # existing pipeline handle them with its optimised paths.
+            from modules.query_understanding import DataSource as DS
+            has_data_sources = any(
+                sq.source_type not in (DS.MODEL_ONLY, DS.VISION, DS.CODER)
+                for sq in plan.sub_queries
+            )
+
+            if has_data_sources:
+                # Step 2: Execute plan through hybrid router
+                hqr_result = execute_hybrid(
+                    plan=plan,
+                    user_id=user_id,
+                    session_id=session_id,
+                    chat_history=hqr_chat_ctx,
+                    user_facts=hqr_user_facts,
+                )
+
+                if hqr_result.final_answer:
+                    elapsed = time.perf_counter() - start
+                    logger.info(
+                        "HQR handled query in %.0fms (%d sources, model=%s, bypass=%s)",
+                        hqr_result.total_time_ms,
+                        hqr_result.fused_context.source_count,
+                        hqr_result.model_used,
+                        hqr_result.bypassed_llm,
+                    )
+
+                    # Store conversation
+                    try:
+                        memory.store_conversation(
+                            user_id, session_id, query,
+                            hqr_result.final_answer,
+                            intent=intent, confidence=filter_confidence,
+                            source=f"hybrid_router:{','.join(hqr_result.fused_context.sources_used)}"
+                        )
+                        memory.extract_user_facts(user_id, query)
+                    except Exception as mem_exc:
+                        logger.error("Memory store error (HQR): %s", mem_exc)
+
+                    return PromptResponse(
+                        response=hqr_result.final_answer,
+                        intent=intent,
+                        confidence=filter_confidence,
+                        sources=["hybrid_router"] + hqr_result.fused_context.sources_used,
+                        detected_language=detected_lang,
+                        processing_time=elapsed,
+                    )
+                else:
+                    logger.info("HQR returned empty answer — falling through to existing pipeline")
+        except Exception as hqr_exc:
+            logger.warning("HQR error (falling back to existing pipeline): %s", hqr_exc)
+
     # ── 1b. Tool Router Pipeline (3B → Permission → Tool → 7B) ───────────
     # Attempt structured tool routing for finance, portfolio, F&O, etc.
     # If the tool router handles the query, short-circuit to return.
@@ -1759,6 +1847,87 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     
     # Track the active request domain for engine model routing
     aarkaa_engine.request_domain.set(domain)
+
+    # ── 1a. Hybrid Query Router — Streaming (feature-flagged) ─────────────
+    from config import HQR_ENABLED
+    if HQR_ENABLED and not is_greeting and not is_reasoning and mode != "benchmark":
+        try:
+            from modules.query_understanding import analyze as hqr_analyze, DataSource as DS
+            from modules.hybrid_router import execute_hybrid
+            import asyncio as _asyncio
+
+            hqr_chat_ctx = None
+            try:
+                hqr_chat_ctx = memory.get_chat_context(user_id, session_id, limit=15)
+            except Exception:
+                pass
+
+            hqr_user_facts = ""
+            try:
+                hqr_user_facts = memory.get_user_facts_prompt(user_id)
+            except Exception:
+                pass
+
+            yield {"type": "status", "status": "Analyzing query..."}
+
+            plan = hqr_analyze(
+                query=query, domain=domain, intent=intent,
+                detected_language=detected_lang, user_id=user_id,
+                chat_context=hqr_chat_ctx,
+            )
+
+            has_data_sources = any(
+                sq.source_type not in (DS.MODEL_ONLY, DS.VISION, DS.CODER)
+                for sq in plan.sub_queries
+            )
+
+            if has_data_sources:
+                # Emit per-source status
+                source_labels = {
+                    DS.MARKET_API: "market data", DS.NEWS_SEARCH: "news",
+                    DS.RAG: "knowledge base", DS.WEB_SEARCH: "web",
+                    DS.MONGODB: "user data", DS.FINANCIAL_TOOL: "financial tools",
+                }
+                for sq in plan.sub_queries:
+                    label = source_labels.get(sq.source_type, sq.source_type.value)
+                    yield {"type": "status", "status": f"Fetching {label}..."}
+
+                yield {"type": "metadata", "intent": intent, "sources": [sq.source_type.value for sq in plan.sub_queries], "plan": plan.to_dict(), "detected_language": detected_lang}
+
+                # Execute in thread pool (blocking) and yield result
+                hqr_result = await _asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: execute_hybrid(
+                        plan=plan, user_id=user_id, session_id=session_id,
+                        chat_history=hqr_chat_ctx, user_facts=hqr_user_facts,
+                    )
+                )
+
+                if hqr_result.final_answer:
+                    yield {"type": "status", "status": "Synthesizing answer..."}
+
+                    # Stream the answer token by token
+                    for i in range(0, len(hqr_result.final_answer), 8):
+                        chunk = hqr_result.final_answer[i:i+8]
+                        yield {"type": "content", "token": chunk}
+                        await _asyncio.sleep(0.001)
+
+                    # Store conversation
+                    try:
+                        memory.store_conversation(
+                            user_id, session_id, query,
+                            hqr_result.final_answer,
+                            intent=intent, confidence=filter_confidence,
+                            source=f"hybrid_router:{','.join(hqr_result.fused_context.sources_used)}"
+                        )
+                    except Exception:
+                        pass
+
+                    elapsed = round(time.perf_counter() - start, 3)
+                    yield {"type": "final", "processing_time": elapsed, "sources": hqr_result.fused_context.sources_used}
+                    return
+        except Exception as hqr_exc:
+            logger.warning("HQR streaming error (falling back): %s", hqr_exc)
 
     # ── 1c. Cognitive Subagent Orchestrator (Stream) ──────────────────────
     # For complex/compound queries, delegate to the subagent orchestrator

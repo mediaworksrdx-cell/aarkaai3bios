@@ -18,17 +18,17 @@ class AuthPermissionTool(Tool):
     def execute(self, params: Dict[str, Any]) -> str:
         action = params.get("action", "default")
         try:
-            if action == "check_access":
+            if action in ("check_access", "check"):
                 user_id = params.get("user_id")
                 tool_name = params.get("tool_name")
                 user_tier = params.get("user_tier")
                 return str(permissions.check_tool_access(user_id, tool_name, user_tier))
-            elif action == "user_info":
+            elif action in ("user_info", "profile", "info"):
                 user_id = params.get("user_id")
                 profile = memory.get_user_profile(user_id)
                 facts = memory.get_user_facts_prompt(user_id)
                 return f"Profile:\n{profile}\n\nFacts:\n{facts}"
-            elif action == "tool_list":
+            elif action in ("tool_list", "list", "default"):
                 user_tier = params.get("user_tier")
                 return str(permissions.get_tool_permissions_summary(user_tier))
             return f"Unknown action: {action}"

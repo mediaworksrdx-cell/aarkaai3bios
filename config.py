@@ -190,3 +190,21 @@ ALLOWED_UPLOAD_EXTENSIONS = {
     ".pdf", ".csv", ".xlsx", ".xls", ".txt", ".json", ".md",
     ".png", ".jpg", ".jpeg", ".docx", ".html",
 }
+
+# ─── Hybrid Query Router ─────────────────────────────────────────────────────
+# Feature flag: when False, the existing pipeline.py waterfall is used unchanged.
+# When True, queries are routed through the new HybridQueryRouter with parallel
+# data source execution.  Default is False for safe, gradual rollout.
+HQR_ENABLED = os.getenv("AARKAAI_HQR_ENABLED", "false").lower() == "true"
+HQR_MAX_WORKERS = int(os.getenv("AARKAAI_HQR_MAX_WORKERS", "6"))
+HQR_MARKET_TIMEOUT = float(os.getenv("AARKAAI_HQR_MARKET_TIMEOUT", "5.0"))
+HQR_WEB_TIMEOUT = float(os.getenv("AARKAAI_HQR_WEB_TIMEOUT", "8.0"))
+HQR_NEWS_TIMEOUT = float(os.getenv("AARKAAI_HQR_NEWS_TIMEOUT", "6.0"))
+HQR_DB_TIMEOUT = float(os.getenv("AARKAAI_HQR_DB_TIMEOUT", "3.0"))
+HQR_RAG_TIMEOUT = float(os.getenv("AARKAAI_HQR_RAG_TIMEOUT", "3.0"))
+HQR_TOOL_TIMEOUT = float(os.getenv("AARKAAI_HQR_TOOL_TIMEOUT", "10.0"))
+HQR_CONTEXT_BUDGET = int(os.getenv("AARKAAI_HQR_CONTEXT_BUDGET", "6000"))
+HQR_ENABLE_PARALLEL = os.getenv("AARKAAI_HQR_PARALLEL", "true").lower() == "true"
+# Confidence threshold below which simple data-only queries (e.g. "SBI price")
+# can return tool results directly without a 7B synthesis pass.
+HQR_BYPASS_LLM_THRESHOLD = float(os.getenv("AARKAAI_HQR_BYPASS_THRESHOLD", "0.92"))

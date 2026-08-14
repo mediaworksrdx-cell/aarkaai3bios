@@ -237,3 +237,16 @@ def compound_interest(principal: float, annual_rate_pct: float, years: int, comp
     except Exception as e:
         logger.error(f"Error in compound_interest: {e}")
         return {"final_amount": 0.0, "interest_earned": 0.0}
+
+# ─── Aliases & Tool Compatibility Mappings ──────────────────────────────────
+calculate_cagr = cagr
+calculate_returns = absolute_return
+sip = sip_future_value
+calculate_sip = sip_future_value
+lumpsum = lumpsum_future_value
+dcf = dcf_valuation
+pe_value = pe_valuation
+ddm = dividend_discount_model
+risk_reward = risk_reward_ratio
+margin = margin_required
+emi = emi_calculator
