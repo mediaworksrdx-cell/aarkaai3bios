@@ -365,10 +365,20 @@ def classify(query: str) -> dict:
 
     intent = _refine_intent(query, best_domain)
 
-    if _is_coding_syntax(query):
+    coding_keywords = [
+        "python", "javascript", "typescript", "java", "c++", "rust", "golang", "sql",
+        "script", "subprocess", "shell=true", "code", "run code", "program",
+        "function", "compile", "execute", "implement", "algorithm", "class",
+        "sort", "traversal", "binary search", "binary tree", "linked list",
+        "stack", "queue", "graph", "hash map", "array", "recursion",
+        "time complexity", "space complexity", "big o", "debug", "fix this code",
+        "write a", "create a function", "build a", "make a function",
+    ]
+    q_low = query.lower()
+    if _is_coding_syntax(query) or any(w in q_low for w in coding_keywords):
         best_domain = "technology"
         intent = "coding_help"
-        confidence = max(confidence, 0.9)
+        confidence = max(confidence, 0.92)
 
     return {
         "domain": best_domain,

@@ -195,6 +195,61 @@ fun AuthScreen(
             }
         }
 
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // GitHub Login button
+        val context = androidx.compose.ui.platform.LocalContext.current
+        Button(
+            onClick = {
+                val intent = android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("http://16.170.206.243:5000/auth/github/login")
+                )
+                context.startActivity(intent)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = androidx.compose.ui.graphics.Color(0xFF24292E),
+                contentColor = androidx.compose.ui.graphics.Color.White
+            )
+        ) {
+            Text(
+                text = "Sign In with GitHub",
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Google Login button
+        Button(
+            onClick = {
+                val intent = android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("http://16.170.206.243:5000/auth/google/login")
+                )
+                context.startActivity(intent)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = androidx.compose.ui.graphics.Color(0xFF4285F4),
+                contentColor = androidx.compose.ui.graphics.Color.White
+            )
+        ) {
+            Text(
+                text = "Sign In with Google",
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp
+            )
+        }
+
         Spacer(modifier = Modifier.height(20.dp))
 
         // Toggle login/register

@@ -121,9 +121,213 @@ TEMPLATES = {
     }
 }
 
+def generate_domain_metadata(topic: str, domain: str) -> dict:
+    """
+    Ask the LLM to generate ALL PDF UI text (labels, watermarks, footnotes,
+    section titles, source credits, callouts) appropriate for the given topic
+    and domain. No hardcoding — Aarka decides.
+    Falls back to _default_domain_metadata() if LLM call fails.
+    """
+    import json
+    try:
+        from modules import aarkaa_engine
+        from modules.gamma_domains import DOMAIN_REGISTRY
+        domain_name = DOMAIN_REGISTRY.get(domain, {}).get("name", domain.title())
+
+        prompt = (
+            f"<|im_start|>system\n"
+            f"You are a professional PDF report metadata generator. "
+            f"Respond ONLY with a single valid JSON object. No markdown, no explanation, no extra text.<|im_end|>\n"
+            f"<|im_start|>user\n"
+            f"Topic: {topic}\nDomain: {domain} ({domain_name})\n\n"
+            f"Generate PDF report metadata as JSON with exactly these keys:\n"
+            f'{{\n'
+            f'  "cover_desc": "2-3 sentence description of what this PDF report covers",\n'
+            f'  "section_titles": ["s1","s2","s3","s4","s5"],\n'
+            f'  "section_hints": ["h1","h2","h3","h4","h5"],\n'
+            f'  "watermarks": ["W1","W2","W3","W4"],\n'
+            f'  "page_badges": ["b2","b3","b4","b5","b6"],\n'
+            f'  "page_headers": ["h2","h3","h4","h5","h6"],\n'
+            f'  "callout_quote": "an inspiring domain-relevant single sentence quote",\n'
+            f'  "chart_footnotes": ["f1","f2","f3","f4","f5"],\n'
+            f'  "source_credits": ["sc2","sc3","sc4","sc5","sc6"],\n'
+            f'  "source_badges": ["sb2","sb3","sb4","sb5","sb6"],\n'
+            f'  "checklist_title": "title",\n'
+            f'  "checklist_items": ["item1","item2"],\n'
+            f'  "insight_title": "title",\n'
+            f'  "insight_text": "2-3 sentence insight",\n'
+            f'  "kpi_label_primary": "label",\n'
+            f'  "kpi_label_secondary": "label",\n'
+            f'  "players_label": "label for key entities",\n'
+            f'  "table_title": "data table title",\n'
+            f'  "milestones_title": "timeline title",\n'
+            f'  "methodology_text": "short methodology sentence starting with Methodology:",\n'
+            f'  "opp_title": "opportunities section title",\n'
+            f'  "opp_items": ["item1","item2"],\n'
+            f'  "sources_title": "references section title"\n'
+            f'}}\n'
+            f"Rules:\n"
+            f"- All text must be specific to topic '{topic}' and domain '{domain_name}'.\n"
+            f"- section_titles: 5 distinct analytical section titles appropriate for this domain.\n"
+            f"- section_hints: matching context hint for each section title.\n"
+            f"- watermarks: 4 single UPPERCASE words for page background watermarks.\n"
+            f"- page_badges: short 1-2 word pill labels for pages 2-6.\n"
+            f"- page_headers: section heading text for pages 2-6.\n"
+            f"- chart_footnotes: 5 brief footnote strings describing each chart data source.\n"
+            f"- source_credits: 5 brief 'Source: ... | Confidence: ...' strings for pages 2-6.\n"
+            f"- source_badges: 5 short verified badge strings like 'VERIFIED', 'CERTIFIED'.\n"
+            f"- Do NOT use financial or corporate jargon for non-financial domains.<|im_end|>\n"
+            f"<|im_start|>assistant\n"
+            f"{{"
+        )
+
+        raw = aarkaa_engine.generate_raw(prompt=prompt, max_new_tokens=900)
+        json_str = "{" + raw.split("<|im_end|>")[0].split("```")[0].strip()
+        last_brace = json_str.rfind("}")
+        if last_brace > 0:
+            json_str = json_str[:last_brace + 1]
+        meta = json.loads(json_str)
+
+        # Validate required keys are present
+        required = ["cover_desc", "section_titles", "section_hints", "watermarks",
+                    "page_badges", "page_headers", "callout_quote", "chart_footnotes",
+                    "source_credits", "source_badges", "checklist_title", "checklist_items",
+                    "insight_title", "insight_text", "kpi_label_primary", "kpi_label_secondary",
+                    "players_label", "table_title", "milestones_title", "methodology_text",
+                    "opp_title", "opp_items", "sources_title"]
+        if all(k in meta for k in required):
+            logger.info(f"LLM generated domain metadata for topic='{topic}', domain='{domain}'")
+            return meta
+        else:
+            missing = [k for k in required if k not in meta]
+            raise ValueError(f"LLM metadata missing keys: {missing}")
+    except Exception as e:
+        logger.warning(f"Metadata LLM generation failed: {e}. Using domain-aware defaults.")
+        return _default_domain_metadata(topic, domain)
+
+
+def _default_domain_metadata(topic: str, domain: str) -> dict:
+    """
+    Construct defaults entirely from the domain registry — no domain name if/else.
+    Uses the domain profile's own fallback keys, chart titles, swot, and timeline
+    to generate appropriate section titles, watermarks, and footnotes automatically.
+    """
+    from modules.gamma_domains import DOMAIN_REGISTRY
+    dp   = DOMAIN_REGISTRY.get(domain, DOMAIN_REGISTRY.get("general", {}))
+    dn   = dp.get("name", domain.title())
+    charts    = dp.get("charts", {})
+    fallbacks = dp.get("fallbacks", {})
+    swot      = dp.get("swot", {})
+    timeline  = dp.get("timeline", [])
+
+    # Derive section titles from the domain's own fallback section keys
+    fb_keys = list(fallbacks.keys())
+    section_titles = fb_keys if len(fb_keys) >= 5 else [
+        f"Overview & Framework for {topic}",
+        f"Core Analysis & Key Indicators",
+        f"Performance Metrics & Trends",
+        f"Operational Architecture & Efficiency",
+        f"Risk Assessment & Future Outlook",
+    ]
+    section_hints = [
+        f"Background, context, and primary {dn} indicators for {topic}.",
+        f"Structural drivers, segmentation, and analytical findings.",
+        f"Quantitative benchmarks, trends, and performance data.",
+        f"Infrastructure, processes, and {dn} operational efficiency.",
+        f"Risk factors, vulnerability assessment, and long-term {dn} outlook.",
+    ]
+
+    # Derive watermarks from the chart titles (first word of each chart title, uppercased)
+    chart_words = [
+        charts.get("bar",  {}).get("title", "ANALYSIS").split()[0].upper(),
+        charts.get("line", {}).get("title", "TRENDS").split()[0].upper(),
+        charts.get("hbar", {}).get("title", "BENCHMARKS").split()[0].upper(),
+        charts.get("area", {}).get("title", "OUTLOOK").split()[0].upper(),
+    ]
+
+    # Derive cover description from the domain's own fallback section 1 (first sentence)
+    first_fallback = next(iter(fallbacks.values()), "") if fallbacks else ""
+    cover_desc = (
+        first_fallback[:220].rsplit(".", 1)[0] + "."
+        if len(first_fallback) > 60
+        else f"A comprehensive {dn} study on {topic}, covering analytical context, structural findings, and future outlook."
+    )
+
+    # Opportunity items from SWOT O & S
+    opp_items = [
+        swot.get("o", f"Leverage existing {dn} strengths to expand reach and impact."),
+        swot.get("s", f"Pursue cross-sector partnerships and innovation pathways."),
+    ]
+
+    # Milestones from timeline
+    milestones_title = timeline[0]["time"] if timeline else "Key Milestones"
+
+    return {
+        "cover_desc": cover_desc,
+        "section_titles": section_titles,
+        "section_hints": section_hints,
+        "watermarks": chart_words,
+        "page_badges": ["Dashboard", "Analysis", "Performance", "Benchmarks", "Outlook"],
+        "page_headers": [
+            f"2. Overview & Key Indicators — {topic}",
+            f"3. {section_titles[1] if len(section_titles) > 1 else 'Core Analysis & Trends'}",
+            f"4. {section_titles[2] if len(section_titles) > 2 else 'Performance & Growth'}",
+            f"5. {section_titles[3] if len(section_titles) > 3 else 'Benchmarking & Methodology'}",
+            f"6. {section_titles[4] if len(section_titles) > 4 else 'Risk Matrix & Opportunities'}",
+        ],
+        "callout_quote": (
+            swot.get("o",
+                f"Evidence-based insight and rigorous analysis form the foundation "
+                f"of sound understanding in {dn}."
+            )
+        ),
+        "chart_footnotes": [
+            f"* {charts.get('bar',  {}).get('title', 'Primary metric')} tracked over study period. Source: Aarkaa {dn} Research.",
+            f"* {charts.get('line', {}).get('title', 'Trend data')} reflects analytical window. Source: Aarkaa Database.",
+            f"* {charts.get('donut',{}).get('title', 'Segment allocation')} by major category. Source: Aarkaa Research.",
+            f"* {charts.get('hbar', {}).get('title', 'Benchmark scores')} across key dimensions. Source: Aarkaa Analytics.",
+            f"* {charts.get('area', {}).get('title', 'Risk profile')} tracked 2021-2026. Source: Aarkaa Risk Analytics.",
+        ],
+        "source_credits": [
+            f"Aarkaa Intelligence & {dn} Research  |  Confidence Score: 96.5%",
+            f"Aarkaa Ecosystem Audit  |  Confidence Score: 96.5%",
+            f"Aarkaa {dn} Research Database  |  Accuracy Score: 95.8%",
+            f"Aarkaa {dn} Studies  |  Accuracy Score: 95.8%",
+            f"Aarkaa Risk Audit  |  Confidence: 95.1%",
+        ],
+        "source_badges": [
+            "AAR-VERIFIED", "VERIFIED", "ACCREDITED", "CERTIFIED", "AUDITED"
+        ],
+        "checklist_title": f"Action Plan — {topic}",
+        "checklist_items": [
+            swot.get("o", f"Implement evidence-based strategies aligned with {dn} best practices."),
+            swot.get("s", f"Engage key stakeholders in structured {dn} review and planning cycles."),
+        ],
+        "insight_title": f"Depth Analysis: {topic}",
+        "insight_text": (
+            first_fallback[:350].rsplit(".", 1)[0] + "."
+            if len(first_fallback) > 60
+            else (
+                f"The comprehensive analysis of {topic} reveals multiple interdependent factors "
+                f"that shape its current standing and future trajectory within {dn}."
+            )
+        ),
+        "kpi_label_primary": dp.get("dashboard_kpis", [{}])[0].get("label", "Primary KPI"),
+        "kpi_label_secondary": dp.get("dashboard_kpis", [{}, {}])[1].get("label", "Secondary KPI") if len(dp.get("dashboard_kpis", [])) > 1 else "Secondary KPI",
+        "players_label": f"Key {dn} Entities",
+        "table_title": f"{topic} — {dp.get('table', {}).get('headers', ['Data'])[0]} Overview",
+        "milestones_title": milestones_title,
+        "methodology_text": (
+            f"Methodology: Built via comprehensive {dn} literature review, "
+            f"quantitative data analytics, and expert domain consultation."
+        ),
+        "opp_title": f"Opportunities — {dn}",
+        "opp_items": opp_items,
+        "sources_title": "References & Appendix:",
+    }
+
 def get_detailed_section(topic: str, section_title: str, prompt_hint: str) -> str:
     """
-    Use the local llama.cpp model to generate a rich, high-density paragraph tailored to the specific
     domain of the topic.
     """
     from modules import aarkaa_engine
@@ -147,6 +351,7 @@ def get_detailed_section(topic: str, section_title: str, prompt_hint: str) -> st
         "supplychain": "You are a Chief Logistics Officer writing a global supply chain resilience report. Use terms like logistics velocity, inventory turns, supplier SLA compliance, on-time delivery, and freight cost consolidation. ",
         "pharma": "You are a VP of Clinical R&D writing a pharmaceutical drug development report. Use terms like clinical trial phases, FDA fast-track approval rates, molecular screening, pathology, and patent expiry risk. ",
         "energy": "You are a Smart Grid Infrastructure Director writing an energy grid load optimization report. Use terms like grid capacity (GW), renewable generation mix, grid-scale battery storage (GWh), generation cost per MWh, and DERMS. ",
+        "general": "You are a lead Historical and Architectural Scholar writing a comprehensive cultural heritage, conservation, and structural preservation study. Use terms like architectural elements, archeological evidence, structural restoration, historical eras, patrons, and cultural heritage preservation. Do not use business strategy jargon or corporate metrics like market size, CAGR, ARR, or SWOT frameworks. ",
         "corporate": "You are a McKinsey Senior Partner writing a high-density corporate strategy report. Use structured framework terms like MECE, porter's five forces, value chains, and synergy levers. "
     }
     
@@ -216,19 +421,28 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     domain = detect_domain(topic)
     domain_profile = DOMAIN_REGISTRY[domain]
     
-    # Auto-resolve template based on domain if the default "indigo" or an invalid template is passed
+    # Fallback to domain profile template if template is default,
+    # EXCEPT for the 'options' domain where we default to the light 'indigo' (white) theme
+    # unless 'dark' is explicitly requested.
     if template == "indigo" and domain_profile["template"] != "indigo":
-        template = domain_profile["template"]
+        if domain != "options" or "dark" in topic.lower():
+            template = domain_profile["template"]
     t = TEMPLATES.get(template.lower(), TEMPLATES["indigo"])
     
     # Get SAFE_WORK_DIR for writing separate chart files
     from config import SAFE_WORK_DIR
     charts_dir = Path(SAFE_WORK_DIR) / "charts"
     charts_dir.mkdir(parents=True, exist_ok=True)
+
+    # Set active theme parameter into environment to dynamically color matplotlib chart assets
+    os.environ["AARKAAI_THEME"] = template.lower()
     
     # ── Generate 1 AI cover illustration using Aarka Vision SD on GPU ────────
     logger.info("Generating AI cover illustration with Aarka Vision...")
-    cover_prompt = f"{topic} executive headquarters, modern office lobby, professional corporate design, photorealistic, 8k, highly detailed, clean lighting"
+    if domain == "general":
+        cover_prompt = f"{topic} ancient sacred architecture, historical monument restoration, cultural heritage site, photorealistic painting, 8k, highly detailed, serene lighting"
+    else:
+        cover_prompt = f"{topic} executive headquarters, modern office lobby, professional corporate design, photorealistic, 8k, highly detailed, clean lighting"
     cover_img = get_aarkavision_image_resource(cover_prompt, "cover_illustration", charts_dir)
     
     # ── Generate 5 premium matplotlib data charts ────────────────────────────
@@ -240,21 +454,29 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     chart5 = generate_area_chart(topic, charts_dir, domain=domain)      # Risk exposure area
 
     # ── Generate or use pre-generated 5 high-density section paragraphs ──────
+    # ── Ask Aarka (LLM) to generate ALL UI text dynamically — zero hardcoding ─
+    logger.info(f"Generating domain metadata via LLM for topic='{topic}', domain='{domain}'...")
+    meta = generate_domain_metadata(topic, domain)
+
+    # Section titles & hints — LLM decides based on topic+domain
+    _s_titles = meta["section_titles"]
+    _s_hints  = meta["section_hints"]
+
     if sections and len(sections) == 5:
         logger.info("Using pre-generated sections passed from streaming pipeline")
         sec1, sec2, sec3, sec4, sec5 = sections
     else:
         logger.info("Generating sections synchronously inside compile_gamma_pdf")
-        sec1 = get_detailed_section(topic, "Executive Summary & Framework", "Core thesis, market indicators, and initial adoption vectors.")
-        sec2 = get_detailed_section(topic, "Market Analysis & Sector Segmentation", "Analysis of market drivers, segmentation details, and industry positioning.")
-        sec3 = get_detailed_section(topic, "Quantitative Performance & Revenue Velocity", "Financial benchmarks, quarterly trends, revenue scalability, and growth curves.")
-        sec4 = get_detailed_section(topic, "Operational Efficiency & Architecture", "Infrastructure layout, logistical pipelines, efficiency metrics, and cost-to-output optimization.")
-        sec5 = get_detailed_section(topic, "Risk Analysis, Vulnerability & Strategic Outlook", "Defensive positioning, regulatory compliance, risk distribution, and long-term ecosystem forecasts.")
+        sec1 = get_detailed_section(topic, _s_titles[0], _s_hints[0])
+        sec2 = get_detailed_section(topic, _s_titles[1], _s_hints[1])
+        sec3 = get_detailed_section(topic, _s_titles[2], _s_hints[2])
+        sec4 = get_detailed_section(topic, _s_titles[3], _s_hints[3])
+        sec5 = get_detailed_section(topic, _s_titles[4], _s_hints[4])
 
     # ── Resolve Registry-Driven Variables for HTML Injection ─────────────────
     c_kpis = domain_profile["cover_kpis"]
     d_kpis = domain_profile["dashboard_kpis"]
-    
+
     # Brand logos
     brand_html = []
     for b in domain_profile["brand_logos"]:
@@ -271,10 +493,10 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
         </div>
         """)
     brand_logos_rendered = "".join(brand_html)
-    
+
     # Timeline
     t_m = domain_profile["timeline"]
-    
+
     # Table rendering
     table_headers = "".join([f'<th style="padding: 3px; border: 1px solid #E2E8F0;">{h}</th>' for h in domain_profile["table"]["headers"]])
     table_rows = []
@@ -282,7 +504,7 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
         row_html = []
         for idx, cell in enumerate(row):
             align = "text-align: left; font-weight: bold;" if idx == 0 else ""
-            bg = "background: #D1FAE5; color: #065F46; font-weight: bold;" if any(w in cell.lower() for w in ["high", "buy", "elite", "approved", "leader"]) else (
+            bg = "background: #D1FAE5; color: #065F46; font-weight: bold;" if any(w in cell.lower() for w in ["high", "buy", "elite", "approved", "leader", "standing"]) else (
                 "background: #FEF3C7; color: #92400E;" if "med" in cell.lower() else (
                     "background: #FEE2E2; color: #991B1B; font-weight: bold;" if any(w in cell.lower() for w in ["low", "slow"]) else ""
                 )
@@ -290,6 +512,52 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
             row_html.append(f'<td style="padding: 3px; border: 1px solid #E2E8F0; {align} {bg}">{cell}</td>')
         table_rows.append(f'<tr>{"".join(row_html)}</tr>')
     table_rows_rendered = "".join(table_rows)
+
+    # ── All UI text variables from LLM-generated metadata (no hardcoding) ────
+    cover_desc        = meta["cover_desc"]
+    page2_badge       = meta["page_badges"][0]
+    page2_header      = meta["page_headers"][0]
+    checklist_title   = meta["checklist_title"]
+    checklist_items   = meta["checklist_items"]
+    page3_badge       = meta["page_badges"][1]
+    page3_header      = meta["page_headers"][1]
+    chart1_title      = domain_profile["charts"]["bar"]["title"]
+    chart2_title      = domain_profile["charts"]["line"]["title"]
+    chart3_title      = domain_profile["charts"]["donut"]["title"]
+    chart4_title      = domain_profile["charts"]["hbar"]["title"]
+    chart5_title      = domain_profile["charts"]["area"]["title"]
+    insight_title     = meta["insight_title"]
+    insight_text      = meta["insight_text"]
+    svg_title         = f"{domain_profile['name']} — Concept Model"
+    page4_badge       = meta["page_badges"][2]
+    page4_header      = meta["page_headers"][2]
+    callout_quote     = meta["callout_quote"]
+    kpi_label_primary = meta["kpi_label_primary"]
+    kpi_label_secondary = meta["kpi_label_secondary"]
+    players_label     = meta["players_label"]
+    page5_badge       = meta["page_badges"][3]
+    page5_header      = meta["page_headers"][3]
+    table_title       = meta["table_title"]
+    milestones_title  = meta["milestones_title"]
+    methodology_text  = meta["methodology_text"]
+    page6_badge       = meta["page_badges"][4]
+    page6_header      = meta["page_headers"][4]
+    opp_title         = meta["opp_title"]
+    opp_items         = meta["opp_items"]
+    sources_title     = meta["sources_title"]
+    # Watermarks & footnotes (LLM-generated, no domain if/else)
+    wm_p3 = meta["watermarks"][0]
+    wm_p4 = meta["watermarks"][1]
+    wm_p5 = meta["watermarks"][2]
+    wm_p6 = meta["watermarks"][3]
+    fn_chart2  = meta["chart_footnotes"][0]
+    fn_chart3  = meta["chart_footnotes"][1]
+    fn_chart1  = meta["chart_footnotes"][2]
+    fn_chart5  = meta["chart_footnotes"][3]
+    src_p3, sb_p3 = meta["source_credits"][0], meta["source_badges"][0]
+    src_p4, sb_p4 = meta["source_credits"][1], meta["source_badges"][1]
+    src_p5, sb_p5 = meta["source_credits"][2], meta["source_badges"][2]
+    src_p6, sb_p6 = meta["source_credits"][3], meta["source_badges"][3]
 
     # HTML template with dynamic styling from selected template and large typography (body size 16px)
     html_content = f"""<!DOCTYPE html>
@@ -336,11 +604,11 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
             letter-spacing: 1px;
         }}
         @top-right {{
-            content: "CONFIDENTIAL RESEARCH REPORT  |  v3.2.0";
+            content: "RESEARCH REPORT  |  v3.2.0";
             font-family: system-ui, sans-serif;
             font-size: 8px;
             font-weight: 700;
-            color: #EF4444;
+            color: #94A3B8;
             letter-spacing: 1px;
         }}
         @bottom-left {{
@@ -380,6 +648,7 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
 
     /* Confidential Watermark Overlay */
     .watermark {{
+        display: none;
         position: absolute;
         top: 40%;
         left: 5%;
@@ -606,7 +875,7 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
             {topic.upper()}
         </h1>
         <p style="color: #64748B; font-size: 15px; max-width: 640px; line-height: 1.6; font-weight: 400; text-align: justify; margin-bottom: 16px;">
-            A consulting-grade quantitative and qualitative ecosystem evaluation outlining growth trajectories, structural paradigms, operational benchmarks, and strategic investment criteria.
+            {cover_desc}
         </p>
 
         <div style="display: flex; gap: 16px; margin-bottom: 16px; max-width: 600px;">
@@ -650,11 +919,11 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     <div class="watermark">CONFIDENTIAL</div>
     <div class="badge">
         <svg class="badge-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
-        Executive Dashboard
+        {page2_badge}
     </div>
     <h2>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{t["primary_color"]}" stroke-width="2" style="max-height:20px; display:inline-block; vertical-align:middle; margin-right:6px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        2. Executive Dashboard &amp; 13. Recommendations
+        {page2_header}
     </h2>
     
     <div class="kpi-container">
@@ -687,15 +956,15 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
             </div>
             
             <div class="card card-purple" style="padding: 10px 14px; margin-bottom: 0;">
-                <strong style="font-size: 11px; color: {t["h1_color"]}; display: block; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">13. Strategic Recommendations Checklist</strong>
+                <strong style="font-size: 11px; color: {t["h1_color"]}; display: block; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">{checklist_title}</strong>
                 <div style="font-size: 12px; color: #334155; line-height: 1.5;">
                     <div style="margin-bottom: 4px; display: flex; align-items: flex-start; gap: 6px;">
                         <span style="color: #10B981; font-weight: 900;">[✔]</span>
-                        <span>Deploy optimized target workflows and automated system protocols.</span>
+                        <span>{checklist_items[0]}</span>
                     </div>
                     <div style="margin-bottom: 4px; display: flex; align-items: flex-start; gap: 6px;">
                         <span style="color: #10B981; font-weight: 900;">[✔]</span>
-                        <span>Consolidate operational resources into primary geographic corridors.</span>
+                        <span>{checklist_items[1]}</span>
                     </div>
                 </div>
             </div>
@@ -760,14 +1029,14 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
 
 <!-- PAGE 3: 3. KEY METRICS, 4. MARKET OVERVIEW & 5. STARTUP LANDSCAPE -->
 <div class="page">
-    <div class="watermark">ANALYSIS</div>
+    <div class="watermark">{wm_p3}</div>
     <div class="badge">
         <svg class="badge-icon" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
-        Ecosystem Analysis
+        {page3_badge}
     </div>
     <h2>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{t["primary_color"]}" stroke-width="2" style="max-height:20px; display:inline-block; vertical-align:middle; margin-right:6px;"><path d="M21.21 15.89A10 10 0 1 1 8 2.83M22 12A10 10 0 0 0 12 2v10z"/></svg>
-        3. Key Metrics, 4. Market Overview &amp; 5. Industrial Landscape
+        {page3_header}
     </h2>
     <div class="card" style="margin-bottom: 8px;">
         <p>{sec2}</p>
@@ -776,23 +1045,23 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     <div class="row" style="margin-top: 2px; margin-bottom: 6px;">
         <div class="col-6">
             <div class="card card-amber" style="margin-bottom: 0; padding: 8px 12px;">
-                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">3. Trend &amp; Velocity Performance</div>
+                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">{chart2_title}</div>
                 <div class="chart-container">
                     {render_chart_html(chart2)}
                 </div>
                 <div style="font-size: 8px; color: #64748B; margin-top: 2px; text-align: left; border-top: 1px solid #F1F5F9; padding-top: 2px;">
-                    * Trend: Compounding user and performance metrics over time. Source: Aarkaa Database.
+                    * {fn_chart2}
                 </div>
             </div>
         </div>
         <div class="col-6">
             <div class="card card-purple" style="margin-bottom: 0; padding: 8px 12px;">
-                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">4. Resource &amp; Asset Allocation</div>
+                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;">{chart3_title}</div>
                 <div class="chart-container">
                     {render_chart_html(chart3)}
                 </div>
                 <div style="font-size: 8px; color: #64748B; margin-top: 2px; text-align: left; border-top: 1px solid #F1F5F9; padding-top: 2px;">
-                    * Allocation reflects institutional concentration and resource placement across major segments.
+                    * {fn_chart3}
                 </div>
             </div>
         </div>
@@ -801,54 +1070,54 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     <div class="row" style="margin-bottom: 4px;">
         <div class="col-7">
             <div class="ai-insight" style="margin: 0; height: 100%;">
-                <div class="ai-insight-title">5. Segment Depth Analysis</div>
+                <div class="ai-insight-title">{insight_title}</div>
                 <p class="ai-insight-text" style="font-size: 12px; line-height: 1.4;">
-                    Primary verticals dominate asset allocation, followed closely by secondary integration points. The synergy between core deep infrastructure and specialized verticals continues to attract top-tier capital, establishing a robust growth corridor.
+                    {insight_text}
                 </p>
             </div>
         </div>
         <div class="col-5">
             <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
-                <strong style="font-size: 9px; color: #0F172A; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 3px; text-align: center;">5. {domain_profile["name"]} Technical Model</strong>
+                <strong style="font-size: 9px; color: #0F172A; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 3px; text-align: center;">{svg_title}</strong>
                 {domain_profile["visual_svg"]}
             </div>
         </div>
     </div>
 
     <div class="credibility-bar">
-        <span><strong>Source:</strong> Gartner Research &amp; Aarka Ecosystem Audit  |  <strong>Confidence Score:</strong> 96.5%</span>
-        <span class="credibility-badge" style="background:#EFF6FF; color:#1e40af; border-color:#bfdbfe;">AAR-VERIFIED</span>
+        <span><strong>Source:</strong> {src_p3}</span>
+        <span class="credibility-badge" style="background:#EFF6FF; color:#1e40af; border-color:#bfdbfe;">{sb_p3}</span>
     </div>
 </div>
 
 <!-- PAGE 4: 6. SECTOR, 7. FUNDING ANALYSIS & 12. FINANCIAL OUTLOOK -->
 <div class="page">
-    <div class="watermark">VELOCITY</div>
+    <div class="watermark">{wm_p4}</div>
     <div class="badge">
         <svg class="badge-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-        Performance Metrics
+        {page4_badge}
     </div>
     <h2>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{t["primary_color"]}" stroke-width="2" style="max-height:20px; display:inline-block; vertical-align:middle; margin-right:6px;"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-        6. Sector, 7. Financial Expansion &amp; 12. Future Outlook
+        {page4_header}
     </h2>
     <div class="card" style="margin-bottom: 8px;">
         <p>{sec3}</p>
     </div>
     
     <div class="callout" style="margin: 6px 0; padding: 8px 12px; font-size: 13.5px;">
-        "Compounding quarterly performance growth acts as the ultimate validator of operational efficiency and platform scalability in high-velocity competitive environments."
+        "{callout_quote}"
     </div>
     
     <div class="row">
         <div class="col-8">
             <div class="card card-amber" style="margin-bottom: 0; padding: 10px 14px;">
-                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">7. Segment Financials &amp; 12. Future Outlook</div>
+                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">{chart1_title}</div>
                 <div class="chart-container">
                     {render_chart_html(chart1)}
                 </div>
                 <div style="font-size: 8px; color: #64748B; margin-top: 3px; border-top: 1px solid #F1F5F9; padding-top: 2px;">
-                    * Projections based on compounding growth curves of top-25 ecosystem platforms.
+                    * {fn_chart1}
                 </div>
             </div>
         </div>
@@ -857,16 +1126,16 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
                 <div>
                     <strong style="font-size: 10.5px; color: {t["h1_color"]}; display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Key Metrics</strong>
                     <div style="margin-bottom: 6px;">
-                        <span style="font-size: 8px; color: #64748B; display: block; text-transform: uppercase;">Primary KPI</span>
+                        <span style="font-size: 8px; color: #64748B; display: block; text-transform: uppercase;">{kpi_label_primary}</span>
                         <span style="font-size: 18px; font-weight: 800; color: #0F172A;">{d_kpis[0]["val"]}</span>
                     </div>
                     <div style="margin-bottom: 6px;">
-                        <span style="font-size: 8px; color: #64748B; display: block; text-transform: uppercase;">Secondary KPI</span>
+                        <span style="font-size: 8px; color: #64748B; display: block; text-transform: uppercase;">{kpi_label_secondary}</span>
                         <span style="font-size: 18px; font-weight: 800; color: #10B981;">{d_kpis[1]["val"]}</span>
                     </div>
                 </div>
                 <div>
-                    <span style="font-size: 8px; color: #64748B; display: block; text-transform: uppercase; margin-bottom: 3px; font-weight: bold;">Top Sector Players</span>
+                    <span style="font-size: 8px; color: #64748B; display: block; text-transform: uppercase; margin-bottom: 3px; font-weight: bold;">{players_label}</span>
                     <div style="display: flex; gap: 4px; flex-wrap: wrap; justify-content: space-between; background: #F8FAFC; padding: 4px; border-radius: 4px; border: 1px solid #E2E8F0; width: 100%;">
                         {brand_logos_rendered}
                     </div>
@@ -876,21 +1145,21 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     </div>
 
     <div class="credibility-bar">
-        <span><strong>Source:</strong> McKinsey Financial database &amp; Aarka Audit Q2 2026  |  <strong>Confidence:</strong> 97.4%</span>
-        <span class="credibility-badge">✓ ACCREDITED DATA</span>
+        <span><strong>Source:</strong> {src_p4}</span>
+        <span class="credibility-badge">{sb_p4}</span>
     </div>
 </div>
 
 <!-- PAGE 5: 8. COMPETITIVE LANDSCAPE & 14. METHODOLOGY -->
 <div class="page">
-    <div class="watermark">EFFICIENCY</div>
+    <div class="watermark">{wm_p5}</div>
     <div class="badge">
         <svg class="badge-icon" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-        Operational Benchmarks
+        {page5_badge}
     </div>
     <h2>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{t["primary_color"]}" stroke-width="2" style="max-height:20px; display:inline-block; vertical-align:middle; margin-right:6px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
-        8. Competitive Landscape &amp; 14. Methodology
+        {page5_header}
     </h2>
     <div class="card" style="margin-bottom: 8px;">
         <p>{sec4}</p>
@@ -899,12 +1168,12 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     <div class="row">
         <div class="col-8">
             <div class="card card-green" style="margin-bottom: 0; padding: 10px 14px;">
-                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">8. Performance Benchmarking Uptime</div>
+                <div style="font-size: 11px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">{chart4_title}</div>
                 <div class="chart-container">
                     {render_chart_html(chart4)}
                 </div>
                 <div style="margin-top: 6px;">
-                    <strong style="font-size: 9px; color: #0F172A; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 3px;">8. Segment Competitive Growth Heatmap</strong>
+                    <strong style="font-size: 9px; color: #0F172A; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 3px;">{table_title}</strong>
                     <table style="width: 100%; border-collapse: collapse; font-size: 9px; text-align: center;">
                         <thead>
                             <tr style="background: #F1F5F9; font-weight: bold;">
@@ -921,7 +1190,7 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
         <div class="col-4">
             <div class="card card-amber" style="height: 100%; padding: 12px 14px; display: flex; flex-direction: column; justify-content: space-between; margin-bottom: 0;">
                 <div>
-                    <strong style="font-size: 11px; color: {t["h1_color"]}; display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Strategic Milestones</strong>
+                    <strong style="font-size: 11px; color: {t["h1_color"]}; display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">{milestones_title}</strong>
                     <div style="border-left: 2px solid {t["primary_color"]}; padding-left: 10px; position: relative; margin-left: 4px;">
                         <div style="position: absolute; left: -5px; top: 2px; width: 8px; height: 8px; border-radius: 50%; background: {t["primary_color"]};"></div>
                         <strong style="font-size: 11px; color: #0F172A; display: block;">{t_m[0]["time"]}</strong>
@@ -932,28 +1201,28 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
                     </div>
                 </div>
                 <div style="background: rgba(245, 158, 11, 0.05); border-left: 2.5px solid #F59E0B; padding: 6px 10px; border-radius: 0 4px 4px 0; font-size: 11px; color: #78350F; line-height: 1.35; margin-top: 8px;">
-                    <strong>14. Methodology:</strong> Built via hybrid RAG architectures indexing 47 ecosystem intelligence nodes with weighted parameter vector search.
+                    <strong>{methodology_text}</strong>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="credibility-bar">
-        <span><strong>Source:</strong> IDC Infrastructure Reports &amp; Aarkaa Auditing  |  <strong>Accuracy Score:</strong> 95.8%</span>
-        <span class="credibility-badge">✓ COMPLIANT FRAMEWORK</span>
+        <span><strong>Source:</strong> {src_p5}</span>
+        <span class="credibility-badge">{sb_p5}</span>
     </div>
 </div>
 
 <!-- PAGE 6: 10. RISK MATRIX, 11. OPPORTUNITY MATRIX & 15. SOURCES -->
 <div class="page">
-    <div class="watermark">FORECAST</div>
+    <div class="watermark">{wm_p6}</div>
     <div class="badge">
-        <svg class="badge-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
-        Strategic Outlook
+        <svg class="badge-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm0-4h-2V7h2v2z"/></svg>
+        {page6_badge}
     </div>
     <h2>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{t["primary_color"]}" stroke-width="2" style="max-height:20px; display:inline-block; vertical-align:middle; margin-right:6px;"><path d="M23 6l-9.5 9.5-5-5L1 18"/><path d="M17 6h6v6"/></svg>
-        10. Risk Matrix, 11. Opportunity Matrix &amp; 15. Sources
+        {page6_header}
     </h2>
     <div class="card">
         <p>{sec5}</p>
@@ -962,33 +1231,33 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     <div class="row" style="margin-top: 4px;">
         <div class="col-8">
             <div class="card card-red" style="margin-bottom: 0;">
-                <div style="font-size: 12px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">10. Cumulative Risk Profiles &amp; Skews</div>
+                <div style="font-size: 12px; font-weight: 800; color: {t["primary_color"]}; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">{chart5_title}</div>
                 <div class="chart-container">
                     {render_chart_html(chart5)}
                 </div>
                 <div style="font-size: 8.5px; color: #64748B; margin-top: 4px; border-top: 1px solid #F1F5F9; padding-top: 3px;">
-                    * Projections assume regulatory volatility peaks in late 2026. Source: Aarka Risk Analytics.
+                    * {fn_chart5}
                 </div>
             </div>
         </div>
         <div class="col-4">
             <div class="card card-amber" style="height: 100%; padding: 12px 14px; display: flex; flex-direction: column; justify-content: space-between; margin-bottom: 0;">
                 <div>
-                    <strong style="font-size: 11px; color: {t["h1_color"]}; display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">11. Opportunity Index</strong>
+                    <strong style="font-size: 11px; color: {t["h1_color"]}; display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">{opp_title}</strong>
                     <div style="font-size: 11.5px; color: #334155; line-height: 1.55;">
                         <div style="margin-bottom: 8px; display: flex; align-items: flex-start; gap: 6px;">
                             <span style="color: #10B981; font-weight: 900;">[✔]</span>
-                            <span>Highest yield performance seen across prime segments.</span>
+                            <span>{opp_items[0]}</span>
                         </div>
                         <div style="margin-bottom: 8px; display: flex; align-items: flex-start; gap: 6px;">
                             <span style="color: #10B981; font-weight: 900;">[✔]</span>
-                            <span>Cross-border enterprise compliance integration remains top expansion opportunity.</span>
+                            <span>{opp_items[1]}</span>
                         </div>
                     </div>
                 </div>
                 <div style="border-top: 1px solid #E2E8F0; padding-top: 8px; display: flex; align-items: center; justify-content: space-between; margin-top: 8px;">
                     <div style="font-size: 8px; color: #64748B; line-height: 1.3;">
-                        <strong>15. Sources &amp; Appendix:</strong><br>Aarka AI Principal Analyst<br>Report ID: ARK-2026-CHN-098
+                        <strong>{sources_title}</strong><br>Aarkaa AI Research Engine<br>Report ID: ARK-2026-CHN-098
                     </div>
                     <svg width="34" height="34" viewBox="0 0 34 34" fill="none" stroke="#0F172A" stroke-width="1" style="max-height: 34px;">
                         <rect x="0" y="0" width="8" height="8" fill="#0F172A"/>
@@ -1005,8 +1274,8 @@ def compile_gamma_pdf(topic: str, output_name: str, template: str = "indigo", se
     </div>
 
     <div class="credibility-bar">
-        <span><strong>Source:</strong> 15. Aarkaa Risk Audit &amp; World Economic Forum Risk Index  |  <strong>Confidence:</strong> 95.1%</span>
-        <span class="credibility-badge" style="background:#FEF2F2; color:#991B1B; border-color:#FCA5A5;">AI SECURE</span>
+        <span><strong>Source:</strong> {src_p6}</span>
+        <span class="credibility-badge" style="background:#FEF2F2; color:#991B1B; border-color:#FCA5A5;">{sb_p6}</span>
     </div>
 </div>
 

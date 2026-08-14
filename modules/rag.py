@@ -117,7 +117,7 @@ def _jaccard_similarity(query_keywords: set, doc_keywords: set) -> float:
 
 def store_knowledge(topic: str, content: str, source: str = "auto_learn", user_id: Optional[str] = None) -> None:
     """
-    Embed and store a knowledge entry in ChromaDB.
+    Embed and store a knowledge entry in ChromaDB with cosine deduplication.
     """
     if _embedding_fn is None or _collection is None:
         logger.warning("RAG not initialised – skipping store")
@@ -128,6 +128,19 @@ def store_knowledge(topic: str, content: str, source: str = "auto_learn", user_i
     effective_user = user_id if user_id else _GLOBAL_USER
 
     try:
+        # Cosine distance deduplication check (distance <= 0.12 means similarity >= 0.88)
+        if _collection.count() > 0:
+            dup_check = _collection.query(
+                query_embeddings=[vec.tolist()],
+                n_results=1,
+                include=["distances"]
+            )
+            if dup_check and "distances" in dup_check and dup_check["distances"] and dup_check["distances"][0]:
+                closest_dist = dup_check["distances"][0][0]
+                if closest_dist <= 0.12:
+                    logger.info("Skipping duplicate knowledge store. Nearest neighbor cosine distance: %.4f", closest_dist)
+                    return
+
         _collection.add(
             ids=[doc_id],
             embeddings=[vec.tolist()],
@@ -147,9 +160,15 @@ def store_knowledge(topic: str, content: str, source: str = "auto_learn", user_i
 # ─── Retrieval ────────────────────────────────────────────────────────────────
 
 
-def search(query: str, top_k: int = 5, user_id: Optional[str] = None, query_domain: Optional[str] = None) -> list[dict]:
+def search(query: str, top_k: int = 5, user_id: Optional[str] = None, query_domain: Optional[str] = None, source_filter: Optional[str] = None) -> list[dict]:
     """
     Semantic search over knowledge entries with ChromaDB, optional reranking and validation.
+
+    Parameters
+    ----------
+    source_filter : str, optional
+        If specified, restrict results to entries with this exact source value
+        (e.g., 'architecture'). Overrides the default auto_learn exclusion.
 
     Returns list of dicts with keys: id, topic, content, score, reranker_score, source
     """
@@ -172,11 +191,18 @@ def search(query: str, top_k: int = 5, user_id: Optional[str] = None, query_doma
         ]
     }
 
-    # 2. Source filtering: exclude "auto_learn" entries
+    # 2. Source filtering
+    if source_filter:
+        # Restrict to a specific source (e.g., 'architecture')
+        source_clause = {"source": source_filter}
+    else:
+        # Default: exclude auto_learn entries
+        source_clause = {"source": {"$ne": "auto_learn"}}
+
     where_filter = {
         "$and": [
             user_filter,
-            {"source": {"$ne": "auto_learn"}},
+            source_clause,
         ]
     }
 
@@ -319,13 +345,14 @@ def search(query: str, top_k: int = 5, user_id: Optional[str] = None, query_doma
 
 
 def get_context(query: str, top_k: int = 3, user_id: Optional[str] = None,
-                max_chars: int = RAG_MAX_CONTEXT_CHARS, query_domain: Optional[str] = None) -> str:
+                max_chars: int = RAG_MAX_CONTEXT_CHARS, query_domain: Optional[str] = None,
+                source_filter: Optional[str] = None) -> str:
     """
     Get a formatted context string for the query from the knowledge base.
 
     Enforces a maximum character budget to prevent context window bloat.
     """
-    results = search(query, top_k=top_k, user_id=user_id, query_domain=query_domain)
+    results = search(query, top_k=top_k, user_id=user_id, query_domain=query_domain, source_filter=source_filter)
     if not results:
         return ""
 

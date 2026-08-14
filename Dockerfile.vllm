@@ -1,0 +1,40 @@
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+LABEL maintainer="AARKAAI Team" \
+      version="1.0" \
+      description="vLLM GPU Node for AARKAA models"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/python3.11 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3.11 /usr/bin/python
+
+# Upgrade pip to ensure compatibility and install torch/vLLM
+RUN python3 -m pip install --upgrade pip && \
+    python3 -m pip install --no-cache-dir torch "vllm>=0.4.2"
+
+ARG MODEL_NAME="aarkaa-ai/aarkaa-3b"
+ARG PORT=8000
+ARG GPU_MEMORY_UTILIZATION=0.90
+ARG MAX_MODEL_LEN=8192
+
+ENV MODEL_NAME=${MODEL_NAME}
+ENV PORT=${PORT}
+ENV GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION}
+ENV MAX_MODEL_LEN=${MAX_MODEL_LEN}
+
+RUN useradd -m -s /bin/bash vllm
+USER vllm
+WORKDIR /home/vllm
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:${PORT}/health || exit 1
+
+EXPOSE ${PORT}
+
+ENTRYPOINT ["sh", "-c", "python3 -m vllm.entrypoints.openai.api_server --model $MODEL_NAME --port $PORT --gpu-memory-utilization $GPU_MEMORY_UTILIZATION --max-model-len $MAX_MODEL_LEN --trust-remote-code"]

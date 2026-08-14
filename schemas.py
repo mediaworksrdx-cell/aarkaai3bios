@@ -33,9 +33,24 @@ class UserCreate(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
-    user_id: str
+    user_id: Optional[str] = None
     name: Optional[str] = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(description="The refresh token issued at login")
+
+
+class LogoutRequest(BaseModel):
+    access_token: Optional[str] = Field(default=None, description="Access token JTI to revoke")
+    refresh_token: Optional[str] = Field(default=None, description="Refresh token to revoke")
+
+
+class GoogleAuthRequest(BaseModel):
+    id_token: Optional[str] = Field(default=None, description="Google ID Token from client SDK")
+    access_token: Optional[str] = Field(default=None, description="Google OAuth access token from client SDK")
 
 
 # ─── Request ──────────────────────────────────────────────────────────────────
@@ -47,13 +62,14 @@ class PromptRequest(BaseModel):
     query: str = Field(
         default="",
         min_length=1,
-        max_length=2000,
-        description="The user's question or command (max 2000 chars)",
+        max_length=10000,
+        description="The user's question or command (max 10000 chars)",
     )
     # user_id is removed from here because we extract it from the bearer token.
     session_id: str = Field(default="1", max_length=64, description="Session identifier")
     context: Optional[dict] = Field(default=None, description="Extra context payload")
     mode: Optional[str] = Field(default="production", description="Execution mode: 'production' or 'benchmark'")
+    model_override: Optional[str] = Field(default=None, description="Optional model provider override: 'gemini', 'claude', 'aarkaa-7b'")
 
     @field_validator("query")
     @classmethod
@@ -182,19 +198,40 @@ class StrategyResponse(BaseModel):
 
 
 
-# --- Auth ---
+# ─── Settings ─────────────────────────────────────────────────────────────────
 
 
-class UserCreate(BaseModel):
-    """Request payload for user registration or login."""
-    email: str = Field(description="User email address")
-    password: str = Field(description="User password")
-    name: str | None = Field(default=None, description="Display name (register only)")
+class UserSettingsUpdate(BaseModel):
+    """Request payload for updating user settings (all fields optional)."""
+    default_model: Optional[str] = Field(default=None, description="Default AI model")
+    response_style: Optional[str] = Field(default=None, description="concise | balanced | detailed")
+    theme: Optional[str] = Field(default=None, description="dark | light | auto")
+    language: Optional[str] = Field(default=None, description="ISO 639-1 language code")
+    streaming_enabled: Optional[bool] = Field(default=None, description="Enable token streaming")
+    reasoning_depth: Optional[str] = Field(default=None, description="fast | balanced | deep")
 
 
-class TokenResponse(BaseModel):
-    """JWT token response returned after auth."""
-    access_token: str
-    token_type: str = "bearer"
+class UserSettingsResponse(BaseModel):
+    """Response containing user settings."""
     user_id: str
-    name: str | None = None
+    default_model: str = "aarkaa-7b"
+    response_style: str = "balanced"
+    theme: str = "dark"
+    language: str = "en"
+    streaming_enabled: bool = True
+    reasoning_depth: str = "balanced"
+    updated_at: Optional[str] = None
+
+
+# ─── Skills ───────────────────────────────────────────────────────────────────
+
+
+class SkillModel(BaseModel):
+    """Request payload for creating or updating a skill."""
+    name: str = Field(max_length=128)
+    content: str = Field(max_length=51200, description="Skill SKILL.md content (max 50KB)")
+
+
+class TestRequestModel(BaseModel):
+    """Request payload for testing a skill with a prompt."""
+    prompt: str = Field(max_length=2000)

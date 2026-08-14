@@ -4,6 +4,10 @@ from modules.web_search import get_web_context
 class WebSearchTool(Tool):
     name = "WebSearch"
     description = "Search the internet (DuckDuckGo + Wikipedia) for up-to-date information, documentation, or to solve errors. Provide a search 'query' in the Action Input JSON."
+    risk_level = "SAFE"
+    latency_weight = 1.8
+    cost_weight = 0.5
+    base_confidence = 0.90
 
     def execute(self, params: dict) -> str:
         query = params.get("query")

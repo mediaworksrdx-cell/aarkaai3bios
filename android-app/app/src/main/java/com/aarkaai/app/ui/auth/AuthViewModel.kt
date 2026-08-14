@@ -163,6 +163,20 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun handleExternalAuth(token: String, userId: String, name: String) {
+        viewModelScope.launch {
+            tokenManager.saveAuth(token, userId, name)
+            uiState = uiState.copy(
+                isLoading = false,
+                token = token,
+                userId = userId,
+                userName = name,
+                isLoggedIn = true,
+                error = null
+            )
+        }
+    }
+
     fun clearError() {
         uiState = uiState.copy(error = null)
     }
