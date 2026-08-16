@@ -2376,21 +2376,15 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     combined_confidence = (filter_confidence + 0.5) / 2
 
     def _background_verify_and_store():
-        verified_response = full_response
-        if not _is_image_generation_query(query):
-            try:
-                from modules.agents.verifier import verify_response
-                logger.info("Running verifier agent on streamed response for database history...")
-                verified_response = verify_response(query, full_response, evidence=fused_context)
-            except Exception as exc:
-                logger.error("Failed to run verifier agent on streamed response: %s", exc)
-
-        _post_process(
-            user_id, session_id, query, verified_response,
-            intent, combined_confidence, sources[-1],
-            memory, auto_learn,
-        )
-        logger.info("Background verify+store completed for query: %.60s...", query)
+        try:
+            _post_process(
+                user_id, session_id, query, full_response,
+                intent, combined_confidence, sources[-1] if sources else "aarkaa",
+                memory, auto_learn,
+            )
+            logger.info("Background store completed for query: %.60s...", query)
+        except Exception as exc:
+            logger.error("Background store failed: %s", exc)
 
     bg_thread = threading.Thread(target=_background_verify_and_store, daemon=True)
     bg_thread.start()

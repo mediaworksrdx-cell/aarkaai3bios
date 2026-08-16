@@ -16,21 +16,28 @@ logger = logging.getLogger(__name__)
 
 # Valid option sets for settings validation
 VALID_MODELS = {
-    "aarkaa-7b", "aarkaa-3b", "gemini-2.5-flash", "gemini-2.5-pro",
+    "aarka-2.0", "aarkaa-7b", "aarkaa-3b", "gemini-2.5", "gemini-2.5-flash", "gemini-2.5-pro",
 }
-VALID_RESPONSE_STYLES = {"concise", "balanced", "detailed"}
+VALID_RESPONSE_STYLES = {"concise", "balanced", "detailed", "professional"}
 VALID_THEMES = {"dark", "light", "auto"}
 VALID_LANGUAGES = {"en", "hi", "ta", "te", "kn", "ml", "mr", "bn", "gu", "pa"}
-VALID_REASONING_DEPTHS = {"fast", "balanced", "deep"}
+VALID_REASONING_DEPTHS = {"fast", "balanced", "deep", "low", "medium", "high"}
 
 # Default settings applied when a user has no stored preferences
 DEFAULT_SETTINGS = {
-    "default_model": "aarkaa-7b",
+    "default_model": "aarka-2.0",
     "response_style": "balanced",
     "theme": "dark",
     "language": "en",
     "streaming_enabled": True,
     "reasoning_depth": "balanced",
+    "about_you": "",
+    "system_directives": "",
+    "extended_thinking": True,
+    "thinking_budget": 4096,
+    "web_search_enabled": True,
+    "deep_research_enabled": True,
+    "market_data_enabled": True,
 }
 
 
@@ -43,6 +50,13 @@ def _validate_setting(key: str, value) -> tuple[bool, str]:
         "language": (VALID_LANGUAGES, "string"),
         "streaming_enabled": (None, "bool"),
         "reasoning_depth": (VALID_REASONING_DEPTHS, "string"),
+        "about_you": (None, "string"),
+        "system_directives": (None, "string"),
+        "extended_thinking": (None, "bool"),
+        "thinking_budget": (None, "int"),
+        "web_search_enabled": (None, "bool"),
+        "deep_research_enabled": (None, "bool"),
+        "market_data_enabled": (None, "bool"),
     }
 
     if key not in validators:
@@ -53,6 +67,11 @@ def _validate_setting(key: str, value) -> tuple[bool, str]:
     if expected_type == "bool":
         if not isinstance(value, bool):
             return False, f"'{key}' must be a boolean"
+        return True, ""
+
+    if expected_type == "int":
+        if not isinstance(value, int):
+            return False, f"'{key}' must be an integer"
         return True, ""
 
     if not isinstance(value, str):
