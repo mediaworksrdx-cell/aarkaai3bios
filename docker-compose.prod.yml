@@ -25,7 +25,6 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - VLLM_3B_URL=http://aarkaa-3b-vllm:8000/v1
       - VLLM_CODER_URL=http://aarkaa-coder-vllm:8001/v1
-      - VISION_SERVICE_URL=http://aarkaa-vision:8002/v1
       - AARKAAI_SECRET_KEY=${AARKAAI_SECRET_KEY}
       - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
       - VERTEX_PROJECT=${VERTEX_PROJECT:-orbital-heaven-504004-s2}
@@ -112,33 +111,7 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    networks:
-      - aarkaai-network
-
-  # ─── 5. AARKAA Vision Microservice Node ────────────────────────────────────
-  aarkaa-vision:
-    build:
-      context: .
-      dockerfile: Dockerfile.vllm
-      args:
-        MODEL_NAME: aarkaa-ai/aarkaa-vision
-        PORT: 8002
-        GPU_MEMORY_UTILIZATION: "0.85"
-    container_name: aarkaai-vision-prod
-    restart: always
-    expose:
-      - "8002"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    networks:
-      - aarkaai-network
-
-  # ─── 6. Internal Gateway & SSL Proxy (Nginx) ────────────────────────────────
+  # ─── 5. Internal Gateway & SSL Proxy (Nginx) ────────────────────────────────
   nginx:
     image: nginx:1.25-alpine
     container_name: aarkaai-nginx-prod

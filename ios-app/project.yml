@@ -24,7 +24,6 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         # Native Launch Screen (iOS 14+)
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: YES
       configs:
         debug:
           MTL_ENABLE_DEBUG_INFO: YES
