@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 
 // ─── Service Authentication ──────────────────────────────────────────────────
 // Uses a dedicated service API key for backend communication.
-// The key must match the AARKAAI_API_KEY configured on the backend.
+// The key must match the API_KEY configured on the backend.
 // NEVER self-mint JWTs — only the backend issues user tokens.
 const FINGENIQ_SERVICE_KEY = process.env.FINGENIQ_SERVICE_API_KEY || '';
-const BACKEND_URL = process.env.AARKAAI_BACKEND_URL || 'http://127.0.0.1:5000';
+const BACKEND_URL = process.env.BACKEND_URL || process.env.AARKAAI_BACKEND_URL || 'http://127.0.0.1:5000';
 
 export async function POST(req: NextRequest) {
   try {
-    const { message, model = 'aarkaa-7b' } = await req.json();
+    const { message, model = 'gemini-2.5-flash' } = await req.json();
 
     if (!message || typeof message !== 'string') {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
@@ -23,16 +23,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Map FinGenIQ model selection → AarkaAI Backend model overrides
-    let modelOverride = 'aarkaa-7b';
-    if (model === 'aarkaa-3b' || model === 'aarkaa-2.0-low') {
-      modelOverride = 'aarkaa-3b';
-    } else if (model === 'gemini-2.5-flash' || model === 'gemini-flash') {
-      modelOverride = 'gemini-2.5-flash';
-    } else if (model === 'gemini-2.5-pro' || model === 'gemini-pro') {
+    // Map FinGenIQ model selection → Backend model overrides
+    let modelOverride = 'gemini-2.5-flash';
+    if (model === 'gemini-2.5-pro' || model === 'gemini-pro') {
       modelOverride = 'gemini-2.5-pro';
     } else {
-      modelOverride = 'aarkaa-7b';
+      modelOverride = 'gemini-2.5-flash';
     }
 
     // Call backend prompt streaming endpoint using service API key

@@ -12,8 +12,6 @@ interface Message {
 }
 
 const MODEL_OPTIONS = [
-  { id: 'aarkaa-7b', label: '🤖 AarkaAI 7B (High Reasoner)', desc: 'Full Deep Reasoning & Financial Engine' },
-  { id: 'aarkaa-3b', label: '⚡ AarkaAI 2.0 (Fast)', desc: 'Ultra-Fast Response Engine' },
   { id: 'gemini-2.5-flash', label: '♊ Gemini 2.5 Flash', desc: 'Google Vertex AI Flash Model' },
   { id: 'gemini-2.5-pro', label: '♊ Gemini 2.5 Pro', desc: 'Google Vertex AI Pro Reasoning' },
 ];
@@ -31,12 +29,12 @@ export default function FinGenIQChatbot() {
     {
       id: 'welcome-1',
       sender: 'assistant',
-      text: "👋 Hello! I am **FinGenIQ AI Tutor** powered by **AarkaAI 7B** and **Google Gemini**.\n\nAsk me anything about financial education, investments, stock analysis, SEBI certifications, or budgeting!",
+      text: "👋 Hello! I am **FinGenIQ AI Tutor** powered by **Google Gemini**.\n\nAsk me anything about financial education, investments, stock analysis, SEBI certifications, or budgeting!",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
   const [input, setInput] = useState('');
-  const [selectedModel, setSelectedModel] = useState('aarkaa-7b');
+  const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -265,7 +263,7 @@ export default function FinGenIQChatbot() {
                   FinGenIQ AI Tutor
                 </div>
                 <div style={{ color: '#9ca3af', fontSize: '11px' }}>
-                  Powered by AarkaAI 7B & Gemini
+                  Powered by Google Gemini
                 </div>
               </div>
             </div>

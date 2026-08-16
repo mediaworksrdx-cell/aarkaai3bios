@@ -165,7 +165,7 @@ class RLHFRequest(BaseModel):
     """Request payload for submitting RLHF feedback."""
 
     conversation_id: Optional[Union[int, str]] = None
-    user_id: str = Field(max_length=128)
+    user_id: Optional[str] = Field(default=None, max_length=128)
     rating: int = Field(ge=-1, le=1, description="1 for positive, -1 for negative")
     correction: Optional[str] = Field(default=None, max_length=2000, description="Optional text correction to learn from")
 
@@ -204,22 +204,36 @@ class StrategyResponse(BaseModel):
 class UserSettingsUpdate(BaseModel):
     """Request payload for updating user settings (all fields optional)."""
     default_model: Optional[str] = Field(default=None, description="Default AI model")
-    response_style: Optional[str] = Field(default=None, description="concise | balanced | detailed")
+    response_style: Optional[str] = Field(default=None, description="concise | balanced | detailed | professional")
     theme: Optional[str] = Field(default=None, description="dark | light | auto")
     language: Optional[str] = Field(default=None, description="ISO 639-1 language code")
     streaming_enabled: Optional[bool] = Field(default=None, description="Enable token streaming")
-    reasoning_depth: Optional[str] = Field(default=None, description="fast | balanced | deep")
+    reasoning_depth: Optional[str] = Field(default=None, description="fast | balanced | deep | low | medium | high")
+    about_you: Optional[str] = Field(default=None, description="User role / industry profile")
+    system_directives: Optional[str] = Field(default=None, description="Account-wide system prompt instructions")
+    extended_thinking: Optional[bool] = Field(default=None, description="Enable extended DAG thinking")
+    thinking_budget: Optional[int] = Field(default=None, description="Maximum thinking budget tokens")
+    web_search_enabled: Optional[bool] = Field(default=None, description="Enable live web search")
+    deep_research_enabled: Optional[bool] = Field(default=None, description="Enable deep research mode")
+    market_data_enabled: Optional[bool] = Field(default=None, description="Enable live market data")
 
 
 class UserSettingsResponse(BaseModel):
     """Response containing user settings."""
     user_id: str
-    default_model: str = "aarkaa-7b"
+    default_model: str = "aarka-2.0"
     response_style: str = "balanced"
     theme: str = "dark"
     language: str = "en"
     streaming_enabled: bool = True
     reasoning_depth: str = "balanced"
+    about_you: Optional[str] = None
+    system_directives: Optional[str] = None
+    extended_thinking: bool = True
+    thinking_budget: int = 4096
+    web_search_enabled: bool = True
+    deep_research_enabled: bool = True
+    market_data_enabled: bool = True
     updated_at: Optional[str] = None
 
 
