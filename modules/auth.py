@@ -28,8 +28,8 @@ from database import get_session, UserAccount, SessionLocal
 logger = logging.getLogger(__name__)
 
 # ─── Token Expiry Configuration ──────────────────────────────────────────────
-# Access token: short-lived (default 15 min for production security)
-ACCESS_TOKEN_MINUTES = int(os.getenv("AARKAAI_ACCESS_TOKEN_MINUTES", str(ACCESS_TOKEN_EXPIRE_MINUTES)))
+# Access token: short-lived (30 min for security)
+ACCESS_TOKEN_MINUTES = int(os.getenv("AARKAAI_ACCESS_TOKEN_MINUTES", "30"))
 # Refresh token: long-lived (default 30 days)
 REFRESH_TOKEN_DAYS = int(os.getenv("AARKAAI_REFRESH_TOKEN_DAYS", "30"))
 
@@ -249,10 +249,33 @@ async def get_current_user(
         except HTTPException:
             raise
         except jwt.PyJWTError:
-            pass
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-    # 3. Guest visitor fallback (allows web chat visitors to query the AI engine)
-    return GUEST_USER
+    # Missing credentials -> 401 Unauthorized
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required. Please provide a valid Bearer token or API key.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+async def get_optional_user(
+    token: Optional[str] = Depends(oauth2_scheme),
+    provided_api_key: Optional[str] = Depends(api_key_header),
+    db: Session = Depends(get_session),
+) -> UserAccount:
+    """
+    FastAPI Dependency that resolves the authenticated user if credentials are provided,
+    otherwise gracefully falls back to GUEST_USER (for public guest chat/stream endpoints).
+    """
+    try:
+        return await get_current_user(token=token, provided_api_key=provided_api_key, db=db)
+    except HTTPException:
+        return GUEST_USER
 
 
 async def require_admin(

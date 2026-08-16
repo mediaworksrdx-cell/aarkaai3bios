@@ -32,8 +32,8 @@ services:
       - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
       - GOOGLE_CSE_API_KEY=${GOOGLE_CSE_API_KEY}
       - GOOGLE_CSE_ID=${GOOGLE_CSE_ID}
-    ports:
-      - "5000:5000"
+    expose:
+      - "5000"
     depends_on:
       - redis
     networks:
@@ -51,8 +51,8 @@ services:
     container_name: aarkaai-redis-prod
     restart: always
     command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     volumes:
       - redis-data:/data
     networks:
@@ -77,8 +77,8 @@ services:
     restart: always
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_TOKEN}
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     deploy:
       resources:
         reservations:
@@ -103,8 +103,8 @@ services:
     restart: always
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HUGGINGFACE_TOKEN}
-    ports:
-      - "8001:8001"
+    expose:
+      - "8001"
     deploy:
       resources:
         reservations:
@@ -126,8 +126,8 @@ services:
         GPU_MEMORY_UTILIZATION: "0.85"
     container_name: aarkaai-vision-prod
     restart: always
-    ports:
-      - "8002:8002"
+    expose:
+      - "8002"
     deploy:
       resources:
         reservations:

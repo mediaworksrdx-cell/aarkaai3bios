@@ -42,14 +42,16 @@ class ChatViewModel: ObservableObject {
     
     init(appSession: AppSession) {
         self.appSession = appSession
-        self.activeConversationId = conversations[0].id
+        let initial = Conversation()
+        self.conversations = [initial]
+        self.activeConversationId = initial.id
         if let token = appSession.currentUserToken {
             self.token = token
         }
     }
     
     var activeConversation: Conversation {
-        conversations.first(where: { $0.id == activeConversationId }) ?? conversations[0]
+        conversations.first(where: { $0.id == activeConversationId }) ?? conversations.first ?? Conversation()
     }
     
     func selectConversation(_ id: UUID) {
