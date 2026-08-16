@@ -264,8 +264,8 @@ async def get_current_user(
 
 
 async def get_optional_user(
+    request: Request,
     token: Optional[str] = Depends(oauth2_scheme),
-    provided_api_key: Optional[str] = Depends(api_key_header),
     db: Session = Depends(get_session),
 ) -> UserAccount:
     """
@@ -273,7 +273,7 @@ async def get_optional_user(
     otherwise gracefully falls back to GUEST_USER (for public guest chat/stream endpoints).
     """
     try:
-        return await get_current_user(token=token, provided_api_key=provided_api_key, db=db)
+        return await get_current_user(request=request, token=token, db=db)
     except HTTPException:
         return GUEST_USER
 
