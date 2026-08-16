@@ -542,6 +542,21 @@ def logout_endpoint(req: LogoutRequest):
 
 # ─── GitHub OAuth ────────────────────────────────────────────────────────────
 
+def _get_github_redirect_uri(request: Request) -> str:
+    """Construct redirect_uri matching GitHub OAuth App settings."""
+    import os
+    if os.getenv("GITHUB_REDIRECT_URI"):
+        return os.environ["GITHUB_REDIRECT_URI"]
+
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "aarka-ai.com"
+    clean_host = forwarded_host.split(":")[0]
+
+    if "synthetixanalytics.com" in clean_host:
+        return "https://synthetixanalytics.com/aarkaai/oauthcallback"
+    else:
+        return "https://aarka-ai.com/auth/github/callback"
+
+
 @app.get("/auth/github/login", tags=["auth"])
 def github_login(request: Request):
     """Redirect to GitHub OAuth screen with CSRF state parameter."""
@@ -550,17 +565,22 @@ def github_login(request: Request):
     if not GITHUB_CLIENT_ID:
         raise HTTPException(status_code=500, detail="GitHub Client ID is not configured.")
     state = secrets.token_urlsafe(32)
-    # Store state in a short-lived cookie for validation in callback
-    redirect_uri = "https://github.com/login/oauth/authorize"
+    redirect_uri = _get_github_redirect_uri(request)
     scope = "user:email read:user"
-    response = fastapi.responses.RedirectResponse(
-        url=f"{redirect_uri}?client_id={GITHUB_CLIENT_ID}&scope={scope}&state={state}"
+    github_auth_url = (
+        f"https://github.com/login/oauth/authorize"
+        f"?client_id={GITHUB_CLIENT_ID}"
+        f"&redirect_uri={redirect_uri}"
+        f"&scope={scope}"
+        f"&state={state}"
     )
+    response = fastapi.responses.RedirectResponse(url=github_auth_url)
     response.set_cookie(
         key="oauth_state", value=state, max_age=600, httponly=True,
-        samesite="lax", secure=True,
+        samesite="lax", secure=True, path="/"
     )
     return response
+
 
 @app.get("/auth/github/callback", tags=["auth"])
 async def github_callback(code: str, state: str, request: Request):
@@ -579,13 +599,16 @@ async def github_callback(code: str, state: str, request: Request):
     if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
         raise HTTPException(status_code=500, detail="GitHub OAuth credentials not configured.")
 
+    redirect_uri = _get_github_redirect_uri(request)
+
     async with httpx.AsyncClient(timeout=10.0) as client:
         token_resp = await client.post(
             "https://github.com/login/oauth/access_token",
             data={
                 "client_id": GITHUB_CLIENT_ID,
                 "client_secret": GITHUB_CLIENT_SECRET,
-                "code": code
+                "code": code,
+                "redirect_uri": redirect_uri
             },
             headers={"Accept": "application/json"}
         )
@@ -634,14 +657,23 @@ async def github_callback(code: str, state: str, request: Request):
             jwt_token = create_access_token(data={"sub": user_id})
             cookie_max_age = ACCESS_TOKEN_EXPIRE_MINUTES * 60
 
+            host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "aarka-ai.com"
+            scheme = request.headers.get("x-forwarded-proto", "https")
+            if "aarka-ai.com" in host:
+                target_url = f"{scheme}://{host}/?auth=success&token={jwt_token}&name={name}&email={email}"
+            elif "synthetixanalytics.com" in host:
+                target_url = f"{scheme}://{host}/aarkaai?auth=success&token={jwt_token}&name={name}&email={email}"
+            else:
+                target_url = f"{OAUTH_REDIRECT_BASE_URL}/?auth=success&token={jwt_token}&name={name}&email={email}"
+
             user_agent = request.headers.get("user-agent", "").lower()
             if "android" in user_agent or "okhttp" in user_agent or "mobile" in user_agent:
                 response = fastapi.responses.RedirectResponse(
-                    url=f"aarkaai://auth-callback?auth=success&user_id={user_id}&name={name}"
+                    url=f"aarkaai://auth-callback?auth=success&user_id={user_id}&name={name}&token={jwt_token}"
                 )
             else:
                 response = fastapi.responses.RedirectResponse(
-                    url=f"{OAUTH_REDIRECT_BASE_URL}/aarkaai?auth=success&name={name}"
+                    url=target_url
                 )
             response.set_cookie(
                 key="aarkaai_token", value=jwt_token,
@@ -670,14 +702,23 @@ async def github_callback(code: str, state: str, request: Request):
             jwt_token = create_access_token(data={"sub": user_id})
             cookie_max_age = ACCESS_TOKEN_EXPIRE_MINUTES * 60
 
+            host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "aarka-ai.com"
+            scheme = request.headers.get("x-forwarded-proto", "https")
+            if "aarka-ai.com" in host:
+                target_url = f"{scheme}://{host}/?auth=success&token={jwt_token}&name={name}&email={email}"
+            elif "synthetixanalytics.com" in host:
+                target_url = f"{scheme}://{host}/aarkaai?auth=success&token={jwt_token}&name={name}&email={email}"
+            else:
+                target_url = f"{OAUTH_REDIRECT_BASE_URL}/?auth=success&token={jwt_token}&name={name}&email={email}"
+
             user_agent = request.headers.get("user-agent", "").lower()
             if "android" in user_agent or "okhttp" in user_agent or "mobile" in user_agent:
                 response = fastapi.responses.RedirectResponse(
-                    url=f"aarkaai://auth-callback?auth=success&user_id={user_id}&name={name}"
+                    url=f"aarkaai://auth-callback?auth=success&user_id={user_id}&name={name}&token={jwt_token}"
                 )
             else:
                 response = fastapi.responses.RedirectResponse(
-                    url=f"{OAUTH_REDIRECT_BASE_URL}/aarkaai?auth=success&name={name}"
+                    url=target_url
                 )
             response.set_cookie(
                 key="aarkaai_token", value=jwt_token,
@@ -692,27 +733,27 @@ async def github_callback(code: str, state: str, request: Request):
 # ─── Google OAuth ────────────────────────────────────────────────────────────
 
 def _get_google_redirect_uri(request: Request) -> str:
-    """Construct redirect_uri for Google OAuth."""
-    host = request.headers.get("host", "synthetixanalytics.com")
-    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-    return f"{scheme}://{host}/auth/google/callback"
+    """Construct redirect_uri matching Google Cloud Console authorized URIs."""
+    import os
+    if os.getenv("GOOGLE_REDIRECT_URI"):
+        return os.environ["GOOGLE_REDIRECT_URI"]
+
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "aarka-ai.com"
+    clean_host = forwarded_host.split(":")[0]
+
+    if "synthetixanalytics.com" in clean_host:
+        return "https://synthetixanalytics.com/aarkaai/oauthcallback"
+    else:
+        return "https://aarka-ai.com/auth/google/callback"
 
 
 @app.get("/auth/google/login", tags=["auth"])
 def google_login(request: Request):
-    """Redirect to Google OAuth 2.0 consent screen with PKCE."""
+    """Redirect to Google OAuth 2.0 consent screen."""
     import secrets
-    import hashlib
-    import base64
     from config import GOOGLE_CLIENT_ID
     if not GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=500, detail="Google Client ID is not configured.")
-
-    # Generate PKCE code_verifier and code_challenge
-    code_verifier = secrets.token_urlsafe(64)
-    code_challenge = base64.urlsafe_b64encode(
-        hashlib.sha256(code_verifier.encode("ascii")).digest()
-    ).rstrip(b"=").decode("ascii")
 
     state = secrets.token_urlsafe(32)
     redirect_uri = _get_google_redirect_uri(request)
@@ -726,22 +767,25 @@ def google_login(request: Request):
         "&access_type=offline"
         "&prompt=consent"
         f"&state={state}"
-        f"&code_challenge={code_challenge}"
-        "&code_challenge_method=S256"
     )
     response = fastapi.responses.RedirectResponse(url=google_auth_url)
     response.set_cookie(
-        key="oauth_state", value=state, max_age=600, httponly=True,
-        samesite="lax", secure=True,
-    )
-    response.set_cookie(
-        key="pkce_verifier", value=code_verifier, max_age=600, httponly=True,
-        samesite="lax", secure=True,
+        key="oauth_state",
+        value=state,
+        max_age=600,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/"
     )
     return response
 
 
+
+
+
 @app.get("/auth/google/callback", tags=["auth"])
+@app.get("/aarkaai/oauthcallback", tags=["auth"])
 async def google_callback(code: str, state: str, request: Request):
     """Exchange OAuth code for Google user profile with PKCE verification."""
     import httpx
@@ -765,16 +809,19 @@ async def google_callback(code: str, state: str, request: Request):
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         # 1. Exchange code for access token
+        token_payload = {
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+        }
+        if code_verifier:
+            token_payload["code_verifier"] = code_verifier
+
         token_resp = await client.post(
             "https://oauth2.googleapis.com/token",
-            data={
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
-                "code": code,
-                "grant_type": "authorization_code",
-                "redirect_uri": redirect_uri,
-                "code_verifier": code_verifier,
-            },
+            data=token_payload,
             headers={"Content-Type": "application/x-www-form-urlencoded"}
         )
         token_data = token_resp.json()
@@ -817,14 +864,23 @@ async def google_callback(code: str, state: str, request: Request):
             jwt_token = create_access_token(data={"sub": user.id})
             cookie_max_age = ACCESS_TOKEN_EXPIRE_MINUTES * 60
 
+            host = request.headers.get("host", "aarka-ai.com")
+            scheme = request.headers.get("x-forwarded-proto", "https")
+            if "aarka-ai.com" in host:
+                target_url = f"{scheme}://{host}/?auth=success&token={jwt_token}&name={name}&email={email}"
+            elif "synthetixanalytics.com" in host:
+                target_url = f"{scheme}://{host}/aarkaai?auth=success&name={name}"
+            else:
+                target_url = f"{OAUTH_REDIRECT_BASE_URL}/?auth=success&token={jwt_token}&name={name}&email={email}"
+
             user_agent = request.headers.get("user-agent", "").lower()
             if "android" in user_agent or "okhttp" in user_agent or "mobile" in user_agent:
                 response = fastapi.responses.RedirectResponse(
-                    url=f"aarkaai://auth-callback?auth=success&user_id={user.id}&name={name}"
+                    url=f"aarkaai://auth-callback?auth=success&user_id={user.id}&name={name}&token={jwt_token}"
                 )
             else:
                 response = fastapi.responses.RedirectResponse(
-                    url=f"{OAUTH_REDIRECT_BASE_URL}/aarkaai?auth=success&name={name}"
+                    url=target_url
                 )
             response.set_cookie(
                 key="aarkaai_token", value=jwt_token,
@@ -1110,12 +1166,12 @@ async def metrics(current_user=fastapi.Depends(modules.auth.require_admin)):
 def prompt(
     req: PromptRequest, 
     request: Request,
-    current_user = fastapi.Depends(modules.auth.get_current_user)
+    current_user = fastapi.Depends(modules.auth.get_optional_user)
 ):
     """
-    Main query endpoint. Requires JWT Bearer token in the header.
+    Main query endpoint. Supports optional JWT authentication / guest visitors.
 
-    Runs the full pipeline. The user_id is automatically attached from the token.
+    Runs the full pipeline. The user_id is automatically attached from the token or guest identity.
     """
     from pipeline import process_query
 
@@ -1142,7 +1198,7 @@ def prompt(
 async def prompt_stream(
     req: PromptRequest, 
     request: Request,
-    current_user = fastapi.Depends(modules.auth.get_current_user)
+    current_user = fastapi.Depends(modules.auth.get_optional_user)
 ):
     """
     Streaming query endpoint. Returns Server-Sent Events (SSE).
@@ -1159,7 +1215,7 @@ async def prompt_stream(
                 yield f"data: {json.dumps(chunk)}\n\n"
         except Exception as exc:
             logger.error("Streaming error: %s", exc, exc_info=True)
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'detail': 'Inference service encountered a temporary error. Please retry.'})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

@@ -589,54 +589,55 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
     if stop:
         stop_tokens.extend(stop)
 
-    stream = model_instance(
-        prompt,
-        max_tokens=max_new_tokens,
-        temperature=temperature,
-        top_p=0.9,
-        repeat_penalty=1.0 if temperature < 0.1 else 1.15,
-        stop=stop_tokens,
-        stream=True
-    )
-    generated_text = ""
-    stripped_header = False
+    with _model_lock:
+        stream = model_instance(
+            prompt,
+            max_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=0.9,
+            repeat_penalty=1.0 if temperature < 0.1 else 1.15,
+            stop=stop_tokens,
+            stream=True
+        )
+        generated_text = ""
+        stripped_header = False
 
-    # Keywords that indicate code/architecture is requested
-    code_keywords = [
-        "code", "script", "program", "function", "write code", "python",
-        "javascript", "implement", "fastapi", "design", "system", "api",
-        "architecture", "backend", "service", "build", "create", "app",
-        "server", "oms", "database", "class", "structure"
-    ]
-    prompt_requests_code = any(w in prompt.lower() for w in code_keywords)
+        # Keywords that indicate code/architecture is requested
+        code_keywords = [
+            "code", "script", "program", "function", "write code", "python",
+            "javascript", "implement", "fastapi", "design", "system", "api",
+            "architecture", "backend", "service", "build", "create", "app",
+            "server", "oms", "database", "class", "structure"
+        ]
+        prompt_requests_code = any(w in prompt.lower() for w in code_keywords)
 
-    for chunk in stream:
-        token = chunk["choices"][0]["text"]
-        if token:
-            generated_text += token
+        for chunk in stream:
+            token = chunk["choices"][0]["text"]
+            if token:
+                generated_text += token
 
-            # Anti-hallucination guard: Stop streaming if model begins unrequested code blocks
-            if "```" in generated_text.lower() and not prompt_requests_code:
-                logger.warning("Unrequested code block detected in stream; terminating generation.")
-                break
+                # Anti-hallucination guard: Stop streaming if model begins unrequested code blocks
+                if "```" in generated_text.lower() and not prompt_requests_code:
+                    logger.warning("Unrequested code block detected in stream; terminating generation.")
+                    break
 
-            if "[Finance Data]" in generated_text or "Target (TGT)" in generated_text:
-                logger.warning("Unrequested financial ticker drift detected in stream; terminating generation.")
-                break
+                if "[Finance Data]" in generated_text or "Target (TGT)" in generated_text:
+                    logger.warning("Unrequested financial ticker drift detected in stream; terminating generation.")
+                    break
 
-            # Strip leading "Thought:" / "Action Input:" header token at beginning of output without blocking subsequent tokens
-            if not stripped_header and len(generated_text) <= 30:
-                low_token = token.lower().strip()
-                if low_token in ["thought:", "thought", "action input:", "action input"]:
-                    logger.info("Stripping leading ReAct scaffolding token: %r", token)
-                    stripped_header = True
-                    continue
+                # Strip leading "Thought:" / "Action Input:" header token at beginning of output without blocking subsequent tokens
+                if not stripped_header and len(generated_text) <= 30:
+                    low_token = token.lower().strip()
+                    if low_token in ["thought:", "thought", "action input:", "action input"]:
+                        logger.info("Stripping leading ReAct scaffolding token: %r", token)
+                        stripped_header = True
+                        continue
 
-            if _has_repetition(generated_text):
-                logger.warning("Repetition loop detected; terminating stream early to protect response.")
-                break
+                if _has_repetition(generated_text):
+                    logger.warning("Repetition loop detected; terminating stream early to protect response.")
+                    break
 
-            yield token
+                yield token
 
 
 
@@ -664,53 +665,52 @@ def generate_raw(prompt, max_new_tokens=300, stop=None):
     prompt_tokens = model_instance.tokenize(prompt.encode("utf-8"), special=True)
     prompt_len = len(prompt_tokens)
     
-    # Context limit is 16384. Set max_tokens to fill remaining context window completely (leaving a small 100-token safety buffer)
-    max_tokens = 16384 - prompt_len - 100
-    if max_tokens <= 0:
-        max_tokens = 1
+    # Dynamic context limit calculation
+    ctx_limit = getattr(model_instance, "n_ctx", lambda: 8192)() if callable(getattr(model_instance, "n_ctx", None)) else 8192
+    max_tokens = max(1, min(max_new_tokens or 300, ctx_limit - prompt_len - 100))
         
-    stream = model_instance(
-        prompt,
-        max_tokens=max_tokens,
-        temperature=0.2,
-        top_p=0.9,
-        repeat_penalty=1.1,
-        stop=native_stop,
-        stream=True
-    )
+    with _model_lock:
+        stream = model_instance(
+            prompt,
+            max_tokens=max_tokens,
+            temperature=0.2,
+            top_p=0.9,
+            repeat_penalty=1.1,
+            stop=native_stop,
+            stream=True
+        )
 
-    
-    generated_text = ""
-    for chunk in stream:
-        token = chunk["choices"][0]["text"]
-        if token:
-            generated_text += token
-            # Check for custom stop sequences streamingly
-            for stop_word in stop:
-                if stop_word in generated_text:
-                    idx = generated_text.index(stop_word)
-                    return generated_text[:idx].strip()
-            
-            # Auto-stop after Action Input line is completed to prevent hallucination
-            if "action input:" in generated_text.lower():
-                ai_idx = generated_text.lower().index("action input:")
-                json_part = generated_text[ai_idx:]
-                import json
-                start_idx = json_part.find("{")
-                if start_idx != -1:
-                    # Search backwards for a valid JSON object
-                    for i in range(len(json_part) - 1, start_idx, -1):
-                        if json_part[i] == "}":
-                            try:
-                                json.loads(json_part[start_idx:i+1])
-                                # If it successfully parses as valid JSON, and a newline exists after the object
-                                if "\n" in json_part[i+1:]:
-                                    return generated_text[:ai_idx + i + 1].strip()
-                            except json.JSONDecodeError:
-                                pass
+        generated_text = ""
+        for chunk in stream:
+            token = chunk["choices"][0]["text"]
+            if token:
+                generated_text += token
+                # Check for custom stop sequences streamingly
+                for stop_word in stop:
+                    if stop_word in generated_text:
+                        idx = generated_text.index(stop_word)
+                        return generated_text[:idx].strip()
+                
+                # Auto-stop after Action Input line is completed to prevent hallucination
+                if "action input:" in generated_text.lower():
+                    ai_idx = generated_text.lower().index("action input:")
+                    json_part = generated_text[ai_idx:]
+                    import json
+                    start_idx = json_part.find("{")
+                    if start_idx != -1:
+                        # Search backwards for a valid JSON object
+                        for i in range(len(json_part) - 1, start_idx, -1):
+                            if json_part[i] == "}":
+                                try:
+                                    json.loads(json_part[start_idx:i+1])
+                                    # If it successfully parses as valid JSON, and a newline exists after the object
+                                    if "\n" in json_part[i+1:]:
+                                        return generated_text[:ai_idx + i + 1].strip()
+                                except json.JSONDecodeError:
+                                    pass
 
-            if _has_repetition(generated_text):
-                break
+                if _has_repetition(generated_text):
+                    break
     result = generated_text.strip()
     if not result:
         logger.warning("generate_raw: model returned empty output — possible KV cache overflow (max_tokens=%d, prompt_len=%d). Returning stub.", max_tokens, prompt_len)
