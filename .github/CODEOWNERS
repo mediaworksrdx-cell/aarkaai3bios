@@ -1,0 +1,27 @@
+# iOS App
+/ios-app/ @mediaworksrdx-cell
+
+# Android App
+/android-app/ @mediaworksrdx-cell
+
+# Web Frontend
+/frontend/ @mediaworksrdx-cell
+/FinGenIQ*.tsx @mediaworksrdx-cell
+/FinGenIQ*.ts @mediaworksrdx-cell
+
+# Backend (Python)
+/main.py @mediaworksrdx-cell
+/pipeline.py @mediaworksrdx-cell
+/modules/ @mediaworksrdx-cell
+/middleware.py @mediaworksrdx-cell
+/config.py @mediaworksrdx-cell
+/schemas.py @mediaworksrdx-cell
+/database.py @mediaworksrdx-cell
+
+# CI/CD
+/.github/ @mediaworksrdx-cell
+
+# Infrastructure
+/Dockerfile* @mediaworksrdx-cell
+/docker-compose* @mediaworksrdx-cell
+/nginx*.conf @mediaworksrdx-cell

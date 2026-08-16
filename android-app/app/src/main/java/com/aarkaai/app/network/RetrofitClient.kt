@@ -22,7 +22,7 @@ object RetrofitClient {
             HttpLoggingInterceptor.Level.NONE
     }
 
-    private val okHttpClient = OkHttpClient.Builder()
+    val okHttpClient = OkHttpClient.Builder()
         .addInterceptor(loggingInterceptor)
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(180, TimeUnit.SECONDS)   // 3 min — LLM generation can be slow on CPU
