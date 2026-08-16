@@ -45,3 +45,23 @@ test_sd.py
 *.zip
 load_results_*.json
 load_test_results.json
+
+# Android signing credentials (NEVER commit these)
+android-app/release.jks
+android-app/gradle.properties
+android-app/local.properties
+*.jks
+*.keystore
+
+# Service account keys
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!*/Contents.json
+!frontend/**/*.json
+
+# Environment files with secrets
+.env
+.env.local
+.env.production

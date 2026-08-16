@@ -1,0 +1,18 @@
+# ─── Gradle Build Settings ───
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+android.useAndroidX=true
+kotlin.code.style=official
+android.nonTransitiveRClass=true
+
+# ─── Signing ───
+# For local development: fill in your values
+# For CI/CD: these are injected via GitHub Secrets (see GITHUB_SECRETS_SETUP.md)
+RELEASE_STORE_FILE=../release.jks
+RELEASE_STORE_PASSWORD=${RELEASE_STORE_PASSWORD}
+RELEASE_KEY_ALIAS=${RELEASE_KEY_ALIAS}
+RELEASE_KEY_PASSWORD=${RELEASE_KEY_PASSWORD}
+
+# ─── Backend URL ───
+# Emulator:   http://10.0.2.2:5000/
+# Production: http://43.204.153.162:5000/
+AARKAAI_BASE_URL=http://10.0.2.2:5000/

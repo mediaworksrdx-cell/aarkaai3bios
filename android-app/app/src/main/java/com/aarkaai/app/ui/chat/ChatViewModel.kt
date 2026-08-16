@@ -122,20 +122,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 var tokenHeader = if (bearerToken.startsWith("Bearer ")) bearerToken else "Bearer $bearerToken"
                 val currentSessionId = _uiState.value.activeConversationId
-                val response = try {
-                    RetrofitClient.api.sendPrompt(
-                        token = tokenHeader,
-                        request = PromptRequest(query = query, session_id = currentSessionId)
-                    )
-                } catch (e: retrofit2.HttpException) {
-                    if (e.code() == 401 || e.code() == 403) {
+                try {
+                    streamOrFallback(tokenHeader, query, currentSessionId)
+                } catch (e: Exception) {
+                    val isAuthError = (e is retrofit2.HttpException && (e.code() == 401 || e.code() == 403)) || 
+                                      (e is com.aarkaai.app.network.SseAuthException)
+                    if (isAuthError) {
                         val newToken = refreshGuestToken()
                         if (newToken != null) {
                             tokenHeader = if (newToken.startsWith("Bearer ")) newToken else "Bearer $newToken"
-                            RetrofitClient.api.sendPrompt(
-                                token = tokenHeader,
-                                request = PromptRequest(query = query, session_id = currentSessionId)
-                            )
+                            streamOrFallback(tokenHeader, query, currentSessionId)
                         } else {
                             throw e
                         }
@@ -144,15 +140,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                replaceLoading(
-                    ChatMessage(
-                        text = response.response,
-                        isUser = false,
-                        processingTime = response.processing_time,
-                        intent = response.intent,
-                        sources = response.sources
-                    )
-                )
+
             } catch (e: Exception) {
                 replaceLoading(
                     ChatMessage(
@@ -257,6 +245,70 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     val loadingIdx = updated.indexOfLast { it.isLoading }
                     if (loadingIdx >= 0) updated[loadingIdx] = replacement
                     else updated.add(replacement)
+                    conv.copy(messages = updated)
+                } else conv
+            }
+            state.copy(conversations = convs)
+        }
+    }
+
+    private suspend fun streamOrFallback(tokenHeader: String, query: String, currentSessionId: String) {
+        try {
+            var hasReceivedTokens = false
+            com.aarkaai.app.network.SseClient.streamPrompt(tokenHeader, query, currentSessionId).collect { token ->
+                hasReceivedTokens = true
+                appendToLoading(token)
+            }
+            if (!hasReceivedTokens) {
+                throw Exception("Stream ended without tokens")
+            }
+            finishLoading()
+        } catch (e: com.aarkaai.app.network.SseAuthException) {
+            throw e
+        } catch (e: Exception) {
+            val response = RetrofitClient.api.sendPrompt(
+                token = tokenHeader,
+                request = PromptRequest(query = query, session_id = currentSessionId)
+            )
+            replaceLoading(
+                ChatMessage(
+                    text = response.response,
+                    isUser = false,
+                    processingTime = response.processing_time,
+                    intent = response.intent,
+                    sources = response.sources
+                )
+            )
+        }
+    }
+
+    private fun appendToLoading(textToAppend: String) {
+        _uiState.update { state ->
+            val convs = state.conversations.map { conv ->
+                if (conv.id == state.activeConversationId) {
+                    val updated = conv.messages.toMutableList()
+                    val loadingIdx = updated.indexOfLast { it.isLoading }
+                    if (loadingIdx >= 0) {
+                        val msg = updated[loadingIdx]
+                        updated[loadingIdx] = msg.copy(text = msg.text + textToAppend)
+                    }
+                    conv.copy(messages = updated)
+                } else conv
+            }
+            state.copy(conversations = convs)
+        }
+    }
+
+    private fun finishLoading() {
+        _uiState.update { state ->
+            val convs = state.conversations.map { conv ->
+                if (conv.id == state.activeConversationId) {
+                    val updated = conv.messages.toMutableList()
+                    val loadingIdx = updated.indexOfLast { it.isLoading }
+                    if (loadingIdx >= 0) {
+                        val msg = updated[loadingIdx]
+                        updated[loadingIdx] = msg.copy(isLoading = false)
+                    }
                     conv.copy(messages = updated)
                 } else conv
             }

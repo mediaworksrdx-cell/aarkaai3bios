@@ -1,0 +1,41 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    name: Build AARKAAI Android App
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+        working-directory: android-app
+
+      - name: Run tests
+        run: ./gradlew test
+        working-directory: android-app
+
+      - name: Assemble Debug APK
+        run: ./gradlew assembleDebug
+        working-directory: android-app
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: aarkaai-android-debug-apk
+          path: android-app/app/build/outputs/apk/debug/*.apk
