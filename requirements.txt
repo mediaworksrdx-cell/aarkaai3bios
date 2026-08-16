@@ -53,7 +53,7 @@ pillow==12.3.0
 
 # External AI APIs
 google-genai==2.14.0
-anthropic==0.120.2
+anthropic==0.121.0
 
 # HTTP
 httpx==0.28.1
