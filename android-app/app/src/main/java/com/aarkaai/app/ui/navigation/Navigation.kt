@@ -79,6 +79,7 @@ fun AarkaaiNavHost() {
             ChatScreen(
                 viewModel = chatViewModel,
                 onLogout = {
+                    chatViewModel.clearAllHistory()
                     authViewModel.logout()
                     navController.navigate(Routes.AUTH) {
                         popUpTo(0) { inclusive = true }

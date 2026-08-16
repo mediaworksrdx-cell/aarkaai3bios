@@ -92,6 +92,7 @@ struct ChatView: View {
                             withAnimation { isSidebarOpen = false }
                         },
                         onLogout: {
+                            viewModel.clearAllHistory()
                             appSession.logout()
                         }
                     )

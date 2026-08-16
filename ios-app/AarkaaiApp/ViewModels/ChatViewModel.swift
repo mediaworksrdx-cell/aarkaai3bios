@@ -64,6 +64,14 @@ class ChatViewModel: ObservableObject {
         activeConversationId = newConv.id
     }
     
+    func clearAllHistory() {
+        let initial = Conversation()
+        self.conversations = [initial]
+        self.activeConversationId = initial.id
+        self.token = ""
+        self.isTyping = false
+    }
+    
     func sendMessage(_ query: String) async {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         
