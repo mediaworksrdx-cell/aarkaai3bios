@@ -98,27 +98,33 @@ export async function* streamChat(
   }
 }
 
+export function getAuthHeaders(): Record<string, string> {
+  const token = getStoredToken();
+  if (token) {
+    return { Authorization: `Bearer ${token}` };
+  }
+  return {};
+}
+
 /**
  * Submit RLHF Feedback (Thumbs Up / Down)
  */
 export async function submitFeedbackApi(
   rating: number,
-  query: string,
-  response: string,
-  modelName: string = 'aarkaa-2.0',
-  sessionId?: string,
-  feedbackText?: string,
-  category?: string
+  conversationId?: string | null,
+  correction?: string,
+  query?: string,
+  response?: string,
+  modelName: string = 'aarkaa-2.0'
 ): Promise<{ status: string; rlhf_id?: string }> {
   try {
     const payload = {
       rating,
-      query,
-      response,
+      conversation_id: conversationId || null,
+      correction: correction || '',
+      query: query || '',
+      response: response || '',
       model_name: modelName,
-      session_id: sessionId,
-      feedback_text: feedbackText,
-      category: category,
       timestamp: Date.now(),
     };
 

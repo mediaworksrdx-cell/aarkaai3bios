@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { ChatProvider, generateId } from '@/context/ChatContext';
+import { ChatProvider, useChatContext, generateId } from '@/context/ChatContext';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { Sidebar } from '@/components/sidebar/Sidebar';
 import { LoginModal } from '@/components/auth/LoginModal';

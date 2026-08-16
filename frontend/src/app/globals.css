@@ -1,0 +1,201 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* === Default: Dark Theme (applied to :root so it's always the base) === */
+:root, .dark, [data-theme="dark"], html.dark, body.dark {
+  --bg-primary: #181715;
+  --bg-secondary: #22201D;
+  --bg-tertiary: #2C2A26;
+  --bg-input: #24221F;
+  --bg-hover: #32302B;
+  --bg-glass: rgba(24, 23, 21, 0.85);
+
+  --accent-primary: #D97757;
+  --accent-hover: #E58A6C;
+  --accent-muted: rgba(217, 119, 87, 0.15);
+
+  --text-primary: #ECE6DC;
+  --text-secondary: #A09A8E;
+  --text-tertiary: #706B62;
+
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-accent: rgba(217, 119, 87, 0.4);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-float: 0 20px 48px rgba(0, 0, 0, 0.6);
+
+  --code-bg: #141312;
+  --code-border: rgba(255, 255, 255, 0.08);
+}
+
+/* === Light Theme (only when explicitly activated) === */
+.light, [data-theme="light"], html.light, body.light {
+  --bg-primary: #FAF8F5;
+  --bg-secondary: #FFFFFF;
+  --bg-tertiary: #F1EDE5;
+  --bg-input: #F6F3EB;
+  --bg-hover: #ECE6DA;
+  --bg-glass: rgba(250, 248, 245, 0.85);
+
+  --accent-primary: #C15F3D;
+  --accent-hover: #B05333;
+  --accent-muted: rgba(193, 95, 61, 0.12);
+
+  --text-primary: #1F1E1B;
+  --text-secondary: #635F55;
+  --text-tertiary: #8E897E;
+
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.15);
+  --border-accent: rgba(193, 95, 61, 0.35);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.08);
+  --shadow-float: 0 20px 48px rgba(0, 0, 0, 0.1);
+
+  --code-bg: #F0ECE3;
+  --code-border: rgba(0, 0, 0, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* Prose Typography & Markdown Styling */
+.prose {
+  color: var(--text-primary);
+  max-width: 100%;
+  font-size: 0.9375rem;
+  line-height: 1.68;
+}
+
+.prose p {
+  margin-top: 0.65em;
+  margin-bottom: 0.65em;
+}
+
+.prose p:first-child {
+  margin-top: 0;
+}
+
+.prose p:last-child {
+  margin-bottom: 0;
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  color: var(--text-primary);
+  font-family: var(--font-display, var(--font-sans, system-ui, sans-serif));
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-top: 1.25em;
+  margin-bottom: 0.5em;
+  line-height: 1.3;
+}
+
+.prose h1 { font-size: 1.5rem; font-weight: 800; }
+.prose h2 { font-size: 1.25rem; font-weight: 700; }
+.prose h3 { font-size: 1.1rem; font-weight: 600; }
+
+.prose ul, .prose ol {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+  padding-left: 1.4em;
+}
+
+.prose li {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+.prose blockquote {
+  border-left: 3px solid var(--accent-primary);
+  padding-left: 1rem;
+  margin: 1rem 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.875rem;
+}
+
+.prose th {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+}
+
+.prose td {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+}
+
+.prose tr:nth-child(even) td {
+  background-color: var(--bg-secondary);
+}
+
+.prose a {
+  color: var(--accent-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.prose a:hover {
+  color: var(--accent-hover);
+}
+
+.prose hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5rem 0;
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.97); }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
