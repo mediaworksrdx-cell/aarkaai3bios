@@ -100,6 +100,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(activeConversationId = id, isSidebarOpen = false) }
     }
 
+    fun clearAllHistory() {
+        val initial = Conversation()
+        bearerToken = ""
+        _uiState.update {
+            ChatUiState(
+                conversations = listOf(initial),
+                activeConversationId = initial.id,
+                isSidebarOpen = false
+            )
+        }
+    }
+
     fun sendMessage(query: String) {
         if (query.isBlank()) return
 
