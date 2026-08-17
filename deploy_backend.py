@@ -85,6 +85,7 @@ def restart():
     print("\n[3/3] Restarting FastAPI server...")
     
     # Kill existing uvicorn
+    ssh("pkill -9 -f 'uvicorn.*5000' 2>/dev/null || true")
     ssh("fuser -k 5000/tcp 2>/dev/null || true")
     time.sleep(1)
     
