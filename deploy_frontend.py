@@ -120,8 +120,8 @@ def restart():
     # Start Next.js
     start_cmd = (
         f"cd {REMOTE_FRONTEND} && "
-        f"export PATH={NODE_BIN}:$PATH && "
-        f"nohup npx next start -p 3000 > /home/sathishbadri2015/nextjs_service.log 2>&1 &"
+        f"export PATH={NODE_BIN}:/usr/bin:/bin:$PATH && "
+        f"setsid npx next start -p 3000 > /home/sathishbadri2015/nextjs_service.log 2>&1 &"
     )
     ssh(start_cmd)
     time.sleep(4)

@@ -96,7 +96,7 @@ def restart():
     # Start FastAPI
     start_cmd = (
         f"cd {REMOTE_BACKEND} && "
-        f"nohup {PYTHON_BIN} -m uvicorn main:app --host 0.0.0.0 --port 5000 "
+        f"setsid {PYTHON_BIN} -m uvicorn main:app --host 0.0.0.0 --port 5000 "
         f"> {REMOTE_BACKEND}/fastapi_service.log 2>&1 &"
     )
     ssh(start_cmd)
