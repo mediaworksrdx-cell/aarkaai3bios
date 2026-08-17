@@ -49,12 +49,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${display.variable} ${inter.variable} ${mono.variable}`} suppressHydrationWarning>
-      <body className="font-sans bg-[var(--bg-primary)] text-[var(--text-primary)] antialiased min-h-screen overflow-hidden transition-colors duration-200" suppressHydrationWarning>
-        {/* Inline script to prevent flash of wrong theme (FOWT) — runs before React hydrates */}
+    <html lang="en" className={`light ${display.variable} ${inter.variable} ${mono.variable}`} data-theme="light" suppressHydrationWarning>
+      <body className="font-sans light bg-[var(--bg-primary)] text-[var(--text-primary)] antialiased min-h-screen overflow-hidden" data-theme="light" suppressHydrationWarning>
+        {/* Pre-hydration script to permanently enforce light theme and reset any old dark cache */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('aarka-theme')||localStorage.getItem('aarkaa-theme')||'dark';var d=document.documentElement;var b=document.body;d.classList.remove('dark','light');d.classList.add(t);d.setAttribute('data-theme',t);if(b){b.classList.remove('dark','light');b.classList.add(t);b.setAttribute('data-theme',t)}}catch(e){}})();`,
+            __html: `(function(){try{localStorage.setItem('aarka-theme','light');localStorage.setItem('aarkaa-theme','light');var d=document.documentElement;var b=document.body;d.classList.remove('dark');d.classList.add('light');d.setAttribute('data-theme','light');if(b){b.classList.remove('dark');b.classList.add('light');b.setAttribute('data-theme','light')}}catch(e){}})();`,
           }}
         />
         <ThemeProvider>

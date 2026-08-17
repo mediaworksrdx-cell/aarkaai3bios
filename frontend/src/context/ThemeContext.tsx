@@ -35,52 +35,36 @@ function applyThemeToDOM(t: Theme) {
 }
 
 /**
- * Read the stored theme from localStorage, defaulting to 'dark'.
+ * Read the stored theme, always returning 'light'.
  */
 function getStoredTheme(): Theme {
-  if (typeof window === 'undefined') return 'dark';
-  try {
-    const saved = localStorage.getItem('aarka-theme') || localStorage.getItem('aarkaa-theme');
-    if (saved === 'light' || saved === 'dark') return saved;
-  } catch {}
-  return 'dark';
+  return 'light';
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => getStoredTheme());
-  const [mounted, setMounted] = useState(false);
+  const [theme, setThemeState] = useState<Theme>('light');
 
-  // Apply theme immediately on first client render
+  // Apply light theme immediately on first client render
   useEffect(() => {
-    const initial = getStoredTheme();
-    setThemeState(initial);
-    applyThemeToDOM(initial);
-    setMounted(true);
+    applyThemeToDOM('light');
+    try {
+      localStorage.setItem('aarka-theme', 'light');
+      localStorage.setItem('aarkaa-theme', 'light');
+    } catch {}
   }, []);
 
   const setTheme = useCallback((t: Theme) => {
-    setThemeState(t);
-    try {
-      localStorage.setItem('aarka-theme', t);
-      localStorage.setItem('aarkaa-theme', t);
-    } catch {}
-    applyThemeToDOM(t);
+    setThemeState('light');
+    applyThemeToDOM('light');
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setThemeState(prev => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      try {
-        localStorage.setItem('aarka-theme', next);
-        localStorage.setItem('aarkaa-theme', next);
-      } catch {}
-      applyThemeToDOM(next);
-      return next;
-    });
+    setThemeState('light');
+    applyThemeToDOM('light');
   }, []);
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>
+    <ThemeContext.Provider value={{ theme: 'light', toggleTheme, setTheme }}>
       {children}
     </ThemeContext.Provider>
   );
@@ -90,7 +74,7 @@ export function useTheme() {
   const context = useContext(ThemeContext);
   if (!context) {
     return {
-      theme: 'dark' as Theme,
+      theme: 'light' as Theme,
       toggleTheme: () => {},
       setTheme: () => {},
     };
