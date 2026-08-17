@@ -21,7 +21,7 @@ USER = "sathishbadri2015"
 HOST = "136.85.114.150"
 SSH_OPTS = ["-o", "StrictHostKeyChecking=no", "-i", KEY]
 
-LOCAL_FRONTEND = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+LOCAL_FRONTEND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
 REMOTE_FRONTEND = "/home/sathishbadri2015/aarka-frontend"
 NODE_BIN = "/home/sathishbadri2015/.nvm/versions/node/v20.20.2/bin"
 
@@ -35,40 +35,35 @@ def ssh(cmd: str, timeout: int = 300) -> str:
 
 
 def rsync_upload():
-    """Rsync local frontend source to server, excluding node_modules and .next"""
+    """Upload frontend source files to server using SCP."""
     print("\n[1/4] Syncing frontend source files to server...")
-    rsync_cmd = [
-        "rsync", "-avz", "--delete",
-        "--exclude", "node_modules",
-        "--exclude", ".next",
-        "--exclude", ".env.local",   # Preserve server's env
-        "-e", f"ssh {' '.join(SSH_OPTS)}",
-        f"{LOCAL_FRONTEND}/",
-        f"{USER}@{HOST}:{REMOTE_FRONTEND}/"
-    ]
-    res = subprocess.run(rsync_cmd, capture_output=True, text=True, errors="ignore", timeout=120)
-    if res.returncode != 0:
-        print(f"  [ERROR] rsync failed: {res.stderr[:500]}")
-        # Fallback: use scp for critical files
-        print("  [FALLBACK] Using SCP for critical theme files...")
-        critical_files = [
-            "src/app/globals.css",
-            "src/app/layout.tsx",
-            "src/context/ThemeContext.tsx",
-            "src/components/common/ThemeToggle.tsx",
-            "tailwind.config.ts",
-        ]
-        for f in critical_files:
-            local_path = os.path.join(LOCAL_FRONTEND, f)
-            remote_path = f"{REMOTE_FRONTEND}/{f}"
-            if os.path.exists(local_path):
-                scp_cmd = ["scp"] + SSH_OPTS + [local_path, f"{USER}@{HOST}:{remote_path}"]
-                subprocess.run(scp_cmd, capture_output=True, text=True)
-                print(f"    [OK] {f}")
-        return True
     
-    changed = [l for l in res.stdout.splitlines() if not l.startswith("sending") and not l.startswith("sent") and not l.startswith("total") and l.strip()]
-    print(f"  [OK] Synced {len(changed)} items")
+    # Sync directories and files under src/
+    sync_items = [
+        "src/app/globals.css",
+        "src/app/layout.tsx",
+        "src/app/page.tsx",
+        "src/context/ThemeContext.tsx",
+        "src/components/common/ThemeToggle.tsx",
+        "src/components/sidebar/Sidebar.tsx",
+        "src/components/chat/ChatContainer.tsx",
+        "src/components/chat/WelcomeScreen.tsx",
+        "src/components/settings/SettingsModal.tsx",
+        "tailwind.config.ts",
+        "package.json",
+    ]
+    
+    for item in sync_items:
+        local_path = os.path.join(LOCAL_FRONTEND, item)
+        remote_path = f"{REMOTE_FRONTEND}/{item}"
+        if os.path.exists(local_path):
+            scp_cmd = ["scp"] + SSH_OPTS + [local_path, f"{USER}@{HOST}:{remote_path}"]
+            res = subprocess.run(scp_cmd, capture_output=True, text=True, errors="ignore")
+            status = "[OK]" if res.returncode == 0 else "[FAIL]"
+            print(f"  {status} {item}")
+        else:
+            print(f"  [SKIP] {item}")
+    
     return True
 
 

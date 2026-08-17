@@ -2,44 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
-/* === Default: Dark Theme (applied to :root so it's always the base) === */
-:root, .dark, [data-theme="dark"], html.dark, body.dark {
-  --bg-primary: #181715;
-  --bg-secondary: #22201D;
-  --bg-tertiary: #2C2A26;
-  --bg-input: #24221F;
-  --bg-hover: #32302B;
-  --bg-glass: rgba(24, 23, 21, 0.85);
-
-  --accent-primary: #D97757;
-  --accent-hover: #E58A6C;
-  --accent-muted: rgba(217, 119, 87, 0.15);
-
-  --text-primary: #ECE6DC;
-  --text-secondary: #A09A8E;
-  --text-tertiary: #706B62;
-
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.16);
-  --border-accent: rgba(217, 119, 87, 0.4);
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
-  --shadow-float: 0 20px 48px rgba(0, 0, 0, 0.6);
-
-  --code-bg: #141312;
-  --code-border: rgba(255, 255, 255, 0.08);
-}
-
-/* === Light Theme (only when explicitly activated) === */
-.light, [data-theme="light"], html.light, body.light {
+/* === Default & Permanent Theme: Light Theme === */
+:root, .light, [data-theme="light"], html, body {
   --bg-primary: #FAF8F5;
   --bg-secondary: #FFFFFF;
   --bg-tertiary: #F1EDE5;
   --bg-input: #F6F3EB;
   --bg-hover: #ECE6DA;
-  --bg-glass: rgba(250, 248, 245, 0.85);
+  --bg-glass: rgba(250, 248, 245, 0.92);
 
   --accent-primary: #C15F3D;
   --accent-hover: #B05333;
