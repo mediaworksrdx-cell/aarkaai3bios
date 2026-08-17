@@ -103,21 +103,15 @@ def build():
 
 
 def restart():
-    """Kill old Next.js and start fresh"""
+    """Kill old Next.js and start fresh with clean user-level process management."""
     print("\n[4/4] Restarting Next.js server...")
     
-    # Kill all existing Next.js / node processes on port 3000
-    ssh("fuser -k 3000/tcp 2>/dev/null || true")
-    time.sleep(1)
+    # 1. Kill old Next.js processes cleanly
+    ssh("pkill -9 -f 'next-server' 2>/dev/null || true")
+    ssh("fuser -k -9 3000/tcp 2>/dev/null || true")
+    time.sleep(2)
     
-    # Double-check nothing is left
-    remaining = ssh("ss -tlpn | grep 3000")
-    if remaining:
-        print(f"  [WARN] Port 3000 still occupied: {remaining}")
-        ssh("fuser -k -9 3000/tcp 2>/dev/null || true")
-        time.sleep(2)
-    
-    # Start Next.js
+    # 2. Start Next.js with setsid
     start_cmd = (
         f"cd {REMOTE_FRONTEND} && "
         f"export PATH={NODE_BIN}:/usr/bin:/bin:$PATH && "
