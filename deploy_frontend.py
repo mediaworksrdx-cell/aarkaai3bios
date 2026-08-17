@@ -103,22 +103,21 @@ def build():
 
 
 def restart():
-    """Kill old Next.js and start fresh with clean user-level process management."""
+    """Kill old Next.js and start fresh with clean background runner."""
     print("\n[4/4] Restarting Next.js server...")
     
     # 1. Kill old Next.js processes cleanly
-    ssh("pkill -9 -f 'next-server' 2>/dev/null || true")
-    ssh("fuser -k -9 3000/tcp 2>/dev/null || true")
-    time.sleep(2)
+    ssh("pkill -9 -f 'next-server.*3000' 2>/dev/null; pkill -9 -f 'node.*next' 2>/dev/null; true")
+    time.sleep(1)
     
-    # 2. Start Next.js with setsid
+    # 2. Start Next.js in background subshell
     start_cmd = (
-        f"cd {REMOTE_FRONTEND} && "
+        f"bash -lc 'cd {REMOTE_FRONTEND} && "
         f"export PATH={NODE_BIN}:/usr/bin:/bin:$PATH && "
-        f"setsid npx next start -p 3000 > /home/sathishbadri2015/nextjs_service.log 2>&1 &"
+        f"(npx next start -p 3000 > /home/sathishbadri2015/nextjs_service.log 2>&1 &)'"
     )
     ssh(start_cmd)
-    time.sleep(4)
+    time.sleep(3)
     
     # Verify
     listener = ssh("ss -tlpn | grep 3000")
