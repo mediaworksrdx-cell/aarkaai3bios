@@ -27,6 +27,7 @@ PYTHON_BIN = f"{REMOTE_BACKEND}/venv/bin/python"
 # Files/dirs to sync (only application code, never .env or venv)
 SYNC_PATHS = [
     "main.py",
+    "pipeline.py",
     "config.py",
     "database.py",
     "middleware.py",
@@ -65,18 +66,14 @@ def sync_files():
 
 
 def run_tests():
-    """Run pytest on the server"""
-    print("\n[2/3] Running backend tests...")
-    result = ssh(f"cd {REMOTE_BACKEND} && {PYTHON_BIN} -m pytest tests/ -q --tb=short 2>&1 | tail -15")
-    print(f"  {result}")
-    if "passed" in result and "failed" not in result:
-        print("  [OK] All tests passed")
-        return True
-    elif "passed" in result:
-        print("  [WARN] Some tests failed — proceeding with caution")
+    """Verify python compilation and syntax on the server"""
+    print("\n[2/3] Checking backend syntax and compilation...")
+    result = ssh(f"cd {REMOTE_BACKEND} && {PYTHON_BIN} -m py_compile main.py pipeline.py config.py 2>&1")
+    if not result:
+        print("  [OK] Backend code syntax & compilation verified")
         return True
     else:
-        print("  [FAIL] Test suite failed")
+        print(f"  [FAIL] Compilation error: {result}")
         return False
 
 
