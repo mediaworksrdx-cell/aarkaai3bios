@@ -379,29 +379,17 @@ class CognitiveOrchestrator:
                 yield {"type": "status", "status": f"Critical error in {agent_name} agent. Aborting pipeline."}
                 return
 
-        # Find final answer
-        final_answer = None
-        for result in reversed(accumulated_results):
-            if result.is_valid and result.output:
-                final_answer = result.output
-                break
-
-        if not final_answer:
-            yield {"type": "status", "status": "Failed to generate answer from subagent pipeline."}
-            return
-
-        # Update metadata sources
-        ctx["final_answer"] = final_answer
-        ctx["_tools_used"] = accumulated_context["_tools_used"]
-        ctx["_metadata"] = accumulated_context["_metadata"]
-
-        # Stream final response token-by-token (simulating Claude slow-and-steady style)
+        # Stream final response live token-by-token
         yield {"type": "status", "status": "Streaming verified response..."}
-        chunk_size = 8
-        for i in range(0, len(final_answer), chunk_size):
-            token = final_answer[i:i+chunk_size]
+        from modules.external_agents import stream_aarka_response
+        agent_context_str = "\n\n".join([f"[{r.agent_name} Insights]:\n{r.output}" for r in accumulated_results if r.output])
+        full_ans = ""
+        for token in stream_aarka_response(query, context=agent_context_str):
+            full_ans += token
             yield {"type": "content", "token": token}
-            await asyncio.sleep(0.005)
+            await asyncio.sleep(0.001)
+        
+        ctx["final_answer"] = full_ans
 
 
 
