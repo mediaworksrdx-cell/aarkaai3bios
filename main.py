@@ -348,14 +348,12 @@ async def error_handler(request: Request, call_next):
         )
 
 
+import modules.errors
+from fastapi.encoders import jsonable_encoder
+
 @app.exception_handler(fastapi.exceptions.RequestValidationError)
 async def validation_exception_handler(request: Request, exc: fastapi.exceptions.RequestValidationError):
-    exc_str = str(exc).encode("ascii", "replace").decode("ascii")
-    logger.error("Request validation failed: %s", exc_str)
-    return JSONResponse(
-        status_code=422,
-        content={"detail": exc.errors()},
-    )
+    return await modules.errors.validation_exception_handler(request, exc)
 
 
 # ─── Authentication Endpoints ───────────────────────────────────────────────────
@@ -426,8 +424,15 @@ def login_user(req: UserCreate):
     if config.MONGODB_URI:
         from modules.mongo_repository import UserRepo
         user_doc = UserRepo.get_by_email(req.email)
-        if not user_doc or not verify_password(req.password, user_doc.get("password_hash", "")):
+        if not user_doc:
             raise HTTPException(status_code=401, detail="Incorrect email or password")
+        is_valid, needs_rehash = verify_password(req.password, user_doc.get("password_hash", ""))
+        if not is_valid:
+            raise HTTPException(status_code=401, detail="Incorrect email or password")
+        # SEC-H2 FIX: Auto-rehash legacy SHA-256 passwords to bcrypt on successful login
+        if needs_rehash:
+            from modules.auth import get_password_hash
+            UserRepo.update_password_hash(user_doc["id"], get_password_hash(req.password))
         user_id = user_doc["id"]
         name = user_doc.get("name", "")
         access_token = create_access_token(data={"sub": user_id})
@@ -444,8 +449,16 @@ def login_user(req: UserCreate):
     db = SessionLocal()
     try:
         user = db.query(UserAccount).filter(UserAccount.email == req.email).first()
-        if not user or not verify_password(req.password, user.password_hash):
+        if not user:
             raise HTTPException(status_code=401, detail="Incorrect email or password")
+        is_valid, needs_rehash = verify_password(req.password, user.password_hash)
+        if not is_valid:
+            raise HTTPException(status_code=401, detail="Incorrect email or password")
+        # SEC-H2 FIX: Auto-rehash legacy SHA-256 passwords to bcrypt on successful login
+        if needs_rehash:
+            from modules.auth import get_password_hash
+            user.password_hash = get_password_hash(req.password)
+            db.commit()
             
         access_token = create_access_token(data={"sub": user.id})
         refresh_token = create_refresh_token(data={"sub": user.id})
@@ -548,11 +561,14 @@ def _get_github_redirect_uri(request: Request) -> str:
     if os.getenv("GITHUB_REDIRECT_URI"):
         return os.environ["GITHUB_REDIRECT_URI"]
 
-    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "aarka-ai.com"
-    clean_host = forwarded_host.split(":")[0]
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    clean_host = forwarded_host.split(":")[0].lower()
 
     if "synthetixanalytics.com" in clean_host:
         return "https://synthetixanalytics.com/aarkaai/oauthcallback"
+    elif clean_host in {"localhost", "127.0.0.1"} or clean_host.startswith("192.168.") or clean_host.startswith("10.") or clean_host.startswith("136.85."):
+        scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+        return f"{scheme}://{forwarded_host}/auth/github/callback"
     else:
         return "https://aarka-ai.com/auth/github/callback"
 
@@ -561,7 +577,7 @@ def _get_github_redirect_uri(request: Request) -> str:
 def github_login(request: Request):
     """Redirect to GitHub OAuth screen with CSRF state parameter."""
     import secrets
-    from config import GITHUB_CLIENT_ID
+    from config import GITHUB_CLIENT_ID, IS_PRODUCTION
     if not GITHUB_CLIENT_ID:
         raise HTTPException(status_code=500, detail="GitHub Client ID is not configured.")
     state = secrets.token_urlsafe(32)
@@ -574,10 +590,11 @@ def github_login(request: Request):
         f"&scope={scope}"
         f"&state={state}"
     )
+    is_https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
     response = fastapi.responses.RedirectResponse(url=github_auth_url)
     response.set_cookie(
         key="oauth_state", value=state, max_age=600, httponly=True,
-        samesite="lax", secure=True, path="/"
+        samesite="lax", secure=(IS_PRODUCTION and is_https), path="/"
     )
     return response
 
@@ -657,19 +674,25 @@ async def github_callback(code: str, state: str, request: Request):
             jwt_token = create_access_token(data={"sub": user_id})
             cookie_max_age = ACCESS_TOKEN_EXPIRE_MINUTES * 60
 
+            # SEC-C3 FIX: Do NOT pass JWT token, email, or name in URL query parameters.
+            # Tokens in URLs leak via browser history, Referer headers, server logs, and CDN logs.
+            # The token is delivered exclusively via HTTP-only secure cookie below.
+            from urllib.parse import quote
+            safe_name = quote(name, safe="")
             host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "aarka-ai.com"
             scheme = request.headers.get("x-forwarded-proto", "https")
             if "aarka-ai.com" in host:
-                target_url = f"{scheme}://{host}/?auth=success&token={jwt_token}&name={name}&email={email}"
+                target_url = f"{scheme}://{host}/?auth=success&name={safe_name}"
             elif "synthetixanalytics.com" in host:
-                target_url = f"{scheme}://{host}/aarkaai?auth=success&token={jwt_token}&name={name}&email={email}"
+                target_url = f"{scheme}://{host}/aarkaai?auth=success&name={safe_name}"
             else:
-                target_url = f"{OAUTH_REDIRECT_BASE_URL}/?auth=success&token={jwt_token}&name={name}&email={email}"
+                target_url = f"{OAUTH_REDIRECT_BASE_URL}/?auth=success&name={safe_name}"
 
             user_agent = request.headers.get("user-agent", "").lower()
             if "android" in user_agent or "okhttp" in user_agent or "mobile" in user_agent:
+                # Mobile deep link: token still in URL for app scheme (not exposed to web)
                 response = fastapi.responses.RedirectResponse(
-                    url=f"aarkaai://auth-callback?auth=success&user_id={user_id}&name={name}&token={jwt_token}"
+                    url=f"aarkaai://auth-callback?auth=success&user_id={user_id}&name={safe_name}&token={jwt_token}"
                 )
             else:
                 response = fastapi.responses.RedirectResponse(
@@ -702,19 +725,23 @@ async def github_callback(code: str, state: str, request: Request):
             jwt_token = create_access_token(data={"sub": user_id})
             cookie_max_age = ACCESS_TOKEN_EXPIRE_MINUTES * 60
 
+            # SEC-C3 FIX: Do NOT pass JWT token, email, or name in URL query parameters.
+            from urllib.parse import quote
+            safe_name = quote(name, safe="")
             host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "aarka-ai.com"
             scheme = request.headers.get("x-forwarded-proto", "https")
             if "aarka-ai.com" in host:
-                target_url = f"{scheme}://{host}/?auth=success&token={jwt_token}&name={name}&email={email}"
+                target_url = f"{scheme}://{host}/?auth=success&name={safe_name}"
             elif "synthetixanalytics.com" in host:
-                target_url = f"{scheme}://{host}/aarkaai?auth=success&token={jwt_token}&name={name}&email={email}"
+                target_url = f"{scheme}://{host}/aarkaai?auth=success&name={safe_name}"
             else:
-                target_url = f"{OAUTH_REDIRECT_BASE_URL}/?auth=success&token={jwt_token}&name={name}&email={email}"
+                target_url = f"{OAUTH_REDIRECT_BASE_URL}/?auth=success&name={safe_name}"
 
             user_agent = request.headers.get("user-agent", "").lower()
             if "android" in user_agent or "okhttp" in user_agent or "mobile" in user_agent:
+                # Mobile deep link: token still in URL for app scheme (not exposed to web)
                 response = fastapi.responses.RedirectResponse(
-                    url=f"aarkaai://auth-callback?auth=success&user_id={user_id}&name={name}&token={jwt_token}"
+                    url=f"aarkaai://auth-callback?auth=success&user_id={user_id}&name={safe_name}&token={jwt_token}"
                 )
             else:
                 response = fastapi.responses.RedirectResponse(
@@ -738,11 +765,14 @@ def _get_google_redirect_uri(request: Request) -> str:
     if os.getenv("GOOGLE_REDIRECT_URI"):
         return os.environ["GOOGLE_REDIRECT_URI"]
 
-    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "aarka-ai.com"
-    clean_host = forwarded_host.split(":")[0]
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    clean_host = forwarded_host.split(":")[0].lower()
 
     if "synthetixanalytics.com" in clean_host:
         return "https://synthetixanalytics.com/aarkaai/oauthcallback"
+    elif clean_host in {"localhost", "127.0.0.1"} or clean_host.startswith("192.168.") or clean_host.startswith("10.") or clean_host.startswith("136.85."):
+        scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+        return f"{scheme}://{forwarded_host}/auth/google/callback"
     else:
         return "https://aarka-ai.com/auth/google/callback"
 
@@ -751,7 +781,7 @@ def _get_google_redirect_uri(request: Request) -> str:
 def google_login(request: Request):
     """Redirect to Google OAuth 2.0 consent screen."""
     import secrets
-    from config import GOOGLE_CLIENT_ID
+    from config import GOOGLE_CLIENT_ID, IS_PRODUCTION
     if not GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=500, detail="Google Client ID is not configured.")
 
@@ -768,13 +798,14 @@ def google_login(request: Request):
         "&prompt=consent"
         f"&state={state}"
     )
+    is_https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
     response = fastapi.responses.RedirectResponse(url=google_auth_url)
     response.set_cookie(
         key="oauth_state",
         value=state,
         max_age=600,
         httponly=True,
-        secure=True,
+        secure=(IS_PRODUCTION and is_https),
         samesite="lax",
         path="/"
     )
@@ -864,19 +895,23 @@ async def google_callback(code: str, state: str, request: Request):
             jwt_token = create_access_token(data={"sub": user.id})
             cookie_max_age = ACCESS_TOKEN_EXPIRE_MINUTES * 60
 
+            # SEC-C3 FIX: Do NOT pass JWT token, email, or name in URL query parameters.
+            from urllib.parse import quote
+            safe_name = quote(name, safe="")
             host = request.headers.get("host", "aarka-ai.com")
             scheme = request.headers.get("x-forwarded-proto", "https")
             if "aarka-ai.com" in host:
-                target_url = f"{scheme}://{host}/?auth=success&token={jwt_token}&name={name}&email={email}"
+                target_url = f"{scheme}://{host}/?auth=success&name={safe_name}"
             elif "synthetixanalytics.com" in host:
-                target_url = f"{scheme}://{host}/aarkaai?auth=success&name={name}"
+                target_url = f"{scheme}://{host}/aarkaai?auth=success&name={safe_name}"
             else:
-                target_url = f"{OAUTH_REDIRECT_BASE_URL}/?auth=success&token={jwt_token}&name={name}&email={email}"
+                target_url = f"{OAUTH_REDIRECT_BASE_URL}/?auth=success&name={safe_name}"
 
             user_agent = request.headers.get("user-agent", "").lower()
             if "android" in user_agent or "okhttp" in user_agent or "mobile" in user_agent:
+                # Mobile deep link: token still in URL for app scheme (not exposed to web)
                 response = fastapi.responses.RedirectResponse(
-                    url=f"aarkaai://auth-callback?auth=success&user_id={user.id}&name={name}&token={jwt_token}"
+                    url=f"aarkaai://auth-callback?auth=success&user_id={user.id}&name={safe_name}&token={jwt_token}"
                 )
             else:
                 response = fastapi.responses.RedirectResponse(

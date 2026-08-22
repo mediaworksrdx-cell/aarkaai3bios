@@ -62,11 +62,11 @@ class PromptRequest(BaseModel):
     query: str = Field(
         default="",
         min_length=1,
-        max_length=10000,
-        description="The user's question or command (max 10000 chars)",
+        max_length=32000,
+        description="The user's question or command (max 32000 chars)",
     )
     # user_id is removed from here because we extract it from the bearer token.
-    session_id: str = Field(default="1", max_length=64, description="Session identifier")
+    session_id: str = Field(default="1", max_length=128, description="Session identifier")
     context: Optional[dict] = Field(default=None, description="Extra context payload")
     mode: Optional[str] = Field(default="production", description="Execution mode: 'production' or 'benchmark'")
     model_override: Optional[str] = Field(default=None, description="Optional model provider override: 'gemini', 'claude', 'aarkaa-7b'")

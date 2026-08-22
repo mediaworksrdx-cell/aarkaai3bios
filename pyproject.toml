@@ -1,0 +1,26 @@
+[project]
+name = "aarkaai"
+version = "3.0.0"
+description = "AARKAAI – Autonomous Agentic Engine & Backend Services"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]  # Line length handled separately
+
+[tool.ruff.lint.isort]
+known-first-party = ["modules", "config", "database", "schemas", "middleware"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+
+[tool.bandit]
+exclude_dirs = ["tests", "scripts", "scratch"]
+skips = ["B101"]  # assert usage in tests

@@ -11,19 +11,22 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# Ensure Google Service Account credentials are set in environment
+# Service account discovery & environment configuration
 _DEFAULT_SA_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 if not _DEFAULT_SA_PATH or not os.path.exists(_DEFAULT_SA_PATH):
-    # Try finding the orbital service account json in repo or home
-    possible_paths = [
-        str(Path(__file__).parent.parent / "orbital-heaven-504004-s2-df5a0ce91659.json"),
-        "/home/sathishbadri2015/aarkaai3b/orbital-heaven-504004-s2-df5a0ce91659.json",
-        str(Path(os.getcwd()) / "orbital-heaven-504004-s2-df5a0ce91659.json"),
-    ]
-    for p in possible_paths:
-        if os.path.exists(p):
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = p
-            _DEFAULT_SA_PATH = p
+    # Dynamically search for service account json files in workspace root or parent
+    search_dirs = [Path(__file__).parent.parent, Path.cwd(), Path.home()]
+    for sdir in search_dirs:
+        for sa_file in sdir.glob("*service_account*.json"):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_file)
+            _DEFAULT_SA_PATH = str(sa_file)
+            break
+        if not _DEFAULT_SA_PATH:
+            for sa_file in sdir.glob("orbital-heaven-*.json"):
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_file)
+                _DEFAULT_SA_PATH = str(sa_file)
+                break
+        if _DEFAULT_SA_PATH:
             break
 
 def _get_genai_client():

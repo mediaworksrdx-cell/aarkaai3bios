@@ -15,6 +15,23 @@ export default function Error({
   }, [error]);
 
   const handleClearCacheAndReset = () => {
+    try {
+      if (typeof window !== 'undefined') {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k.startsWith('aarka') || k.startsWith('aarkaa') || k.includes('conv') || k.includes('chat') || k.includes('user') || k.includes('token'))) {
+            keysToRemove.push(k);
+          }
+        }
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+        sessionStorage.clear();
+        window.location.href = '/';
+        return;
+      }
+    } catch (e) {
+      console.warn('Clear storage error:', e);
+    }
     reset();
   };
 

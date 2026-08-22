@@ -97,9 +97,17 @@ def run_command(command: str, timeout: int = 30) -> str:
     Returns stdout + stderr combined, truncated to 3000 chars.
     """
     try:
+        # SEC-C2 FIX: Use shell=False with shlex.split() to prevent
+        # shell metacharacter injection in codegent tool execution.
+        import shlex
+        try:
+            cmd_args = shlex.split(command)
+        except ValueError as parse_err:
+            return f"Error: Failed to parse command: {parse_err}"
+
         result = subprocess.run(
-            command,
-            shell=True,
+            cmd_args,
+            shell=False,
             cwd=str(WORKSPACE),
             capture_output=True,
             text=True,

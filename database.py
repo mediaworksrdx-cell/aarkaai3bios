@@ -230,6 +230,10 @@ class UserSettings(Base):
 
 def init_db() -> None:
     """Create all tables if they don't exist."""
+    try:
+        import modules.subscription  # noqa: F401
+    except Exception:
+        pass
     Base.metadata.create_all(bind=engine)
 
 

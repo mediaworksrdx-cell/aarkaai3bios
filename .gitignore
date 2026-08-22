@@ -1,17 +1,87 @@
-*.pem
+# ══════════════════════════════════════════════════════════════════════════════
+# SECURITY — NEVER commit these files (production secrets & user data)
+# ══════════════════════════════════════════════════════════════════════════════
+.env
+.env.*
+.env.local
+.env.production
+.env.production.*
+*.db
+*.sqlite
+*.sqlite3
+
+# GCP / Cloud service account keys
 *-sa-key.json
 *service_account*.json
 orbital-heaven-*.json
-*.gguf
-*.db
+
+# SSH / TLS keys
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ══════════════════════════════════════════════════════════════════════════════
+# JSON files (block by default, whitelist specific ones)
+# ══════════════════════════════════════════════════════════════════════════════
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!*/Contents.json
+!frontend/**/*.json
+!.github/**/*.json
+!.vscode/settings.json
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Python
+# ══════════════════════════════════════════════════════════════════════════════
 __pycache__/
 *.pyc
-.env
-*.env
-.env*
-.env.production*
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
 
-# Scratch/utility test scripts (contain hardcoded test credentials)
+# ══════════════════════════════════════════════════════════════════════════════
+# Build / Deployment Artifacts
+# ══════════════════════════════════════════════════════════════════════════════
+*.tar.gz
+*.zip
+*.gguf
+load_results_*.json
+load_test_results.json
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Model files (too large for Git)
+# ══════════════════════════════════════════════════════════════════════════════
+*.bin
+*.safetensors
+*.gguf
+aarkaa-3b/
+llama.cpp/
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Frontend
+# ══════════════════════════════════════════════════════════════════════════════
+node_modules/
+.next/
+frontend/node_modules/
+frontend/.next/
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Android signing credentials
+# ══════════════════════════════════════════════════════════════════════════════
+android-app/release.jks
+android-app/gradle.properties
+android-app/local.properties
+*.jks
+*.keystore
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Scratch / Utility scripts with hardcoded credentials
+# ══════════════════════════════════════════════════════════════════════════════
 scratch/test_remote_*.py
 scratch/test_pdf_remote.py
 scratch/test_portfolio_remote.py
@@ -20,14 +90,6 @@ scratch/run_remote_verify.py
 scratch/verify_cpu_idle.py
 scratch/verify_factual_query.py
 scratch/trigger_remote_test.py
-
-# GCP service account keys
-*.json
-!package.json
-!package-lock.json
-!tsconfig.json
-
-# Existing exclusions
 scratch/run_conversion*.py
 scratch/download_model.py
 scratch/download_and_convert.py
@@ -36,32 +98,33 @@ scratch/get_hf_base_info.py
 scratch/list_hf_files.py
 scratch/merge_and_quantize.py
 scratch/run_model_conversion.py
-list_hf.py
-merge_lora.py
-test_sd.py
 
-# Build/runtime artifacts
-*.tar.gz
-*.zip
-load_results_*.json
-load_test_results.json
+# ══════════════════════════════════════════════════════════════════════════════
+# IDE / OS
+# ══════════════════════════════════════════════════════════════════════════════
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
 
-# Android signing credentials (NEVER commit these)
-android-app/release.jks
-android-app/gradle.properties
-android-app/local.properties
-*.jks
-*.keystore
+# ══════════════════════════════════════════════════════════════════════════════
+# Logs
+# ══════════════════════════════════════════════════════════════════════════════
+*.log
+logs/
 
-# Service account keys
-*.json
-!package.json
-!package-lock.json
-!tsconfig.json
-!*/Contents.json
-!frontend/**/*.json
+# ══════════════════════════════════════════════════════════════════════════════
+# Scratch & Workspace
+# ══════════════════════════════════════════════════════════════════════════════
+scratch/
+workspace/
+*.html
+*.pdf
 
-# Environment files with secrets
-.env
-.env.local
-.env.production
+# ══════════════════════════════════════════════════════════════════════════════
+# ChromaDB vector store (regenerable)
+# ══════════════════════════════════════════════════════════════════════════════
+chroma_db/
+
