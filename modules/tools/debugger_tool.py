@@ -1,14 +1,16 @@
+import subprocess
 import sys
-import traceback
 from typing import Dict, Any
 from modules.tools.base import Tool
 from modules.tools.fs import _resolve_safe_path
+from config import BASH_TIMEOUT, SAFE_WORK_DIR
+
 
 class DebuggerTool(Tool):
     name = "DebuggerTool"
     description = (
         "Inspect execution flow and evaluate stack traces matching target "
-        "Python modules natively."
+        "Python modules by running them in an isolated subprocess."
     )
     risk_level = "LOW"
     latency_weight = 1.0
@@ -28,16 +30,32 @@ class DebuggerTool(Tool):
 
         try:
             resolved = _resolve_safe_path(path)
-            with open(resolved, "r", encoding="utf-8") as f:
-                code_content = f.read()
-            
-            # Execute in isolated space capturing tracebacks
-            local_scope = {}
-            try:
-                exec(code_content, {"__name__": "__main__"}, local_scope)
-                return "Execution completed successfully. No traceback exceptions captured."
-            except Exception as runtime_err:
-                tb = traceback.format_exc()
-                return f"Runtime error captured:\n{runtime_err}\n\nStack Trace:\n{tb}"
+
+            # SEC-C1 FIX: Execute in an isolated subprocess instead of exec()
+            # This prevents arbitrary code from accessing the parent process's
+            # memory, globals, imports, or environment.
+            result = subprocess.run(
+                [sys.executable, str(resolved)],
+                capture_output=True,
+                text=True,
+                timeout=BASH_TIMEOUT,
+                cwd=str(SAFE_WORK_DIR),
+            )
+
+            if result.returncode == 0:
+                output = "Execution completed successfully. No traceback exceptions captured."
+                if result.stdout:
+                    output += f"\n\n[stdout]\n{result.stdout[:2000]}"
+                return output
+            else:
+                output = f"Runtime error captured (exit code {result.returncode}):\n"
+                if result.stderr:
+                    output += f"\nStack Trace:\n{result.stderr[:3000]}"
+                if result.stdout:
+                    output += f"\n\n[stdout]\n{result.stdout[:1000]}"
+                return output
+
+        except subprocess.TimeoutExpired:
+            return f"Error: Debugger execution timed out after {BASH_TIMEOUT} seconds."
         except Exception as e:
             return f"Debugger setup error: {e}"

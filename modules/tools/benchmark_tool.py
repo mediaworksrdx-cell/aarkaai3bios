@@ -1,7 +1,10 @@
+import subprocess
+import sys
 import time
 from typing import Dict, Any
 from modules.tools.base import Tool
 from modules.tools.fs import _resolve_safe_path
+from config import BASH_TIMEOUT, SAFE_WORK_DIR
 
 class BenchmarkTool(Tool):
     name = "BenchmarkTool"
@@ -24,14 +27,28 @@ class BenchmarkTool(Tool):
 
         try:
             resolved = _resolve_safe_path(path)
-            with open(resolved, "r", encoding="utf-8") as f:
-                content = f.read()
 
+            # SEC-C1 FIX: Execute in an isolated subprocess instead of exec()
+            # This prevents arbitrary code from accessing the parent process's
+            # memory, globals, imports, or environment.
             start_t = time.perf_counter()
-            exec_vars = {}
-            exec(content, {"__name__": "__main__"}, exec_vars)
+            result = subprocess.run(
+                [sys.executable, str(resolved)],
+                capture_output=True,
+                text=True,
+                timeout=BASH_TIMEOUT,
+                cwd=str(SAFE_WORK_DIR),
+            )
             elapsed = time.perf_counter() - start_t
-            
-            return f"Benchmark completed.\nTotal Execution Time: {elapsed:.4f} seconds"
+
+            output = f"Benchmark completed.\nTotal Execution Time: {elapsed:.4f} seconds\n"
+            if result.stdout:
+                output += f"\n[stdout]\n{result.stdout[:2000]}\n"
+            if result.stderr:
+                output += f"\n[stderr]\n{result.stderr[:1000]}\n"
+            output += f"Exit code: {result.returncode}"
+            return output
+        except subprocess.TimeoutExpired:
+            return f"Error: Benchmark timed out after {BASH_TIMEOUT} seconds."
         except Exception as e:
             return f"Performance benchmark run error: {e}"

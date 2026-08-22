@@ -1,20 +1,23 @@
 import subprocess
 
-KEY = r"C:\Users\daarv\Downloads\aarkaai3b.pem"
-HOST = "16.170.206.243"
-USER = "ec2-user"
+KEY = r"C:\Users\daarv\.ssh\id_ed25519"
+USER = "sathishbadri2015"
+HOST = "136.85.114.150"
+SSH_OPTS = ["-o", "StrictHostKeyChecking=no", "-i", KEY]
 
-cmd = [
-    "ssh",
-    "-i", KEY,
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "BatchMode=yes",
-    f"{USER}@{HOST}",
-    "sudo ls -la /"
-]
+def ssh(cmd, timeout=15):
+    full_cmd = ["ssh"] + SSH_OPTS + [f"{USER}@{HOST}", cmd]
+    try:
+        res = subprocess.run(full_cmd, capture_output=True, text=True, errors="ignore", timeout=timeout)
+        return f"STDOUT: {res.stdout.strip()}\nSTDERR: {res.stderr.strip()}\nEXIT: {res.returncode}"
+    except Exception as e:
+        return f"ERROR: {e}"
 
-res = subprocess.run(cmd, capture_output=True, text=True)
-print("STDOUT:")
-print(res.stdout)
-print("STDERR:")
-print(res.stderr)
+print("=== Checking sudo access non-interactively ===")
+print(ssh("sudo -n true"))
+
+print("\n=== Checking PM2 or Supervisor or systemd availability ===")
+print(ssh("which pm2 supervisor systemctl || true"))
+
+print("\n=== Current Running Processes on 3000 and 5000 ===")
+print(ssh("ss -tlpn | grep -E '3000|5000'"))

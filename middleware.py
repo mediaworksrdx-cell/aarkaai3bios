@@ -291,7 +291,12 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
             return {"type": "http.request", "body": body_bytes}
         request._receive = receive
 
-        cache_key = hashlib.sha256(body_bytes).hexdigest()
+        # SEC-M6 FIX: Include user identity in cache key to prevent cross-user
+        # data leakage. Two different authenticated users with the same request
+        # body must get separate cache entries.
+        auth_header = request.headers.get("authorization", "anonymous")
+        cache_input = body_bytes + auth_header.encode("utf-8")
+        cache_key = hashlib.sha256(cache_input).hexdigest()
         redis_key = f"cache:response:{cache_key}"
 
         # Check Redis cache

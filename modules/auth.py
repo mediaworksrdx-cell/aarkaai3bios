@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 import logging
 import os
+import time
 import uuid
 
 import jwt
@@ -39,9 +40,11 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # OAuth2 scheme (auto_error=False to allow checking X-API-Key fallback)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 
-# ─── Redis Token Revocation Store ────────────────────────────────────────────
+# Redis & In-memory token revocation store
 _redis_revocation = None
 _redis_checked = False
+_inmemory_revocations: dict[str, float] = {}
+_inmemory_login_failures: dict[str, tuple[int, float]] = {}
 
 
 def _get_revocation_store():
@@ -58,19 +61,25 @@ def _get_revocation_store():
         logger.info("Token revocation store: using Redis backend (%s)", redis_url)
     except Exception:
         _redis_revocation = None
-        logger.info("Token revocation store: Redis unavailable, revocation disabled")
+        logger.info("Token revocation store: Redis unavailable, using in-memory fallback")
     return _redis_revocation
 
 
 def _is_token_revoked(jti: str) -> bool:
     """Check if a token JTI has been revoked."""
+    if not jti:
+        return False
     r = _get_revocation_store()
-    if r is None:
-        return False
-    try:
-        return r.exists(f"revoked:{jti}") == 1
-    except Exception:
-        return False
+    if r is not None:
+        try:
+            return r.exists(f"revoked:{jti}") == 1
+        except Exception:
+            pass
+    # In-memory fallback
+    expiry = _inmemory_revocations.get(jti)
+    if expiry and time.time() < expiry:
+        return True
+    return False
 
 
 def revoke_token(jti: str, expires_in_seconds: int = 86400 * 31) -> bool:
@@ -78,31 +87,75 @@ def revoke_token(jti: str, expires_in_seconds: int = 86400 * 31) -> bool:
     Add a token JTI to the revocation blacklist.
     TTL defaults to 31 days (slightly longer than max refresh token lifetime).
     """
+    if not jti:
+        return False
     r = _get_revocation_store()
-    if r is None:
-        logger.warning("Cannot revoke token: Redis unavailable")
-        return False
-    try:
-        r.setex(f"revoked:{jti}", expires_in_seconds, "1")
-        return True
-    except Exception as exc:
-        logger.error("Token revocation failed: %s", exc)
-        return False
+    if r is not None:
+        try:
+            r.setex(f"revoked:{jti}", expires_in_seconds, "1")
+            return True
+        except Exception as exc:
+            logger.error("Redis token revocation failed: %s", exc)
+    # In-memory fallback
+    _inmemory_revocations[jti] = time.time() + expires_in_seconds
+    return True
 
 
 # ─── Password Hashing ────────────────────────────────────────────────────────
+import bcrypt
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    # Support legacy SHA256 hashes gracefully while using bcrypt for new/upgraded passwords
-    if len(hashed_password) == 64 and not hashed_password.startswith("$"):
+def verify_password(plain_password: str, hashed_password: str) -> tuple[bool, bool]:
+    """Verify a password against its hash.
+    
+    Returns:
+        (is_valid, needs_rehash) tuple. When needs_rehash is True, the caller
+        should update the stored hash using get_password_hash(plain_password).
+    """
+    if not hashed_password or not plain_password:
+        return False, False
+    # Bcrypt hashes start with $2b$, $2a$, or $2y$
+    if hashed_password.startswith(("$2b$", "$2a$", "$2y$")):
+        try:
+            pwd_bytes = plain_password.encode("utf-8")[:72]
+            return bcrypt.checkpw(pwd_bytes, hashed_password.encode("utf-8")), False
+        except Exception:
+            return False, False
+    # SEC-H2 FIX: Legacy unsalted SHA-256 — verify but flag for immediate rehash.
+    if len(hashed_password) == 64:
         import hashlib
-        return hashlib.sha256(plain_password.encode("utf-8")).hexdigest() == hashed_password
-    return pwd_context.verify(plain_password, hashed_password)
+        is_valid = hashlib.sha256(plain_password.encode("utf-8")).hexdigest() == hashed_password
+        if is_valid:
+            logger.warning("SEC-H2: Legacy SHA-256 hash verified — flagging for bcrypt rehash")
+        return is_valid, is_valid  # needs_rehash=True only when valid
+    return False, False
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    """Hash a plain text password using bcrypt with automatic salt generation."""
+    pwd_bytes = password.encode("utf-8")[:72]
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
+
+
+def decode_access_token(token: str) -> dict:
+    """Decode and validate a JWT access token, verifying signature and revocation status."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        jti = payload.get("jti")
+        if jti and _is_token_revoked(jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return payload
+    except jwt.PyJWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid or expired token: {exc}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 # ─── Token Generation ────────────────────────────────────────────────────────
@@ -343,20 +396,97 @@ def register_user(email: str, password: str, name: Optional[str] = None) -> dict
         session.close()
 
 
+# ─── Login Attempt Tracking ──────────────────────────────────────────────────
+
+_MAX_FAILED_ATTEMPTS = 5
+_LOCKOUT_SECONDS = 900  # 15 minutes
+
+
+def _check_account_locked(email: str) -> bool:
+    """Check if account is temporarily locked due to failed login attempts."""
+    r = _get_revocation_store()
+    if r is not None:
+        try:
+            failures = r.get(f"login_failures:{email}")
+            return failures is not None and int(failures) >= _MAX_FAILED_ATTEMPTS
+        except Exception:
+            pass
+    # In-memory fallback
+    data = _inmemory_login_failures.get(email)
+    if data:
+        count, expires_at = data
+        if time.time() < expires_at and count >= _MAX_FAILED_ATTEMPTS:
+            return True
+    return False
+
+
+def _record_login_failure(email: str):
+    """Increment failure counter with auto-expiry."""
+    r = _get_revocation_store()
+    if r is not None:
+        try:
+            key = f"login_failures:{email}"
+            pipe = r.pipeline()
+            pipe.incr(key)
+            pipe.expire(key, _LOCKOUT_SECONDS)
+            pipe.execute()
+            return
+        except Exception:
+            pass
+    # In-memory fallback
+    data = _inmemory_login_failures.get(email)
+    now = time.time()
+    if data and now < data[1]:
+        count = data[0] + 1
+        _inmemory_login_failures[email] = (count, now + _LOCKOUT_SECONDS)
+    else:
+        _inmemory_login_failures[email] = (1, now + _LOCKOUT_SECONDS)
+
+
+def _clear_login_failures(email: str):
+    """Clear failure counter on successful login."""
+    r = _get_revocation_store()
+    if r is not None:
+        try:
+            r.delete(f"login_failures:{email}")
+        except Exception:
+            pass
+    # In-memory fallback
+    _inmemory_login_failures.pop(email, None)
+
+
 def login_user(email: str, password: str) -> dict:
     """
     Verify credentials and return dual-token payload. Raises ValueError on bad credentials.
     """
     session = SessionLocal()
     try:
+        normalized_email = email.lower().strip()
+        if _check_account_locked(normalized_email):
+            raise ValueError(
+                "Account temporarily locked due to too many failed attempts. "
+                "Try again in 15 minutes."
+            )
+
         user = session.query(UserAccount).filter(
-            UserAccount.email == email.lower().strip()
+            UserAccount.email == normalized_email
         ).first()
-        if not user or not verify_password(password, user.password_hash):
+        if not user:
+            _record_login_failure(normalized_email)
+            raise ValueError("Invalid email or password")
+        is_valid, needs_rehash = verify_password(password, user.password_hash)
+        if not is_valid:
+            _record_login_failure(normalized_email)
             raise ValueError("Invalid email or password")
         if not user.is_active:
             raise ValueError("Account is disabled")
+        # SEC-H2 FIX: Auto-rehash legacy SHA-256 passwords to bcrypt
+        if needs_rehash:
+            user.password_hash = get_password_hash(password)
+            session.commit()
+            logger.info("SEC-H2: Rehashed legacy password for user %s", user.email)
 
+        _clear_login_failures(normalized_email)
         access = create_access_token({"sub": user.id})
         refresh = create_refresh_token({"sub": user.id})
         logger.info("User logged in: %s", user.email)

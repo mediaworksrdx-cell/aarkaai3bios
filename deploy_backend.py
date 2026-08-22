@@ -33,6 +33,8 @@ SYNC_PATHS = [
     "middleware.py",
     "schemas.py",
     "modules/",
+    "routers/",
+    "pipeline/",
     "skills/",
     "tests/",
 ]
@@ -47,16 +49,21 @@ def ssh(cmd: str, timeout: int = 300) -> str:
 
 def scp(local_path: str, remote_path: str):
     cmd = ["scp", "-r"] + SSH_OPTS + [local_path, f"{USER}@{HOST}:{remote_path}"]
-    return subprocess.run(cmd, capture_output=True, text=True, errors="ignore")
+    return subprocess.run(cmd, capture_output=True, text=True, errors="ignore", timeout=120)
 
 
 def sync_files():
     """Upload application code to server"""
     print("\n[1/3] Syncing backend source files...")
+    # Ensure remote base directories exist
+    ssh(f"mkdir -p {REMOTE_BACKEND}/routers {REMOTE_BACKEND}/pipeline {REMOTE_BACKEND}/modules {REMOTE_BACKEND}/tests")
     for path in SYNC_PATHS:
-        local = os.path.join(LOCAL_BACKEND, path)
-        remote = f"{REMOTE_BACKEND}/{path}"
+        local = os.path.join(LOCAL_BACKEND, path.rstrip("/\\"))
         if os.path.exists(local):
+            if os.path.isdir(local):
+                remote = f"{REMOTE_BACKEND}/"
+            else:
+                remote = f"{REMOTE_BACKEND}/{path}"
             res = scp(local, remote)
             status = "[OK]" if res.returncode == 0 else "[FAIL]"
             print(f"  {status} {path}")
@@ -91,11 +98,11 @@ def restart():
         ssh("fuser -k -9 5000/tcp 2>/dev/null || true")
         time.sleep(2)
     
-    # Start FastAPI
+    # Start FastAPI in background inside a detached screen session
     start_cmd = (
-        f"cd {REMOTE_BACKEND} && "
-        f"setsid {PYTHON_BIN} -m uvicorn main:app --host 0.0.0.0 --port 5000 "
-        f"> {REMOTE_BACKEND}/fastapi_service.log 2>&1 &"
+        f"screen -wipe 2>/dev/null; "
+        f"screen -dmS aarkaai_backend bash -c "
+        f"'cd {REMOTE_BACKEND} && {PYTHON_BIN} -m uvicorn main:app --host 0.0.0.0 --port 5000 >> {REMOTE_BACKEND}/fastapi_service.log 2>&1'"
     )
     ssh(start_cmd)
     

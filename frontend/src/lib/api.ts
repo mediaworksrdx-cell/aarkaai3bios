@@ -40,17 +40,31 @@ export async function* streamChat(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE}/chat`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      query,
-      session_id: sessionId,
-      model_override: modelOverride,
-      effort: effort || 'medium',
-    }),
-    signal,
-  });
+  const payload = {
+    query,
+    session_id: sessionId,
+    model_override: modelOverride,
+    effort: effort || 'medium',
+    mode: effort === 'high' ? 'deep_reasoning' : 'production',
+  };
+
+  let response: Response;
+  try {
+    response = await fetch('/prompt/stream', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal,
+    });
+  } catch (err: any) {
+    if (signal?.aborted) throw err;
+    response = await fetch(`${API_BASE}/chat`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal,
+    });
+  }
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => `HTTP ${response.status}`);

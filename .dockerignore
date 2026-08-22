@@ -1,0 +1,82 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# PROD-M2 FIX: .dockerignore — Prevent secrets, build artifacts, and
+# unnecessary files from being copied into the Docker image layer.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Secrets & Credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*-sa-key.json
+*service_account*.json
+orbital-heaven-*.json
+
+# Git
+.git
+.gitignore
+
+# Databases (user data)
+*.db
+*.sqlite
+*.sqlite3
+chroma_db/
+
+# Model weights (too large, not needed in Docker)
+*.bin
+*.safetensors
+*.gguf
+aarkaa-3b/
+llama.cpp/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node.js (frontend builds separately)
+node_modules/
+frontend/node_modules/
+frontend/.next/
+.next/
+
+# Archives
+*.tar.gz
+*.zip
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# CI/CD (not needed in production image)
+.github/
+
+# Test & scratch files
+tests/
+scratch/
+load_test.py
+load_results_*.json
+
+# Android / iOS (separate builds)
+android-app/
+ios-app/
+
+# Documentation (not needed at runtime)
+*.md
+LICENSE

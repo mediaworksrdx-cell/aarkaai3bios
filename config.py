@@ -76,6 +76,13 @@ if ENVIRONMENT == "production" and SECRET_KEY == _DEFAULT_KEY:
         "Set a strong random secret key via the AARKAAI_SECRET_KEY environment variable."
     )
 
+# Enforce minimum key entropy in all environments
+if len(SECRET_KEY) < 32:
+    raise RuntimeError(
+        "FATAL: AARKAAI_SECRET_KEY is too short (minimum 32 characters). "
+        "Generate a strong key with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
+    )
+
 # Warn if GCP credentials are missing in production
 if IS_PRODUCTION and not GOOGLE_APPLICATION_CREDENTIALS:
     import warnings
@@ -178,10 +185,9 @@ FOREX_PAIRS = {
 
 # ─── Security Blocklist for Agent Tools ─────────────────────────────────────
 BASH_TIMEOUT = float(os.getenv("AARKAAI_BASH_TIMEOUT", "30.0"))
-BASH_BLOCKLIST = [
-    "rm -rf /", "rm -rf /*", "mkfs", "dd if=", ":(){ :|:& };:", 
-    "chmod -R 777 /", "shutdown", "reboot", "poweroff"
-]
+# DEPRECATED: Blocklist replaced by allowlist architecture in modules/tools/bash.py
+# Kept as empty list for backward compatibility with any code referencing it.
+BASH_BLOCKLIST: list[str] = []
 
 # ─── Upload Restrictions ─────────────────────────────────────────────────────
 MAX_UPLOAD_SIZE_MB = int(os.getenv("AARKAAI_MAX_UPLOAD_SIZE_MB", "10"))

@@ -139,12 +139,13 @@ def check_access(user_id: str, feature: str = "strategy") -> dict:
 
     except Exception as exc:
         logger.error("Subscription check failed for %s: %s", user_id, exc)
-        # Fail open — allow access on errors to avoid blocking users
+        # SEC-H5 FIX: Fail CLOSED — deny premium access on errors to prevent
+        # attackers from exploiting database failures to bypass subscription checks.
         return {
-            "allowed": True,
-            "remaining": 1,
+            "allowed": False,
+            "remaining": 0,
             "tier": "free",
-            "message": "Access granted (fallback).",
+            "message": "Unable to verify subscription. Please try again shortly.",
         }
     finally:
         session.close()

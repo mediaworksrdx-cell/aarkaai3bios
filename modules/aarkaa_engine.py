@@ -245,7 +245,8 @@ def _get_gpu_layers() -> int:
 
 
 def _get_threads() -> int:
-    return 4 if _has_cuda() else 2
+    import os
+    return max(1, os.cpu_count() or 4)
 
 
 def _is_ist_nighttime() -> bool:
@@ -268,27 +269,30 @@ def _get_model(force_gpu=True, force_general=False):
     is_coder_query = (request_domain.get() == "technology") and not force_general
     
     if force_gpu:
-        if is_coder_query:
+        if is_coder_query and _model_coder_gpu is not False:
             if _model_coder_gpu is None:
-                with _model_lock:
-                    if _model_coder_gpu is None:
-                        from llama_cpp import Llama
-                        logger.info("Technology/Coding query detected. Loading Coder GGUF model to GPU...")
-                        try:
-                            _model_coder_gpu = Llama(
-                                model_path=str(_gguf_coder_path),
-                                n_ctx=16384,
-                                n_threads=_get_threads(),
-                                n_threads_batch=_get_threads(),
-                                n_gpu_layers=_get_gpu_layers(),
-                                verbose=False,
-                            )
-                            logger.info("Coder GGUF model successfully loaded.")
-                        except Exception as e:
-                            logger.error("Failed to load Coder GGUF model: %s. Falling back to general model.", e)
-                            is_coder_query = False
+                if not _gguf_coder_path.exists():
+                    _model_coder_gpu = False
+                else:
+                    with _model_lock:
+                        if _model_coder_gpu is None:
+                            from llama_cpp import Llama
+                            logger.info("Technology/Coding query detected. Loading Coder GGUF model...")
+                            try:
+                                _model_coder_gpu = Llama(
+                                    model_path=str(_gguf_coder_path),
+                                    n_ctx=8192,
+                                    n_threads=_get_threads(),
+                                    n_threads_batch=_get_threads(),
+                                    n_gpu_layers=_get_gpu_layers(),
+                                    verbose=False,
+                                )
+                                logger.info("Coder GGUF model successfully loaded.")
+                            except Exception as e:
+                                logger.error("Failed to load Coder GGUF model: %s. Falling back to general model.", e)
+                                _model_coder_gpu = False
 
-            if _model_coder_gpu is not None:
+            if _model_coder_gpu and _model_coder_gpu is not False:
                 return _model_coder_gpu
 
         # General model loading (or fallback if coder loading failed)
@@ -1527,12 +1531,12 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             if context:
                 user_prompt += "Context:\n" + context + "\n\n"
             user_prompt += f"Request: {query}\n\n"
-            user_prompt += "Provide production-grade Python code with complete FIFO accounting logic, exact unit tests, and a dedicated Complexity Analysis section. Output ONLY clean markdown."
+            user_prompt += "Provide complete, production-grade Python code, exact unit tests, and a dedicated Complexity Analysis section. Output ONLY clean markdown."
             if lang != "en":
                 user_prompt += f" You MUST write your response ONLY in the following language: {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT (is_code):\n%s", prompt)
-        tokens = MAX_TOKENS
+        tokens = min(MAX_TOKENS, 400)
     else:
         import re
         is_chat_or_greeting = any(

@@ -1747,6 +1747,29 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         web_search,
     )
 
+    _SENTINEL = object()
+
+    async def _stream_in_thread(gen_func, *args, **kwargs):
+        """Run a blocking generator in a thread and yield tokens via asyncio.Queue."""
+        q: asyncio.Queue = asyncio.Queue(maxsize=64)
+        loop = asyncio.get_event_loop()
+
+        def _producer():
+            try:
+                for token in gen_func(*args, **kwargs):
+                    loop.call_soon_threadsafe(q.put_nowait, token)
+            except Exception as exc:
+                logger.error("_stream_in_thread producer error: %s", exc)
+            finally:
+                loop.call_soon_threadsafe(q.put_nowait, _SENTINEL)
+
+        asyncio.get_event_loop().run_in_executor(None, _producer)
+        while True:
+            item = await q.get()
+            if item is _SENTINEL:
+                break
+            yield item
+
     start = time.perf_counter()
     sources: list[str] = []
 
@@ -2308,61 +2331,27 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             yield {"type": "content", "token": token}
             await asyncio.sleep(0.01)
     elif is_coding_query and not is_coding_output and not is_knowledge:
-        # ── AARKA CODER PIPELINE ──────────────────────────────────────────
-        # Route coding queries through the dual-model pipeline:
-        #   1. Coder 3B generates code
-        #   2. CVR validates syntax + security
-        #   3. Coder 3B auto-generates unit tests
-        #   4. Sandbox executes code + tests
-        #   5. 7B General model streams polished response with code evidence
-        import asyncio
-        from modules.aarka_coder import run_coder_pipeline
-
-        yield {"type": "status", "status": "Generating code with Aarka Coder..."}
+        # ── Fast Code Generation Stream ────────────────────────────────────
+        # Stream code and tests directly to ensure zero 504 Gateway Timeouts.
+        yield {"type": "status", "status": "Generating production code & test suite..."}
         await asyncio.sleep(0.01)
 
-        try:
-            coder_result = run_coder_pipeline(query, fused_context)
-        except Exception as exc:
-            logger.error("Aarka Coder pipeline failed: %s", exc)
-            coder_result = None
-
-        if coder_result and coder_result.get("code"):
-            if coder_result.get("test_code"):
-                yield {"type": "status", "status": "Testing generated code in sandbox..."}
-                await asyncio.sleep(0.01)
-
-            yield {"type": "status", "status": "Polishing response with analysis..."}
-            await asyncio.sleep(0.01)
-
-            # Build enriched context with code + test results for 7B polish pass
-            code_evidence = _build_coder_context(coder_result)
-            enriched_context = fused_context + "\n\n---\n\n" + code_evidence if fused_context else code_evidence
-
-            # Stream final polished response from 7B general model
-            for token in aarkaa_engine.stream_final_response(
-                query, enriched_context, intent=intent, lang=detected_lang,
-                mode=mode, history=chat_ctx, user_facts=user_facts,
-                force_general=True  # Force 7B general model for the polish pass
-            ):
-                full_response += token
-                yield {"type": "content", "token": token}
-                await asyncio.sleep(0.001)
-        else:
-            # Coder pipeline failed — fall back to direct streaming
-            logger.warning("Aarka Coder returned no code — falling back to direct streaming")
-            for token in aarkaa_engine.stream_final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode, history=chat_ctx, user_facts=user_facts):
-                full_response += token
-                yield {"type": "content", "token": token}
-                await asyncio.sleep(0.001)
+        async for token in _stream_in_thread(
+            aarkaa_engine.stream_final_response,
+            query, fused_context, intent=intent, lang=detected_lang,
+            mode=mode, history=chat_ctx, user_facts=user_facts
+        ):
+            full_response += token
+            yield {"type": "content", "token": token}
     else:
         # Stream tokens live token-by-token using high-performance synthesis engine
         import asyncio
         from modules.external_agents import stream_aarka_response
-        for token in stream_aarka_response(query, context=fused_context, history=chat_ctx):
+        async for token in _stream_in_thread(
+            stream_aarka_response, query, context=fused_context, history=chat_ctx
+        ):
             full_response += token
             yield {"type": "content", "token": token}
-            await asyncio.sleep(0.001)
 
     # ── 7. Yield final stats IMMEDIATELY so the client can close the stream ─
     elapsed = round(time.perf_counter() - start, 3)
