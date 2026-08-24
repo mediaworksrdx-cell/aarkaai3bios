@@ -13,6 +13,7 @@ interface Message {
 
 const MODEL_OPTIONS = [
   { id: 'gemini-3.7-flash', label: '♊ Gemini 3.7 Flash', desc: 'Google Vertex AI Flash Model' },
+  { id: 'gemini-3.7-flash', label: '♊ Gemini 3.7 Flash', desc: 'Google Vertex AI Pro Reasoning' },
 ];
 
 const SUGGESTED_PROMPTS = [
@@ -28,7 +29,7 @@ export default function FinGenIQChatbot() {
     {
       id: 'welcome-1',
       sender: 'assistant',
-      text: "ðŸ‘‹ Hello! I am **FinGenIQ AI Tutor** powered by **Google Gemini**.\n\nAsk me anything about financial education, investments, stock analysis, SEBI certifications, or budgeting!",
+      text: "👋 Hello! I am **FinGenIQ AI Tutor** powered by **Google Gemini**.\n\nAsk me anything about financial education, investments, stock analysis, SEBI certifications, or budgeting!",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -166,7 +167,7 @@ export default function FinGenIQChatbot() {
           msg.id === assistantMsgId
             ? {
                 ...msg,
-                text: `âš ï¸ **Connection Error**: ${err.message || 'Unable to connect to AI server.'}`,
+                text: `⚠️ **Connection Error**: ${err.message || 'Unable to connect to AI server.'}`,
                 isStreaming: false,
               }
             : msg
@@ -204,7 +205,7 @@ export default function FinGenIQChatbot() {
         title="Open FinGenIQ AI Assistant"
         aria-label="Open AI Assistant"
       >
-        {isOpen ? 'âœ•' : 'ðŸ’¬'}
+        {isOpen ? '✕' : '💬'}
       </button>
 
       {/* Chat Window Container */}
@@ -335,7 +336,7 @@ export default function FinGenIQChatbot() {
                     whiteSpace: 'pre-wrap',
                   }}
                 >
-                  {msg.text || (msg.isStreaming ? 'âš¡ Thinking...' : '')}
+                  {msg.text || (msg.isStreaming ? '⚡ Thinking...' : '')}
                 </div>
                 <div
                   style={{
@@ -373,7 +374,7 @@ export default function FinGenIQChatbot() {
                         transition: 'background 0.2s ease',
                       }}
                     >
-                      ðŸ’¡ {prompt}
+                      💡 {prompt}
                     </button>
                   ))}
                 </div>
