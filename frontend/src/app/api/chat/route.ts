@@ -26,8 +26,8 @@ export async function POST(request: NextRequest) {
     const effort = body.effort || 'medium';
 
     // Map to active backend engine targets
-    if (modelOverride === 'gemini-2.5' || modelOverride.startsWith('gemini')) {
-      modelOverride = 'gemini-2.5';
+    if (modelOverride === 'gemini-3.7' || modelOverride.startsWith('gemini')) {
+      modelOverride = 'gemini-3.7';
     } else {
       modelOverride = 'aarka-2.0';
     }

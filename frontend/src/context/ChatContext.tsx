@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Conversation, Message, EffortLevel } from '@/types';
@@ -65,7 +65,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
         if (savedModel === 'aarkaa-7b' || savedModel === 'aarkaa-3b' || savedModel === 'aarkaa-2.0' || savedModel === 'aarka-2.0') {
           setSelectedModelState('aarka-2.0');
         } else if (savedModel.startsWith('gemini')) {
-          setSelectedModelState('gemini-2.5');
+          setSelectedModelState('gemini-3.7');
         } else {
           setSelectedModelState(savedModel);
         }
@@ -154,7 +154,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
     const normalized = model === 'aarkaa-7b' || model === 'aarkaa-3b' || model === 'aarkaa-2.0' || model === 'aarka-2.0'
       ? 'aarka-2.0'
       : model.startsWith('gemini')
-      ? 'gemini-2.5'
+      ? 'gemini-3.7'
       : model;
     setSelectedModelState(normalized);
     try {
@@ -273,7 +273,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
         role: 'assistant',
         content: '',
         timestamp: Date.now(),
-        modelUsed: model === 'gemini-2.5' ? 'Google Gemini 2.5' : 'Aarka AI',
+        modelUsed: model === 'gemini-3.7' ? 'Google Gemini 3.7' : 'Aarka AI',
         effort: effort,
         isStreaming: true,
       };
@@ -301,7 +301,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
       abortControllerRef.current = new AbortController();
 
       let accumulated = '';
-      let finalModel = model === 'gemini-2.5' ? 'Google Gemini 2.5' : 'Aarka AI';
+      let finalModel = model === 'gemini-3.7' ? 'Google Gemini 3.7' : 'Aarka AI';
 
       try {
         const stream = streamChat(text, convId, model, effort, undefined, abortControllerRef.current.signal);

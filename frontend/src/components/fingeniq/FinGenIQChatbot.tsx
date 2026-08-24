@@ -12,8 +12,7 @@ interface Message {
 }
 
 const MODEL_OPTIONS = [
-  { id: 'gemini-2.5-flash', label: '♊ Gemini 2.5 Flash', desc: 'Google Vertex AI Flash Model' },
-  { id: 'gemini-2.5-pro', label: '♊ Gemini 2.5 Pro', desc: 'Google Vertex AI Pro Reasoning' },
+  { id: 'gemini-3.7-flash', label: '♊ Gemini 3.7 Flash', desc: 'Google Vertex AI Flash Model' },
 ];
 
 const SUGGESTED_PROMPTS = [
@@ -29,12 +28,12 @@ export default function FinGenIQChatbot() {
     {
       id: 'welcome-1',
       sender: 'assistant',
-      text: "👋 Hello! I am **FinGenIQ AI Tutor** powered by **Google Gemini**.\n\nAsk me anything about financial education, investments, stock analysis, SEBI certifications, or budgeting!",
+      text: "ðŸ‘‹ Hello! I am **FinGenIQ AI Tutor** powered by **Google Gemini**.\n\nAsk me anything about financial education, investments, stock analysis, SEBI certifications, or budgeting!",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
   const [input, setInput] = useState('');
-  const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
+  const [selectedModel, setSelectedModel] = useState('gemini-3.7-flash');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -167,7 +166,7 @@ export default function FinGenIQChatbot() {
           msg.id === assistantMsgId
             ? {
                 ...msg,
-                text: `⚠️ **Connection Error**: ${err.message || 'Unable to connect to AI server.'}`,
+                text: `âš ï¸ **Connection Error**: ${err.message || 'Unable to connect to AI server.'}`,
                 isStreaming: false,
               }
             : msg
@@ -205,7 +204,7 @@ export default function FinGenIQChatbot() {
         title="Open FinGenIQ AI Assistant"
         aria-label="Open AI Assistant"
       >
-        {isOpen ? '✕' : '💬'}
+        {isOpen ? 'âœ•' : 'ðŸ’¬'}
       </button>
 
       {/* Chat Window Container */}
@@ -336,7 +335,7 @@ export default function FinGenIQChatbot() {
                     whiteSpace: 'pre-wrap',
                   }}
                 >
-                  {msg.text || (msg.isStreaming ? '⚡ Thinking...' : '')}
+                  {msg.text || (msg.isStreaming ? 'âš¡ Thinking...' : '')}
                 </div>
                 <div
                   style={{
@@ -374,7 +373,7 @@ export default function FinGenIQChatbot() {
                         transition: 'background 0.2s ease',
                       }}
                     >
-                      💡 {prompt}
+                      ðŸ’¡ {prompt}
                     </button>
                   ))}
                 </div>

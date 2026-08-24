@@ -42,8 +42,8 @@ export const MODEL_OPTIONS: ModelOption[] = [
     icon: '⚡',
   },
   {
-    id: 'gemini-2.5',
-    label: 'Google Gemini 2.5',
+    id: 'gemini-3.7',
+    label: 'Google Gemini 3.7',
     icon: '✨',
   },
 ];

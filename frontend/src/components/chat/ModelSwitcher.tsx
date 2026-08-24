@@ -26,7 +26,7 @@ export function ModelSwitcher({
   const activeModelId = selectedModel === 'aarkaa-2.0' || selectedModel === 'aarkaa-7b' || selectedModel === 'aarkaa-3b' || selectedModel === 'aarka-2.0'
     ? 'aarka-2.0'
     : selectedModel.startsWith('gemini')
-    ? 'gemini-2.5'
+    ? 'gemini-3.7'
     : selectedModel;
 
   const currentModel = MODEL_OPTIONS.find(m => m.id === activeModelId) || MODEL_OPTIONS[0];
