@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import FinGenIQChatbot from '@/components/chat/FinGenIQChatbot';
+import FinGenIQChatbot from './FinGenIQChatbot';
 
 export const metadata: Metadata = {
   title: { default: 'FingenIQ — Learn. Grow. Prosper.', template: '%s — FingenIQ' },
