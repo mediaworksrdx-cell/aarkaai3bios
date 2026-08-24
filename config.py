@@ -65,7 +65,7 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY", "")
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")  # Must be a valid Vertex AI model ID
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")  # Must be a valid Vertex AI model ID
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
 
 # Guard against insecure default secret key in production

@@ -38,19 +38,27 @@ def _get_genai_client():
         return genai.Client(api_key=gemini_key)
     
     # Use Vertex AI via Service Account / ADC
+    # Force the base non-regionalized endpoint — newer models (gemini-3.7-flash+)
+    # are not served from region-prefixed hostnames (e.g. us-central1-aiplatform.googleapis.com).
+    # See: https://github.com/anomalyco/opencode/issues/10040
     project = os.getenv("VERTEX_PROJECT") or getattr(config, "VERTEX_PROJECT", "orbital-heaven-504004-s2")
     location = os.getenv("VERTEX_LOCATION") or getattr(config, "VERTEX_LOCATION", "us-central1")
-    return genai.Client(vertexai=True, project=project, location=location)
+    return genai.Client(
+        vertexai=True,
+        project=project,
+        location=location,
+        http_options={"api_version": "v1beta1", "base_url": f"https://aiplatform.googleapis.com/"},
+    )
 
 
 def stream_gemini_response(
     query: str,
     context: str = "",
     system_prompt: str = "",
-    model_name: str = "gemini-2.5-flash"
+    model_name: str = "gemini-3.7-flash"
 ) -> Generator[str, None, None]:
     """
-    Stream live tokens for Google Gemini 2.5 via Vertex AI or Google GenAI SDK.
+    Stream live tokens for Google Gemini 3.7 via Vertex AI or Google GenAI SDK.
     """
     try:
         client = _get_genai_client()
@@ -61,9 +69,9 @@ def stream_gemini_response(
             prompt += f"Context:\n{context}\n\n"
         prompt += f"User:\n{query}"
 
-        target_model = "gemini-2.5-flash"
+        target_model = "gemini-3.7-flash"
         if "pro" in model_name:
-            target_model = "gemini-2.5-pro"
+            target_model = "gemini-3.7-flash"
 
         response = client.models.generate_content_stream(
             model=target_model,
@@ -78,7 +86,7 @@ def stream_gemini_response(
 
     # High-performance native fallback via Aarkaa Neural Engine
     from modules import aarkaa_engine
-    gemini_system = "You are Google Gemini 2.5, an advanced AI model developed by Google. Answer with high technical precision, structured insights, and clarity."
+    gemini_system = "You are Google Gemini 3.7, an advanced AI model developed by Google. Answer with high technical precision, structured insights, and clarity."
     effective_system = (system_prompt + "\n\n" + gemini_system) if system_prompt else gemini_system
     for token in aarkaa_engine.stream_final_response(query, context, effective_system):
         yield token
@@ -100,7 +108,7 @@ def stream_aarka_response(
     )
     effective_system = (system_prompt + "\n\n" + aarka_persona) if system_prompt else aarka_persona
     
-    # Try high-speed streaming via Vertex AI Gemini 2.5 engine
+    # Try high-speed streaming via Vertex AI Gemini 3.7 engine
     try:
         client = _get_genai_client()
         prompt = f"System Instructions:\n{effective_system}\n\n"
@@ -116,7 +124,7 @@ def stream_aarka_response(
         prompt += f"User:\n{query}"
 
         response = client.models.generate_content_stream(
-            model="gemini-2.5-flash",
+            model="gemini-3.7-flash",
             contents=prompt,
         )
         for chunk in response:

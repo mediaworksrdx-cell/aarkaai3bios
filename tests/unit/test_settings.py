@@ -95,9 +95,9 @@ class TestUserSettingsSchemas(unittest.TestCase):
 
     def test_settings_update_partial(self):
         from schemas import UserSettingsUpdate
-        req = UserSettingsUpdate(default_model="gemini-2.5-flash")
+        req = UserSettingsUpdate(default_model="gemini-3.7-flash")
         dump = req.model_dump(exclude_unset=True)
-        self.assertEqual(dump, {"default_model": "gemini-2.5-flash"})
+        self.assertEqual(dump, {"default_model": "gemini-3.7-flash"})
 
     def test_settings_update_empty(self):
         from schemas import UserSettingsUpdate
@@ -121,7 +121,7 @@ class TestUserSettingsSchemas(unittest.TestCase):
     def test_settings_response_defaults(self):
         from schemas import UserSettingsResponse
         resp = UserSettingsResponse(user_id="test-123")
-        self.assertEqual(resp.default_model, "aarkaa-7b")
+        self.assertEqual(resp.default_model, "aarka-2.0")
         self.assertEqual(resp.response_style, "balanced")
         self.assertEqual(resp.theme, "dark")
         self.assertTrue(resp.streaming_enabled)

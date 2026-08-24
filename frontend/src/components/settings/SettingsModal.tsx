@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -117,7 +117,7 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
   const [incognitoChat, setIncognitoChat] = useState(false);
 
   // Model & Reasoning Settings
-  const [defaultModel, setDefaultModel] = useState<'aarka-2.0' | 'gemini-2.5'>('aarka-2.0');
+  const [defaultModel, setDefaultModel] = useState<'aarka-2.0' | 'gemini-3.7'>('aarka-2.0');
   const [defaultEffort, setDefaultEffort] = useState<'low' | 'medium' | 'high'>('medium');
 
   // Thinking Settings
@@ -154,7 +154,7 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
 
   // Developer API Keys (Masked only)
   const [apiKeys, setApiKeys] = useState<{ id: string; name: string; maskedKey: string; created: string }[]>([
-    { id: 'k1', name: 'Production Agent Key', maskedKey: 'ark-live-9f2e••••••••••••••••3a81', created: '2026-08-10' },
+    { id: 'k1', name: 'Production Agent Key', maskedKey: 'ark-live-9f2eâ€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢3a81', created: '2026-08-10' },
   ]);
   const [newKeyName, setNewKeyName] = useState('');
 
@@ -287,7 +287,7 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
   const handleGenerateApiKey = () => {
     if (!newKeyName.trim()) return;
     const randomSuffix = Math.random().toString(36).substring(2, 6);
-    const masked = `ark-live-${randomSuffix}••••••••••••••••${Date.now().toString(36).slice(-4)}`;
+    const masked = `ark-live-${randomSuffix}â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢${Date.now().toString(36).slice(-4)}`;
     setApiKeys([...apiKeys, { id: 'k-' + Date.now(), name: newKeyName.trim(), maskedKey: masked, created: new Date().toISOString().split('T')[0] }]);
     setNewKeyName('');
   };
@@ -413,15 +413,15 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
                     className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
                   >
                     <option value="en">English (US / Global)</option>
-                    <option value="hi">Hindi (हिंदी)</option>
-                    <option value="ta">Tamil (தமிழ்)</option>
-                    <option value="te">Telugu (తెలుగు)</option>
-                    <option value="kn">Kannada (ಕನ್ನಡ)</option>
-                    <option value="ml">Malayalam (മലയാളം)</option>
-                    <option value="mr">Marathi (मराठी)</option>
-                    <option value="bn">Bengali (বাংলা)</option>
-                    <option value="gu">Gujarati (ગુજરાતી)</option>
-                    <option value="pa">Punjabi (ਪੰਜਾਬੀ)</option>
+                    <option value="hi">Hindi (à¤¹à¤¿à¤‚à¤¦à¥€)</option>
+                    <option value="ta">Tamil (à®¤à®®à®¿à®´à¯)</option>
+                    <option value="te">Telugu (à°¤à±†à°²à±à°—à±)</option>
+                    <option value="kn">Kannada (à²•à²¨à³à²¨à²¡)</option>
+                    <option value="ml">Malayalam (à´®à´²à´¯à´¾à´³à´‚)</option>
+                    <option value="mr">Marathi (à¤®à¤°à¤¾à¤ à¥€)</option>
+                    <option value="bn">Bengali (à¦¬à¦¾à¦‚à¦²à¦¾)</option>
+                    <option value="gu">Gujarati (àª—à«àªœàª°àª¾àª¤à«€)</option>
+                    <option value="pa">Punjabi (à¨ªà©°à¨œà¨¾à¨¬à©€)</option>
                   </select>
                 </div>
 
@@ -684,14 +684,14 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
 
                     <button
                       type="button"
-                      onClick={() => setDefaultModel('gemini-2.5')}
+                      onClick={() => setDefaultModel('gemini-3.7')}
                       className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
-                        defaultModel === 'gemini-2.5' ? 'border-[var(--accent-primary)] bg-[var(--accent-muted)]' : 'border-[var(--border)] bg-[var(--bg-secondary)]'
+                        defaultModel === 'gemini-3.7' ? 'border-[var(--accent-primary)] bg-[var(--accent-muted)]' : 'border-[var(--border)] bg-[var(--bg-secondary)]'
                       }`}
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <Cpu className="w-4 h-4 text-blue-400" />
-                        <span className="text-xs font-bold text-[var(--text-primary)]">Google Gemini 2.5</span>
+                        <span className="text-xs font-bold text-[var(--text-primary)]">Google Gemini 3.7</span>
                       </div>
                       <span className="text-[11px] text-[var(--text-secondary)] block">
                         Multimodal partner model with extended context capabilities.
@@ -928,7 +928,7 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
                   <div className="flex items-center justify-between text-xs py-1 border-b border-[var(--border)]">
                     <div>
                       <span className="text-[var(--text-primary)] font-medium block">Current Browser Session</span>
-                      <span className="text-[10px] text-[var(--text-tertiary)]">IP: 136.85.114.150 · Last active: Now</span>
+                      <span className="text-[10px] text-[var(--text-tertiary)]">IP: 136.85.114.150 Â· Last active: Now</span>
                     </div>
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-500">Active</span>
                   </div>

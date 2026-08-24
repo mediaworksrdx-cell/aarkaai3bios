@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 
 # Valid option sets for settings validation
 VALID_MODELS = {
-    "aarka-2.0", "aarkaa-7b", "aarkaa-3b", "gemini-2.5", "gemini-2.5-flash", "gemini-2.5-pro",
+    "aarka-2.0", "aarkaa-7b", "aarkaa-3b",
+    "gemini-3.7", "gemini-3.7-flash",
+    "gemini-2.5", "gemini-2.5-flash", "gemini-2.5-pro",  # backward compat with stored user prefs
 }
 VALID_RESPONSE_STYLES = {"concise", "balanced", "detailed", "professional"}
 VALID_THEMES = {"dark", "light", "auto"}

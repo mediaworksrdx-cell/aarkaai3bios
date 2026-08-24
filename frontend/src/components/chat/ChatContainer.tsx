@@ -64,7 +64,7 @@ export function ChatContainer({
     exportToPdf({
       title: activeConversation?.title || 'Aarka AI Conversation',
       content: getFullConversationText(),
-      modelUsed: selectedModel === 'gemini-2.5' ? 'Google Gemini 2.5' : 'Aarka AI',
+      modelUsed: selectedModel === 'gemini-3.7' ? 'Google Gemini 3.7' : 'Aarka AI',
     });
   };
 
@@ -73,7 +73,7 @@ export function ChatContainer({
     exportToWord({
       title: activeConversation?.title || 'Aarka AI Conversation',
       content: getFullConversationText(),
-      modelUsed: selectedModel === 'gemini-2.5' ? 'Google Gemini 2.5' : 'Aarka AI',
+      modelUsed: selectedModel === 'gemini-3.7' ? 'Google Gemini 3.7' : 'Aarka AI',
     });
   };
 

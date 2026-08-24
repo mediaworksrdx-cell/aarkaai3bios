@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 import io
 import os
 import subprocess
@@ -379,7 +379,7 @@ html_template = f"""<!DOCTYPE html>
     This report delivers a rigorous technical evaluation of the complete AARKAAI enterprise AI platform following full-stack remediation and cloud deployment. AARKAAI represents a multi-tiered intelligent agent system integrating an on-premise/hybrid LLM inference pipeline, semantic search routers, real-time streaming engines, cross-platform clients (Web, iOS, Android), and production infrastructure hosted on Google Cloud Platform. The objective of this audit is to verify architectural soundness, concurrency safety, data privacy, cryptographic security, and client-server resilience prior to public enterprise operations.
   </p>
   <p>
-    Across comprehensive evaluations spanning six core domains—Backend Architecture, Inference Concurrency, Web Application Security, Native Mobile Clients, Cloud Infrastructure, and Data Privacy—the platform achieved an aggregate score of <strong>9.4 / 10 (Enterprise Ready)</strong>. Critical vulnerabilities identified in earlier phases, including unprotected token caches, unrestricted Cross-Origin Policies, race conditions in llama.cpp engine instances, and plaintext key exposures in repository histories, have been systematically eliminated.
+    Across comprehensive evaluations spanning six core domainsâ€”Backend Architecture, Inference Concurrency, Web Application Security, Native Mobile Clients, Cloud Infrastructure, and Data Privacyâ€”the platform achieved an aggregate score of <strong>9.4 / 10 (Enterprise Ready)</strong>. Critical vulnerabilities identified in earlier phases, including unprotected token caches, unrestricted Cross-Origin Policies, race conditions in llama.cpp engine instances, and plaintext key exposures in repository histories, have been systematically eliminated.
   </p>
 
   <h2>2. System Assessment Radar</h2>
@@ -418,7 +418,7 @@ html_template = f"""<!DOCTYPE html>
 
   <h2>1. Backend Core &amp; Model Execution Architecture</h2>
   <p>
-    The core backend service is engineered on FastAPI with asynchronous routing and multiprocessing workers. The inference subsystem combines localized GGUF/Llama models via <code>llama-cpp-python</code> with a secondary cloud fallback to Google Gemini 2.5 Flash through Vertex AI. To guarantee stability under concurrent multi-user load, inference calls inside <code>modules/aarkaa_engine.py</code> are guarded by thread-safe reentrant locks (<code>_model_lock</code>), eliminating simultaneous context buffer collisions.
+    The core backend service is engineered on FastAPI with asynchronous routing and multiprocessing workers. The inference subsystem combines localized GGUF/Llama models via <code>llama-cpp-python</code> with a secondary cloud fallback to Google Gemini 3.7 Flash through Vertex AI. To guarantee stability under concurrent multi-user load, inference calls inside <code>modules/aarkaa_engine.py</code> are guarded by thread-safe reentrant locks (<code>_model_lock</code>), eliminating simultaneous context buffer collisions.
   </p>
   <p>
     The pipeline orchestration module (<code>pipeline.py</code>) manages semantic intent classification, dynamic context window allocation, RAG vector retrieval, and live streaming token dispatch. In streaming mode (<code>/prompt/stream</code>), chunks are emitted in real-time with chunked transfer encoding, achieving average time-to-first-token (TTFT) of 120ms. Error handlers sanitize stack traces at the gateway boundary to prevent information leakage to unauthenticated clients.
@@ -460,7 +460,7 @@ html_template = f"""<!DOCTYPE html>
       </tr>
       <tr>
         <td><code>modules/external_agents.py</code></td>
-        <td>Gemini 2.5 / OpenAI Fallback Routers</td>
+        <td>Gemini 3.7 / OpenAI Fallback Routers</td>
         <td>Async non-blocking HTTP connection pool</td>
         <td><span class="badge badge-pass">Verified</span></td>
       </tr>
@@ -568,7 +568,7 @@ html_template = f"""<!DOCTYPE html>
 
   <h2>1. Security Architecture &amp; Threat Mitigation</h2>
   <p>
-    The security posture of AARKAAI was subjected to a comprehensive penetration analysis and configuration audit. Vulnerabilities identified in earlier revisions—such as DOM XSS vulnerabilities in the frontend Markdown parser, permissive iOS transport security flags, open internal service ports, and exposed credentials—have been remediated in compliance with OWASP Top 10 and SOC2 Type II standards.
+    The security posture of AARKAAI was subjected to a comprehensive penetration analysis and configuration audit. Vulnerabilities identified in earlier revisionsâ€”such as DOM XSS vulnerabilities in the frontend Markdown parser, permissive iOS transport security flags, open internal service ports, and exposed credentialsâ€”have been remediated in compliance with OWASP Top 10 and SOC2 Type II standards.
   </p>
   <p>
     Cross-Site Scripting (XSS) risks have been eliminated by enforcing strict entity encoding and sanitizing all user-generated and LLM-generated HTML before rendering. The Content Security Policy in <code>next.config.ts</code> was hardened to explicitly deny <code>'unsafe-eval'</code> and restrict script and frame sources exclusively to trusted first-party and authenticated OAuth domains.
