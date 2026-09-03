@@ -1702,6 +1702,9 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 )
                 is_general = intent in ["general_query", "web_lookup", "news_search", "science_query", "tech_info", "finance_general", "health_query", "history_query", ""] or not intent
                 tokens = MAX_TOKENS
+                is_tutor_or_concise = any(w in query.lower() for w in ["tutor", "concise", "brief", "2 paragraph", "in two", "short", "quick", "explain in"])
+                if is_tutor_or_concise:
+                    tokens = min(tokens, 400)
                 is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
                 is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
                     all(w in query.lower() for w in ["gpu", "schedul", "queu", "cost", "isolation"])
