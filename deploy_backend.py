@@ -17,7 +17,7 @@ import os
 # ─── Configuration ────────────────────────────────────────────────────────────
 KEY = r"C:\Users\daarv\.ssh\id_ed25519"
 USER = "sathishbadri2015"
-HOST = "136.85.114.150"
+HOST = "35.225.45.190"
 SSH_OPTS = ["-o", "StrictHostKeyChecking=no", "-i", KEY]
 
 LOCAL_BACKEND = os.path.dirname(os.path.abspath(__file__))
