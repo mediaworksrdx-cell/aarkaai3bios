@@ -1751,7 +1751,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
 
     async def _stream_in_thread(gen_func, *args, **kwargs):
         """Run a blocking generator in a thread and yield tokens via asyncio.Queue."""
-        q: asyncio.Queue = asyncio.Queue(maxsize=64)
+        q: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_event_loop()
 
         def _producer():
