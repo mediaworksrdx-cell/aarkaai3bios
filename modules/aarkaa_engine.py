@@ -973,7 +973,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = MAX_TOKENS
+            tokens = min(MAX_TOKENS, 300)
         elif any(w in q_lower for w in ["code", "program", "function", "script", "write", "implement", "create a"]):
             system_prompt = (
                 "You are AARKAA, an expert programming AI assistant."
@@ -982,7 +982,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f" You MUST respond ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = MAX_TOKENS
+            tokens = min(MAX_TOKENS, 300)
         else:
             is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
             is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:", "plan a", "project plan", "saas", "roadmap"]) or (
@@ -1025,7 +1025,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f"You MUST write your response ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = MAX_TOKENS
+            tokens = min(MAX_TOKENS, 300)
         temp = _get_temperature(query, "general_query")
         response = _generate(prompt, max_new_tokens=tokens, temperature=temp)
         confidence = min(0.9, 0.5 + len(response.split()) / 150)
@@ -1429,7 +1429,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT: %s", prompt)
-        tokens = MAX_TOKENS
+        tokens = min(MAX_TOKENS, 300)
         return prompt, tokens, 0.0  # temperature 0.0 for deterministic, precise reasoning
 
     is_rhetorical = intent in ["persuasion", "debate", "comparison", "roleplay"]
@@ -1484,7 +1484,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT (rhetorical):\n%s", prompt)
-        tokens = MAX_TOKENS
+        tokens = min(MAX_TOKENS, 300)
         temp = 0.75 if intent in ["persuasion", "roleplay"] else 0.4
         return prompt, tokens, temp
     is_design = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
@@ -1509,7 +1509,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
         )
         prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT (is_design):\n%s", prompt)
-        tokens = MAX_TOKENS
+        tokens = min(MAX_TOKENS, 300)
         return prompt, tokens, 0.7
 
     is_code = intent == "coding_help" or any(
@@ -1648,7 +1648,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 if lang != "en":
                     user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
-                tokens = MAX_TOKENS
+                tokens = min(MAX_TOKENS, 300)
             else:
                 system_prompt = (
                     "You are Aarkaa AI, created by Synthetix Analytics.\n\n"
@@ -1701,10 +1701,10 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
                 )
                 is_general = intent in ["general_query", "web_lookup", "news_search", "science_query", "tech_info", "finance_general", "health_query", "history_query", ""] or not intent
-                tokens = MAX_TOKENS
-                is_tutor_or_concise = any(w in query.lower() for w in ["tutor", "concise", "brief", "2 paragraph", "in two", "short", "quick", "explain in"])
+                tokens = min(MAX_TOKENS, 300)
+                is_tutor_or_concise = any(w in query.lower() for w in ["tutor", "concise", "brief", "2 paragraph", "in two", "short", "quick", "explain in", "context: lesson", "lesson", "user question:"])
                 if is_tutor_or_concise:
-                    tokens = min(tokens, 400)
+                    tokens = min(tokens, 260)
                 is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
                 is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
                     all(w in query.lower() for w in ["gpu", "schedul", "queu", "cost", "isolation"])
@@ -1777,7 +1777,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     user_prompt += f" Write your entire response ONLY in the following language: {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
                 if "has_finance" not in locals() or not has_finance:
-                    tokens = MAX_TOKENS
+                    tokens = min(MAX_TOKENS, 300)
     temp = _get_temperature(query, intent, context)
     return prompt, tokens, temp
 

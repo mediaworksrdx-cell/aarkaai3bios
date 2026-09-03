@@ -88,7 +88,7 @@ def stream_gemini_response(
     from modules import aarkaa_engine
     gemini_system = "You are Google Gemini 3.7, an advanced AI model developed by Google. Answer with high technical precision, structured insights, and clarity."
     effective_system = (system_prompt + "\n\n" + gemini_system) if system_prompt else gemini_system
-    for token in aarkaa_engine.stream_final_response(query, context, effective_system):
+    for token in aarkaa_engine.stream_final_response(query, context, intent="general_query"):
         yield token
 
 
@@ -136,7 +136,7 @@ def stream_aarka_response(
 
     # Local Neural Engine Fallback
     from modules import aarkaa_engine
-    for token in aarkaa_engine.stream_final_response(query, context, effective_system):
+    for token in aarkaa_engine.stream_final_response(query, context, intent="general_query"):
         yield token
 
 
