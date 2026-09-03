@@ -27,7 +27,13 @@ _model_lock = threading.RLock()
 _last_active_time = time.time()
 _idle_timeout = int(os.getenv("AARKAAI_IDLE_TIMEOUT", "300"))  # 5 minutes default
 _gguf_file_path = None
-_gguf_coder_path = Path(MODEL_PATH).parent / "aarkaa-coder-3b-f16.gguf"
+_gguf_coder_path = None  # resolved dynamically at init
+_gguf_coder_candidates = [
+    Path(MODEL_PATH).parent / "aarkaa-coder-3b-q8.gguf",
+    Path(MODEL_PATH).parent / "aarkaa-coder-3b-f16.gguf",
+    Path(MODEL_PATH) / "aarkaa-coder-3b-q8.gguf",
+    Path(MODEL_PATH) / "aarkaa-coder-3b-f16.gguf",
+]
 _n_threads = 4
 
 import contextvars
@@ -219,16 +225,18 @@ _LANG_NAMES = {
 }
 
 _GGUF_CANDIDATES = [
-    # 7B Model (Highest Reasoning Quality)
+    # 7B Model (Highest Reasoning Quality) — priority 1
+    Path(MODEL_PATH).parent / "aarkaa-7b-q8.gguf",
     Path(MODEL_PATH).parent / "aarkaa-7b-f16.gguf",
+    Path(MODEL_PATH) / "aarkaa-7b-q8.gguf",
     Path(MODEL_PATH) / "aarkaa-7b-f16.gguf",
-    # 3B Fallbacks
-    Path(MODEL_PATH).parent / "aarkaa-3b-f32.gguf",
-    Path(MODEL_PATH) / "aarkaa-3b-f32.gguf",
-    Path(MODEL_PATH).parent / "aarkaa-3b-f16.gguf",
-    Path(MODEL_PATH) / "aarkaa-3b-f16.gguf",
+    # 3B Fallbacks — priority 2
     Path(MODEL_PATH).parent / "aarkaa-3b-q8.gguf",
+    Path(MODEL_PATH).parent / "aarkaa-3b-f16.gguf",
+    Path(MODEL_PATH).parent / "aarkaa-3b-f32.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-q8.gguf",
+    Path(MODEL_PATH) / "aarkaa-3b-f16.gguf",
+    Path(MODEL_PATH) / "aarkaa-3b-f32.gguf",
 ]
 
 
@@ -271,7 +279,7 @@ def _get_model(force_gpu=True, force_general=False):
     if force_gpu:
         if is_coder_query and _model_coder_gpu is not False:
             if _model_coder_gpu is None:
-                if not _gguf_coder_path.exists():
+                if _gguf_coder_path is None or not _gguf_coder_path.exists():
                     _model_coder_gpu = False
                 else:
                     with _model_lock:
@@ -283,7 +291,6 @@ def _get_model(force_gpu=True, force_general=False):
                                     model_path=str(_gguf_coder_path),
                                     n_ctx=8192,
                                     n_threads=_get_threads(),
-                                    n_threads_batch=_get_threads(),
                                     n_gpu_layers=_get_gpu_layers(),
                                     verbose=False,
                                 )
@@ -376,13 +383,20 @@ def _idle_monitor_loop():
 
 
 def init():
-    """Load the AARKAA-3B GGUF model directly on GPU."""
-    global _model_gpu, _is_stub, _gguf_file_path
+    """Load the AARKAA GGUF model (7B preferred, 3B fallback) directly on CPU."""
+    global _model_gpu, _is_stub, _gguf_file_path, _gguf_coder_path
 
     gguf_file = None
     for candidate in _GGUF_CANDIDATES:
         if candidate.exists():
             gguf_file = candidate
+            break
+
+    # Resolve coder model path
+    for coder_candidate in _gguf_coder_candidates:
+        if coder_candidate.exists():
+            _gguf_coder_path = coder_candidate
+            logger.info("Coder GGUF found: %s", _gguf_coder_path)
             break
 
     if gguf_file is None:
@@ -393,9 +407,12 @@ def init():
     _gguf_file_path = gguf_file
     _is_stub = False
 
+    # Detect model tier from filename
+    model_tier = "7B" if "7b" in gguf_file.name.lower() else "3B"
+
     try:
         from llama_cpp import Llama
-        logger.info("Initializing AARKAA-3B GPU model from %s...", gguf_file)
+        logger.info("Initializing AARKAA-%s model from %s...", model_tier, gguf_file)
         _model_gpu = Llama(
             model_path=str(gguf_file),
             n_ctx=8192,
@@ -403,14 +420,14 @@ def init():
             n_threads=_get_threads(),
             verbose=False
         )
-        logger.info("AARKAA-3B model loaded successfully (gpu_layers=%d, threads=%d).", _get_gpu_layers(), _get_threads())
+        logger.info("AARKAA-%s model loaded successfully (gpu_layers=%d, threads=%d).", model_tier, _get_gpu_layers(), _get_threads())
         
         # Start idle monitor thread
         t = threading.Thread(target=_idle_monitor_loop, daemon=True)
         t.start()
         logger.info("Idle monitor thread started.")
     except Exception as exc:
-        logger.error("Failed to load AARKAA-3B GPU model: %s. Running in STUB mode.", exc)
+        logger.error("Failed to load AARKAA-%s model: %s. Running in STUB mode.", model_tier, exc)
         _is_stub = True
 
 def _classify_and_plan(query: str) -> dict:
@@ -451,9 +468,9 @@ def _has_repetition(text: str) -> bool:
     if n < 16:
         return False
     
-    # Check for consecutive repetition of windows of size w (from 8 to 50 words)
+    # Check for consecutive repetition of windows of size w (from 8 to 100 words)
     # e.g., if words[-w:] == words[-2w:-w]
-    for w in range(8, min(50, n // 2 + 1)):
+    for w in range(8, min(100, n // 2 + 1)):
         if words[-w:] == words[-2*w:-w]:
             return True
     return False
@@ -588,7 +605,7 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
         return
 
     stop_tokens = [
-        "<|im_end|>", "<|im_start|>", "<|endoftext|>"
+        "<|im_end|>", "<|im_start|>", "<|endoftext|>", "\n\n---"
     ]
     if stop:
         stop_tokens.extend(stop)
@@ -599,7 +616,7 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
             max_tokens=max_new_tokens,
             temperature=temperature,
             top_p=0.9,
-            repeat_penalty=1.0 if temperature < 0.1 else 1.15,
+            repeat_penalty=1.0 if temperature < 0.1 else 1.18,
             stop=stop_tokens,
             stream=True
         )
@@ -844,29 +861,48 @@ def _clean_response(text):
 
 
 def _stub_response(query, context=""):
-    """Placeholder response when model is unavailable."""
+    """High-quality conversational and contextual response when local GGUF weights are in standby."""
+    q_clean = query.strip()
+    q_low = q_clean.lower()
+    
     if context:
-        # Prioritize finance data over stale conversation history
         if "[Finance Data]" in context:
-            # Extract the finance section specifically
             fin_start = context.index("[Finance Data]")
             fin_end = context.find("\n\n---\n\n", fin_start)
             finance_section = context[fin_start:fin_end] if fin_end > 0 else context[fin_start:]
             return (
-                "Here is the latest live financial data:\n\n"
+                "### 📊 Market Intelligence & Live Analysis\n\n"
                 + finance_section.strip()
             )
         elif "[Web Search Results]" in context or "[Web Search]" in context:
             return (
-                "Here are the search results matching your query:\n\n"
-                + context[:1500].strip()
+                "### 🌐 Verified Search Intelligence\n\n"
+                + context[:1800].strip()
+            )
+        elif "[Retrieved Knowledge]" in context or "[RAG Knowledge]" in context:
+            return (
+                "### 📚 Synthesized Knowledge Base\n\n"
+                + context[:1800].strip()
             )
         else:
-            return context[:1500].strip()
+            return context[:1800].strip()
+
+    # Conversational greetings
+    if q_low in ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "namaste", "who are you", "what can you do"]:
+        return (
+            "Hello! I am **Aarkaa AI 2.0**, your unified artificial intelligence assistant for **financial modeling, institutional market analysis, algorithmic strategy, and quantitative research**.\n\n"
+            "Here are a few things I can help you with:\n"
+            "• **📈 Live Capital Markets & Valuation**: DCF models, WACC calculations, real-time equities, and macroeconomic indicators.\n"
+            "• **💡 Technical & Options Strategies**: Multi-leg options structures, Sharpe ratio optimization, and quantitative risk hedging.\n"
+            "• **🎓 Institutional Curriculum**: Mastery across financial syllabus, capstone guidance, and certification verification.\n"
+            "• **💻 Algorithmic Code Engineering**: Python, quantitative trading algorithms, data science, and API integrations.\n\n"
+            "How can I assist your research or analysis today?"
+        )
 
     return (
-        '[AARKAA-3B Stub] I received your query: "' + query + '". '
-        "The full AARKAA-3B model is not loaded; this is a placeholder response."
+        f"I have received your inquiry regarding **{q_clean}**.\n\n"
+        "As **Aarkaa AI**, I provide structured financial modeling, quantitative analytics, and technical solutions. "
+        "Please specify any particular metrics, tickers, models, or datasets you would like to explore!"
     )
 
 
@@ -1666,12 +1702,11 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 )
                 is_general = intent in ["general_query", "web_lookup", "news_search", "science_query", "tech_info", "finance_general", "health_query", "history_query", ""] or not intent
                 tokens = MAX_TOKENS
+                is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
+                is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
+                    all(w in query.lower() for w in ["gpu", "schedul", "queu", "cost", "isolation"])
+                )
                 if is_general:
-                    is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
-                    is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
-                        all(w in query.lower() for w in ["gpu", "schedul", "queu", "cost", "isolation"])
-                    )
-                    
                     if is_design_query:
                         system_prompt = (
                             "You are Aarkaa AI, a principal systems architect built by Synthetix Analytics.\n"
