@@ -222,3 +222,11 @@ HQR_ENABLE_PARALLEL = os.getenv("AARKAAI_HQR_PARALLEL", "true").lower() == "true
 # Confidence threshold below which simple data-only queries (e.g. "SBI price")
 # can return tool results directly without a 7B synthesis pass.
 HQR_BYPASS_LLM_THRESHOLD = float(os.getenv("AARKAAI_HQR_BYPASS_THRESHOLD", "0.92"))
+
+# ─── Modal Serverless GPU Engine ─────────────────────────────────────────────
+MODAL_GPU_ENDPOINT = os.getenv(
+    "MODAL_GPU_ENDPOINT",
+    "https://mediaworksr--aarkaa-inference-aarkaagpu-endpoint.modal.run"
+)
+MODAL_GPU_ENABLED = os.getenv("MODAL_GPU_ENABLED", "true").lower() == "true"
+
