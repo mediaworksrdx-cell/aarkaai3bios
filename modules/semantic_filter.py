@@ -32,6 +32,11 @@ _DOMAIN_KEYWORDS: dict[str, list[str]] = {
         "commodity", "gold", "silver", "oil", "nifty", "sensex", "nasdaq",
         "trading", "investment", "dividend", "portfolio", "etf", "mutual fund",
         "bull", "bear", "ipo", "ticker", "earnings", "revenue",
+        "smc", "smart money", "smart money concepts", "order block", "order flow",
+        "fvg", "fair value gap", "bos", "choch", "mss", "liquidity", "liquidity sweep",
+        "market structure", "price action", "technical chart", "technical analysis",
+        "candlestick", "support", "resistance", "break of structure", "change of character",
+        "chart", "fibonacci", "rsi", "macd", "indicator",
         # Hindi
         "शेयर", "बाजार", "कीमत", "सोना", "चांदी", "निवेश", "मुनाफा",
         # Spanish
@@ -379,6 +384,18 @@ def classify(query: str) -> dict:
         best_domain = "technology"
         intent = "coding_help"
         confidence = max(confidence, 0.92)
+
+    import re
+    trading_keywords = [
+        "smc", "smart money", "smart money concepts", "order block", "order flow",
+        "fvg", "fair value gap", "bos", "choch", "mss", "liquidity sweep",
+        "market structure", "price action", "technical chart", "candlestick",
+        "support and resistance", "break of structure", "change of character",
+    ]
+    if any(re.search(r"\b" + re.escape(w) + r"\b", q_low) for w in trading_keywords):
+        best_domain = "finance"
+        intent = "finance_general"
+        confidence = max(confidence, 0.90)
 
     return {
         "domain": best_domain,
