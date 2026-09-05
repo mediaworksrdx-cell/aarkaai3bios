@@ -106,7 +106,9 @@ class AarkaaGPU:
         stop_tokens = [
             "<|im_end|>", "<|im_start|>", "<|endoftext|>",
             "\nBest regards", "\nBest Regards", "\nSincerely", "\n\n#", "\n#Aarkaa",
-            "Thank you for your question", "Please let me know if there is anything else"
+            "Thank you for your question", "Please let me know if there is anything else",
+            "(End of answer)", "(End of response)", "[End of answer]", "[End of response]",
+            "--- END", "(End of text)", "### End of Answer"
         ]
         if stop:
             stop_tokens.extend(stop)
@@ -133,7 +135,9 @@ class AarkaaGPU:
         stop_tokens = [
             "<|im_end|>", "<|im_start|>", "<|endoftext|>",
             "\nBest regards", "\nBest Regards", "\nSincerely", "\n\n#", "\n#Aarkaa",
-            "Thank you for your question", "Please let me know if there is anything else"
+            "Thank you for your question", "Please let me know if there is anything else",
+            "(End of answer)", "(End of response)", "[End of answer]", "[End of response]",
+            "--- END", "(End of text)", "### End of Answer"
         ]
         if stop:
             stop_tokens.extend(stop)

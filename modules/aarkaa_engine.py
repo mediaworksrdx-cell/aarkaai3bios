@@ -646,7 +646,9 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
         "<|im_end|>", "<|im_start|>", "<|endoftext|>", "\n\n---",
         "<|im_start|>user", "<|im_start|>system", "\nuser\n", "\nUser:", "\nQuestion:",
         "\nBest regards", "\nBest Regards", "\nSincerely", "\n\n#", "\n#Aarkaa",
-        "Thank you for your question", "Please let me know if there is anything else"
+        "Thank you for your question", "Please let me know if there is anything else",
+        "(End of answer)", "(End of response)", "[End of answer]", "[End of response]",
+        "--- END", "(End of text)", "### End of Answer"
     ]
     if stop:
         stop_tokens.extend(stop)
@@ -696,6 +698,11 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
             low_gen = generated_text.lower()
             if any(s in low_gen for s in ["best regards", "sincerely,", "yours truly", "thank you for your question", "please let me know if there is anything else"]):
                 logger.warning("Conversational closing detected in Modal GPU stream; terminating early.")
+                break
+
+            # Anti-end-marker guard: Terminate immediately if model outputs synthetic end markers
+            if any(m in low_gen for m in ["(end of answer)", "(end of response)", "[end of answer]", "[end of response]", "--- end"]):
+                logger.warning("Synthetic end marker detected in Modal GPU stream; terminating early.")
                 break
 
             # Strip leading "Thought:" / "Action Input:" header token
@@ -767,6 +774,11 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
                 low_gen = generated_text.lower()
                 if any(s in low_gen for s in ["best regards", "sincerely,", "yours truly", "thank you for your question", "please let me know if there is anything else"]):
                     logger.warning("Conversational closing detected in stream; terminating early.")
+                    break
+
+                # Anti-end-marker guard: Terminate immediately if model outputs synthetic end markers
+                if any(m in low_gen for m in ["(end of answer)", "(end of response)", "[end of answer]", "[end of response]", "--- end"]):
+                    logger.warning("Synthetic end marker detected in stream; terminating early.")
                     break
 
                 # Strip leading "Thought:" / "Action Input:" header token at beginning of output without blocking subsequent tokens
@@ -913,6 +925,20 @@ def _clean_response(text):
     ]
     for pat in closing_patterns:
         text = re.sub(pat, "", text, flags=re.DOTALL).strip()
+
+    # Strip synthetic end-of-answer/response markers (e.g. (End of answer)```, --- END OF ANSWER ---)
+    end_marker_patterns = [
+        r"(?i)\s*[\(\[]\s*end of (?:answer|response|text|explanation)\s*[\)\]][\s`]*",
+        r"(?i)\s*---+\s*end\s+(?:of\s+)?(?:answer|response|disclaimer|text)\s*---+[\s`]*",
+        r"(?i)\s*###\s*end of (?:answer|response|text)[\s`]*",
+    ]
+    for pat in end_marker_patterns:
+        text = re.sub(pat, "", text).strip()
+
+    # If the text has stray trailing backticks not part of a genuine markdown code block, remove them
+    code_syntax_markers = ["```python", "```javascript", "```bash", "```json", "```html", "```sql", "```ts", "```c"]
+    if not any(marker in text for marker in code_syntax_markers):
+        text = re.sub(r"\s*`{1,3}\s*$", "", text).strip()
 
     # Programmatically strip common email/letter salutations and sign-offs
     lines = text.split('\n')
@@ -1832,6 +1858,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "- STRICTLY FORBIDDEN: NEVER include sign-offs or closings (such as 'Best regards', 'Sincerely', 'Thank you for your question', 'Please let me know if there is anything else', or 'Aarkaa AI').\n"
                     "- STRICTLY FORBIDDEN: NEVER output social media hashtags, SEO tags, or promotional keyword lists (such as '#AarkaaAI', '#StockPrice', '#FinancialAnalysis').\n"
                     "- STRICTLY FORBIDDEN: NEVER parrot back internal data source references (such as 'fetched from Yahoo Finance') or attach disclaimers.\n"
+                    "- STRICTLY FORBIDDEN: NEVER append '(End of answer)', '(End of response)', or any meta-closure tags or stray backticks.\n"
                     "- End your answer immediately once the requested explanation or factual summary is complete.\n\n"
                     "Primary Objective:\n"
                     "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
