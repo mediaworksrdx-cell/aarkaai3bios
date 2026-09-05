@@ -127,4 +127,6 @@ workspace/
 # ChromaDB vector store (regenerable)
 # ══════════════════════════════════════════════════════════════════════════════
 chroma_db/
+*.tsbuildinfo
+*.jsonl
 

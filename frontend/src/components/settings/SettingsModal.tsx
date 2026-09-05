@@ -89,6 +89,7 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
   const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<TabId>('general');
   const [savedNotification, setSavedNotification] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // General Settings
   const [language, setLanguage] = useState('en');
@@ -238,12 +239,21 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
         web_search_enabled: webSearchEnabled,
         deep_research_enabled: deepResearchEnabled,
         market_data_enabled: marketDataEnabled,
+        // FIX H3: map frontend defaultEffort → backend reasoning_depth
+        reasoning_depth: defaultEffort,
       });
-    } catch {}
+      setSaveError(null);
+    } catch (err: any) {
+      // FIX M4: surface backend save errors to the user instead of silently swallowing
+      const msg = err?.message || 'Failed to save settings to server. Changes saved locally only.';
+      setSaveError(msg);
+      setTimeout(() => setSaveError(null), 4000);
+    }
 
     setSavedNotification(true);
     setTimeout(() => setSavedNotification(false), 2000);
   };
+
 
   const handleAddMemory = () => {
     if (!newMemoryFact.trim()) return;
@@ -318,6 +328,18 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
         className="relative w-full max-w-4xl h-[680px] bg-[var(--bg-primary)] border border-[var(--border-strong)] rounded-2xl shadow-[var(--shadow-float)] flex overflow-hidden flex-col md:flex-row animate-scale-up"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Save / Error notification bar */}
+        {savedNotification && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-xl bg-green-500/20 border border-green-500/40 text-green-600 text-xs font-semibold shadow-lg">
+            <CheckCircle2 className="w-3.5 h-3.5" /> Settings saved
+          </div>
+        )}
+        {saveError && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-xl bg-red-500/20 border border-red-500/40 text-red-600 text-xs font-semibold shadow-lg max-w-sm text-center">
+            ⚠ {saveError}
+          </div>
+        )}
+
         {/* Left Sidebar Navigation */}
         <div className="w-full md:w-64 border-b md:border-b-0 md:border-r border-[var(--border)] bg-[var(--bg-secondary)] flex flex-col flex-shrink-0">
           <div className="p-4 border-b border-[var(--border)] flex items-center justify-between">

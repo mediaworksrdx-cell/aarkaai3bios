@@ -5,9 +5,60 @@ const nextConfig: NextConfig = {
   async rewrites() {
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://127.0.0.1:5000';
     return [
+      // Auth flows
       {
         source: '/auth/:path*',
         destination: `${backendUrl}/auth/:path*`,
+      },
+      // Core API proxy — /api/* → backend (strips the /api prefix)
+      {
+        source: '/api/settings',
+        destination: `${backendUrl}/settings`,
+      },
+      {
+        source: '/api/rlhf',
+        destination: `${backendUrl}/rlhf`,
+      },
+      {
+        source: '/api/chat',
+        destination: `${backendUrl}/prompt`,
+      },
+      {
+        source: '/api/skills/:path*',
+        destination: `${backendUrl}/skills/:path*`,
+      },
+      {
+        source: '/api/subscription/:path*',
+        destination: `${backendUrl}/subscription/:path*`,
+      },
+      {
+        source: '/api/metrics',
+        destination: `${backendUrl}/metrics`,
+      },
+      // Direct backend passthrough (no /api prefix)
+      {
+        source: '/prompt/stream',
+        destination: `${backendUrl}/prompt/stream`,
+      },
+      {
+        source: '/prompt',
+        destination: `${backendUrl}/prompt`,
+      },
+      {
+        source: '/strategy',
+        destination: `${backendUrl}/strategy`,
+      },
+      {
+        source: '/health',
+        destination: `${backendUrl}/health`,
+      },
+      {
+        source: '/upload',
+        destination: `${backendUrl}/upload`,
+      },
+      {
+        source: '/download/:filename*',
+        destination: `${backendUrl}/download/:filename*`,
       },
     ];
   },

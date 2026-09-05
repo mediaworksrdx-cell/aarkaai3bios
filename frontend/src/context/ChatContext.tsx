@@ -5,6 +5,21 @@ import { Conversation, Message, EffortLevel } from '@/types';
 import { streamChat, submitFeedbackApi } from '@/lib/api';
 
 const STORAGE_KEY = 'aarka-conversations-v3';
+const SESSION_ACTIVE_KEY = 'aarka-active-conv-id';
+
+function isPageReload(): boolean {
+  if (typeof window === 'undefined' || typeof performance === 'undefined') return false;
+  try {
+    const navEntries = performance.getEntriesByType('navigation');
+    if (navEntries.length > 0) {
+      return (navEntries[0] as PerformanceNavigationTiming).type === 'reload';
+    }
+    // Fallback for older browsers
+    return (performance as any).navigation?.type === 1;
+  } catch {
+    return false;
+  }
+}
 
 export function generateId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -78,15 +93,27 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
     } catch {}
   }, []);
 
-  // Load conversations whenever user account changes
+  // Sync activeConversationId into sessionStorage so page refreshes in the same tab preserve it
+  useEffect(() => {
+    if (activeConversationId) {
+      try {
+        sessionStorage.setItem(SESSION_ACTIVE_KEY, activeConversationId);
+      } catch {}
+    }
+  }, [activeConversationId]);
+
+  // Load conversations whenever user account changes or app mounts
   useEffect(() => {
     try {
+      const isReload = isPageReload();
       const saved = localStorage.getItem(currentStorageKey);
+      let sanitized: Conversation[] = [];
+
       if (saved && saved !== 'undefined' && saved !== 'null') {
         try {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            const sanitized: Conversation[] = parsed
+            sanitized = parsed
               .filter(c => c && typeof c === 'object')
               .map(c => ({
                 id: c.id || generateId(),
@@ -108,19 +135,45 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
                 model: c.model || 'aarka-2.0',
                 effort: c.effort || 'high',
               }));
-
-            if (sanitized.length > 0) {
-              setConversations(sanitized);
-              setActiveConversationId(sanitized[0].id);
-              return;
-            }
           }
         } catch (e) {
           console.warn('Corrupted storage reset', e);
         }
       }
 
-      // Initial clean conversation for this user
+      // 1. REFRESH SCENARIO: User refreshed/reloaded the current tab.
+      // Retain the exact same conversation they were actively in.
+      let sessionActiveId: string | null = null;
+      try {
+        sessionActiveId = sessionStorage.getItem(SESSION_ACTIVE_KEY);
+      } catch {}
+
+      if (isReload && sessionActiveId) {
+        const matchingConv = sanitized.find(c => c.id === sessionActiveId);
+        if (matchingConv) {
+          setConversations(sanitized);
+          setActiveConversationId(matchingConv.id);
+          return;
+        }
+      }
+
+      // 2. NEW OPEN SCENARIO: New browser tab, new window, app launch, or fresh navigation.
+      // Every new open must start with a clean new conversation.
+      // Keep existing non-empty conversations in history so they appear in sidebar.
+      const existingWithMessages = sanitized.filter(c => Array.isArray(c.messages) && c.messages.length > 0);
+
+      // If the top conversation in storage is already empty (0 messages), reuse it
+      const topIsEmpty = sanitized[0] && (!sanitized[0].messages || sanitized[0].messages.length === 0);
+      if (topIsEmpty) {
+        setConversations(sanitized);
+        setActiveConversationId(sanitized[0].id);
+        try {
+          sessionStorage.setItem(SESSION_ACTIVE_KEY, sanitized[0].id);
+        } catch {}
+        return;
+      }
+
+      // Otherwise create a fresh new conversation for this new open session
       const initialId = generateId();
       const initialConv: Conversation = {
         id: initialId,
@@ -131,9 +184,14 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
         model: 'aarka-2.0',
         effort: 'high',
       };
-      setConversations([initialConv]);
+
+      const finalConvs = [initialConv, ...existingWithMessages];
+      setConversations(finalConvs);
       setActiveConversationId(initialId);
-      localStorage.setItem(currentStorageKey, JSON.stringify([initialConv]));
+      try {
+        sessionStorage.setItem(SESSION_ACTIVE_KEY, initialId);
+        localStorage.setItem(currentStorageKey, JSON.stringify(finalConvs));
+      } catch {}
     } catch (e) {
       console.warn('Failed to load user conversations', e);
     }
@@ -463,6 +521,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
     setActiveConversationId(freshId);
 
     try {
+      sessionStorage.setItem(SESSION_ACTIVE_KEY, freshId);
       localStorage.setItem(currentStorageKey, JSON.stringify([freshConv]));
       localStorage.removeItem('aarka-conv-v3-guest');
       localStorage.removeItem('aarka-conversations-v3');
