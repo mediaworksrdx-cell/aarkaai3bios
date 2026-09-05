@@ -644,7 +644,9 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
     """Run generation via Modal GPU (primary) or local llama.cpp (fallback), yielding tokens with repetition guard."""
     stop_tokens = [
         "<|im_end|>", "<|im_start|>", "<|endoftext|>", "\n\n---",
-        "<|im_start|>user", "<|im_start|>system", "\nuser\n", "\nUser:", "\nQuestion:"
+        "<|im_start|>user", "<|im_start|>system", "\nuser\n", "\nUser:", "\nQuestion:",
+        "\nBest regards", "\nBest Regards", "\nSincerely", "\n\n#", "\n#Aarkaa",
+        "Thank you for your question", "Please let me know if there is anything else"
     ]
     if stop:
         stop_tokens.extend(stop)
@@ -681,6 +683,19 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
 
             if "[Finance Data]" in generated_text or "Target (TGT)" in generated_text:
                 logger.warning("Unrequested financial ticker drift detected in Modal GPU stream; terminating generation.")
+                break
+
+            # Anti-hashtag guard: Terminate immediately if model begins social media hashtag soup
+            if "#" in token and len(generated_text) > 30 and not prompt_requests_code:
+                import re
+                if re.search(r'#[A-Za-z0-9_]{3,}', generated_text):
+                    logger.warning("Social media hashtag detected in Modal GPU stream; terminating early.")
+                    break
+
+            # Anti-conversational closing guard: Stop if model starts an email sign-off or polite closing
+            low_gen = generated_text.lower()
+            if any(s in low_gen for s in ["best regards", "sincerely,", "yours truly", "thank you for your question", "please let me know if there is anything else"]):
+                logger.warning("Conversational closing detected in Modal GPU stream; terminating early.")
                 break
 
             # Strip leading "Thought:" / "Action Input:" header token
@@ -739,6 +754,19 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
 
                 if "[Finance Data]" in generated_text or "Target (TGT)" in generated_text:
                     logger.warning("Unrequested financial ticker drift detected in stream; terminating generation.")
+                    break
+
+                # Anti-hashtag guard: Terminate immediately if model begins social media hashtag soup
+                if "#" in token and len(generated_text) > 30 and not prompt_requests_code:
+                    import re
+                    if re.search(r'#[A-Za-z0-9_]{3,}', generated_text):
+                        logger.warning("Social media hashtag detected in stream; terminating early.")
+                        break
+
+                # Anti-conversational closing guard: Stop if model starts an email sign-off or polite closing
+                low_gen = generated_text.lower()
+                if any(s in low_gen for s in ["best regards", "sincerely,", "yours truly", "thank you for your question", "please let me know if there is anything else"]):
+                    logger.warning("Conversational closing detected in stream; terminating early.")
                     break
 
                 # Strip leading "Thought:" / "Action Input:" header token at beginning of output without blocking subsequent tokens
@@ -872,9 +900,19 @@ def _clean_response(text):
     for phrase in meta_phrases_to_remove:
         text = text.replace(phrase, "").strip()
 
-    # Regex-based disclaimer stripper (removes "It is important to note that these prices are live...")
+    # Regex-based disclaimer and meta-scaffolding stripper
     import re
-    text = re.sub(r"(?i)\n*\s*(?:it is important to note|please note|note that|keep in mind|as of now|these values are live).*$", "", text).strip()
+    # Strip social media hashtag cascades (e.g. #AarkaaAI #FinancialAnalysis #AMDStockPrice...)
+    text = re.sub(r"(?:\s*#[A-Za-z0-9_\-\/]+){2,}.*$", "", text, flags=re.DOTALL).strip()
+
+    # Strip conversational closings, thank you notes, and signoffs
+    closing_patterns = [
+        r"(?i)\s*(?:if you need more detailed analysis|feel free to ask|thank you for your question|please let me know if there is anything else|best regards|sincerely|yours truly).*$",
+        r"(?i)\s*(?:this information was fetched from yahoo finance|please note that this is live financial data).*$",
+        r"(?i)\n*\s*(?:it is important to note|please note|note that|keep in mind|as of now|these values are live).*$",
+    ]
+    for pat in closing_patterns:
+        text = re.sub(pat, "", text, flags=re.DOTALL).strip()
 
     # Programmatically strip common email/letter salutations and sign-offs
     lines = text.split('\n')
@@ -1789,10 +1827,12 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "- Show calculations when needed.\n"
                     "- For impossible scenarios, explain why they are impossible.\n\n"
                     "Communication:\n"
-                    "- Be professional, friendly, and concise.\n"
-                    "- Focus on answering the question rather than discussing limitations or referencing context.\n"
-                    "- STRICTLY avoid all disclaimers, notes, or explanations of system limitations or context sufficiency.\n"
-                    "- Use structured formatting when it improves readability.\n\n"
+                    "- Be professional, objective, and concise.\n"
+                    "- Focus directly on answering the question with factual data, clear structure, and rigorous analysis.\n"
+                    "- STRICTLY FORBIDDEN: NEVER include sign-offs or closings (such as 'Best regards', 'Sincerely', 'Thank you for your question', 'Please let me know if there is anything else', or 'Aarkaa AI').\n"
+                    "- STRICTLY FORBIDDEN: NEVER output social media hashtags, SEO tags, or promotional keyword lists (such as '#AarkaaAI', '#StockPrice', '#FinancialAnalysis').\n"
+                    "- STRICTLY FORBIDDEN: NEVER parrot back internal data source references (such as 'fetched from Yahoo Finance') or attach disclaimers.\n"
+                    "- End your answer immediately once the requested explanation or factual summary is complete.\n\n"
                     "Primary Objective:\n"
                     "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
                 )
@@ -1840,9 +1880,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     has_finance = "[Finance Data]" in context
                     if has_finance:
                         user_prompt += (
-                            "IMPORTANT: The data below contains LIVE, REAL-TIME financial data fetched just now from Yahoo Finance. "
-                            "You MUST use the exact prices, values, and percentages from the [Finance Data] section. "
-                            "Do NOT use any prices from your training data or prior knowledge — they are outdated.\n\n"
+                            "CRITICAL FINANCIAL DIRECTIVE: Use the exact prices, change figures, and market capitalization values from the [Finance Data] section below. "
+                            "State the factual numbers cleanly and directly. Do NOT include disclaimers, do NOT mention Yahoo Finance or data recency, and do NOT output conversational closings or hashtags.\n\n"
                         )
                     # Cap context length to prevent prompt overflow for step-by-step queries
                     ctx_to_inject = context

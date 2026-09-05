@@ -103,7 +103,11 @@ class AarkaaGPU:
         if llm is None:
             return "Aarkaa GPU engine unavailable."
         
-        stop_tokens = ["<|im_end|>", "<|im_start|>", "<|endoftext|>"]
+        stop_tokens = [
+            "<|im_end|>", "<|im_start|>", "<|endoftext|>",
+            "\nBest regards", "\nBest Regards", "\nSincerely", "\n\n#", "\n#Aarkaa",
+            "Thank you for your question", "Please let me know if there is anything else"
+        ]
         if stop:
             stop_tokens.extend(stop)
             
@@ -126,7 +130,11 @@ class AarkaaGPU:
             yield "Aarkaa GPU engine unavailable."
             return
 
-        stop_tokens = ["<|im_end|>", "<|im_start|>", "<|endoftext|>"]
+        stop_tokens = [
+            "<|im_end|>", "<|im_start|>", "<|endoftext|>",
+            "\nBest regards", "\nBest Regards", "\nSincerely", "\n\n#", "\n#Aarkaa",
+            "Thank you for your question", "Please let me know if there is anything else"
+        ]
         if stop:
             stop_tokens.extend(stop)
 
