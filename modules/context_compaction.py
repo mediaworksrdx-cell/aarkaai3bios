@@ -81,7 +81,7 @@ def cond_llm_summarize(prompt_str: str, current_tokens: int, threshold_tokens: i
         logger.error("Failed to run Layer 4 Summarization: %s", e)
         return prompt_str
 
-def compact_prompt(prompt_str: str, model_instance, max_tokens: int = 5500) -> str:
+def compact_prompt(prompt_str: str, model_instance, max_tokens: int = 12000) -> str:
     """Run the complete 5-Layer Context Compaction pipeline."""
     # Layer 1 & Layer 2: Pre-process prompt content
     # We will clean and truncate parts of the prompt string that represent large tool logs or files

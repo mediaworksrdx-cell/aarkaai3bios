@@ -289,7 +289,7 @@ def _get_model(force_gpu=True, force_general=False):
                             try:
                                 _model_coder_gpu = Llama(
                                     model_path=str(_gguf_coder_path),
-                                    n_ctx=8192,
+                                    n_ctx=16384,
                                     n_threads=_get_threads(),
                                     n_gpu_layers=_get_gpu_layers(),
                                     verbose=False,
@@ -311,7 +311,7 @@ def _get_model(force_gpu=True, force_general=False):
                     try:
                         _model_gpu = Llama(
                             model_path=str(_gguf_file_path),
-                            n_ctx=8192,
+                            n_ctx=16384,
                             n_gpu_layers=_get_gpu_layers(),
                             n_threads=_get_threads(),
                             verbose=False
@@ -371,7 +371,7 @@ def _idle_monitor_loop():
                             from llama_cpp import Llama
                             _model_gpu = Llama(
                                 model_path=str(_gguf_file_path),
-                                n_ctx=8192,
+                                n_ctx=16384,
                                 n_gpu_layers=_get_gpu_layers(),
                                 n_threads=_get_threads(),
                                 verbose=False
@@ -415,7 +415,7 @@ def init():
         logger.info("Initializing AARKAA-%s model from %s...", model_tier, gguf_file)
         _model_gpu = Llama(
             model_path=str(gguf_file),
-            n_ctx=8192,
+            n_ctx=16384,
             n_gpu_layers=_get_gpu_layers(),
             n_threads=_get_threads(),
             verbose=False
@@ -482,7 +482,7 @@ def _build_chatml(system: str, user: str) -> str:
 
 
 def _build_chatml_multi(system: str, history: list[dict] | None, user: str,
-                       max_history_chars: int = 3000, user_facts: str = "") -> str:
+                       max_history_chars: int = 20000, user_facts: str = "") -> str:
     """Build ChatML format with system message, multi-turn history, and current user prompt.
     
     Truncates history starting from the OLDEST messages to fit within max_history_chars.
@@ -664,9 +664,9 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
 
 
 def _truncate_agent_prompt(prompt_str: str, model_instance) -> str:
-    """If the agent prompt exceeds 5500 tokens, run the 5-layer context compaction pipeline."""
+    """If the agent prompt exceeds 12000 tokens, run the 5-layer context compaction pipeline."""
     from modules.context_compaction import compact_prompt
-    return compact_prompt(prompt_str, model_instance, max_tokens=5500)
+    return compact_prompt(prompt_str, model_instance, max_tokens=12000)
 
 
 def generate_raw(prompt, max_new_tokens=300, stop=None):
@@ -688,8 +688,8 @@ def generate_raw(prompt, max_new_tokens=300, stop=None):
     prompt_len = len(prompt_tokens)
     
     # Dynamic context limit calculation
-    ctx_limit = getattr(model_instance, "n_ctx", lambda: 8192)() if callable(getattr(model_instance, "n_ctx", None)) else 8192
-    max_tokens = max(1, min(max_new_tokens or 300, ctx_limit - prompt_len - 100))
+    ctx_limit = getattr(model_instance, "n_ctx", lambda: 16384)() if callable(getattr(model_instance, "n_ctx", None)) else 16384
+    max_tokens = max(1, min(max_new_tokens or 3800, ctx_limit - prompt_len - 100))
         
     with _model_lock:
         stream = model_instance(
@@ -974,7 +974,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = min(MAX_TOKENS, 300)
+            tokens = MAX_TOKENS
         elif any(w in q_lower for w in ["code", "program", "function", "script", "write", "implement", "create a"]):
             system_prompt = (
                 "You are AARKAA, an expert programming AI assistant."
@@ -983,7 +983,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f" You MUST respond ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = min(MAX_TOKENS, 300)
+            tokens = MAX_TOKENS
         else:
             is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
             is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:", "plan a", "project plan", "saas", "roadmap"]) or (
@@ -1026,7 +1026,7 @@ def primary_check(query, lang="en"):
             if lang != "en":
                 user_prompt += f"You MUST write your response ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
-            tokens = min(MAX_TOKENS, 300)
+            tokens = MAX_TOKENS
         temp = _get_temperature(query, "general_query")
         response = _generate(prompt, max_new_tokens=tokens, temperature=temp)
         confidence = min(0.9, 0.5 + len(response.split()) / 150)
@@ -1107,7 +1107,7 @@ def final_response(query, context, intent="", lang="en", mode="production", hist
             
             prompt_len = len(prompt)
             logger.info("final_response (attempt %d): prompt_len=%d chars, max_tokens=%d, temp=%.2f", attempt + 1, prompt_len, tokens, temp)
-            if prompt_len > 6000:
+            if prompt_len > 38000:
                 logger.warning("Prompt too long (%d chars) — rebuilding without history to prevent context overflow", prompt_len)
                 result = _build_final_prompt(query, context, intent, lang, mode, history=None, user_facts=user_facts)
                 prompt, tokens = result[0], result[1]
@@ -1152,7 +1152,7 @@ def stream_final_response(query, context, intent="", lang="en", mode="production
         # Safety check: if prompt is too long, rebuild without history
         prompt_len = len(prompt)
         logger.info("stream_final_response: prompt_len=%d chars, max_tokens=%d, temp=%.2f", prompt_len, tokens, temp)
-        if prompt_len > 6000:
+        if prompt_len > 38000:
             logger.warning("Prompt too long (%d chars) — rebuilding without history to prevent context overflow", prompt_len)
             result = _build_final_prompt(query, context, intent, lang, mode, history=None, user_facts=user_facts)
             prompt, tokens = result[0], result[1]
@@ -1430,7 +1430,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT: %s", prompt)
-        tokens = min(MAX_TOKENS, 300)
+        tokens = MAX_TOKENS
         return prompt, tokens, 0.0  # temperature 0.0 for deterministic, precise reasoning
 
     is_rhetorical = intent in ["persuasion", "debate", "comparison", "roleplay"]
@@ -1485,7 +1485,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT (rhetorical):\n%s", prompt)
-        tokens = min(MAX_TOKENS, 300)
+        tokens = MAX_TOKENS
         temp = 0.75 if intent in ["persuasion", "roleplay"] else 0.4
         return prompt, tokens, temp
     is_design = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
@@ -1510,7 +1510,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
         )
         prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT (is_design):\n%s", prompt)
-        tokens = min(MAX_TOKENS, 300)
+        tokens = MAX_TOKENS
         return prompt, tokens, 0.7
 
     is_code = intent == "coding_help" or any(
@@ -1573,7 +1573,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 user_prompt += f" You MUST write your response ONLY in the following language: {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT (is_code):\n%s", prompt)
-        tokens = min(MAX_TOKENS, 400)
+        tokens = MAX_TOKENS
     else:
         import re
         is_chat_or_greeting = any(
@@ -1649,7 +1649,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 if lang != "en":
                     user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
-                tokens = min(MAX_TOKENS, 300)
+                tokens = MAX_TOKENS
             else:
                 system_prompt = (
                     "You are Aarkaa AI, created by Synthetix Analytics.\n\n"
@@ -1703,10 +1703,10 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
                 )
                 is_general = intent in ["general_query", "web_lookup", "news_search", "science_query", "tech_info", "finance_general", "health_query", "history_query", ""] or not intent
-                tokens = min(MAX_TOKENS, 600)
+                tokens = MAX_TOKENS
                 is_tutor_or_concise = any(w in query.lower() for w in ["tutor", "concise", "brief", "2 paragraph", "in two", "short", "quick", "explain in", "context: lesson", "lesson", "user question:"])
                 if is_tutor_or_concise:
-                    tokens = min(tokens, 260)
+                    tokens = min(tokens, 600)
                 is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
                 is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
                     all(w in query.lower() for w in ["gpu", "schedul", "queu", "cost", "isolation"])
@@ -1752,8 +1752,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                         )
                     # Cap context length to prevent prompt overflow for step-by-step queries
                     ctx_to_inject = context
-                    if len(context) > 3000 and (is_step_by_step or is_design_query):
-                        ctx_to_inject = context[:3000] + "\n... (trimmed for brevity)"
+                    if len(context) > 18000 and (is_step_by_step or is_design_query):
+                        ctx_to_inject = context[:18000] + "\n... (trimmed for brevity)"
                     user_prompt += (
                         "Reference Information (use ONLY if directly relevant to the question above):\n"
                         "---------------------\n"
