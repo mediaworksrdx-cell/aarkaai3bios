@@ -44,7 +44,7 @@ class GenerateRequest(BaseModel):
     gpu="T4",
     volumes={"/models": models_volume},
     timeout=600,
-    scaledown_window=300,  # Scale down after 5 minutes of inactivity to save credits
+    scaledown_window=30,  # Scale down after 30 seconds of inactivity to minimize idle GPU credit usage
 )
 class AarkaaGPU:
     @modal.enter()
