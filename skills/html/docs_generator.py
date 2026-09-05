@@ -13,14 +13,38 @@ Requires: pip install weasyprint --break-system-packages
 """
 
 import sys
+import os
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
+# Check for Weasyprint without crashing on missing C libraries (libgobject-2.0-0)
+_WEASYPRINT_AVAILABLE = False
 try:
     from weasyprint import HTML
-except ImportError:
-    print("ERROR: weasyprint not installed. Run:")
-    print("  pip install weasyprint --break-system-packages")
-    sys.exit(1)
+    _WEASYPRINT_AVAILABLE = True
+except (ImportError, OSError, Exception):
+    _WEASYPRINT_AVAILABLE = False
+
+def _find_browser_binary() -> str | None:
+    """Find available headless browser (Edge, Chrome, Chromium, Brave)."""
+    candidates = [
+        shutil.which("msedge"),
+        shutil.which("chrome"),
+        shutil.which("google-chrome"),
+        shutil.which("chromium"),
+        shutil.which("chromium-browser"),
+        shutil.which("brave"),
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return None
 
 
 DEFAULT_PRINT_CSS = """
@@ -70,18 +94,8 @@ def _sanitize_html(html_content: str) -> str:
 
 def generate_pdf(html_content: str, output_path: str, inject_print_css: bool = True) -> str:
     """
-    Render an HTML string to a PDF file.
-
-    Args:
-        html_content: Full HTML document as a string (self-contained, inline CSS).
-        output_path: Path to write the resulting PDF.
-        inject_print_css: If True, appends sensible @page/print rules
-                           (A4, page-break controls) before rendering.
-
-    Returns:
-        The output_path on success.
+    Render an HTML string to a PDF file using headless Edge/Chrome or WeasyPrint.
     """
-    # Strip network-dependent CSS that causes errors in weasyprint 69.x
     html_content = _sanitize_html(html_content)
     
     if inject_print_css:
@@ -92,8 +106,48 @@ def generate_pdf(html_content: str, output_path: str, inject_print_css: bool = T
         else:
             html_content = f"<style>{DEFAULT_PRINT_CSS}</style>" + html_content
 
-    HTML(string=html_content, base_url=None).write_pdf(output_path)
-    return output_path
+    browser = _find_browser_binary()
+    output_pdf = os.path.abspath(output_path)
+    os.makedirs(os.path.dirname(output_pdf), exist_ok=True)
+
+    # 1. Prefer Headless Browser (Edge/Chrome) for perfect CSS/SVG/Canvas rendering
+    if browser:
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as tf:
+                tf.write(html_content)
+                temp_html = tf.name
+
+            cmd = [
+                browser,
+                "--headless",
+                "--disable-gpu",
+                "--no-pdf-header-footer",
+                f"--print-to-pdf={output_pdf}",
+                f"file:///{os.path.abspath(temp_html)}"
+            ]
+            res = subprocess.run(cmd, capture_output=True, timeout=45)
+            try:
+                os.remove(temp_html)
+            except OSError:
+                pass
+
+            if res.returncode == 0 and os.path.exists(output_pdf) and os.path.getsize(output_pdf) > 0:
+                return str(output_pdf)
+        except Exception as browser_err:
+            pass
+
+    # 2. Fallback to WeasyPrint if available
+    if _WEASYPRINT_AVAILABLE:
+        try:
+            HTML(string=html_content, base_url=None).write_pdf(output_pdf)
+            return str(output_pdf)
+        except Exception as wp_err:
+            raise RuntimeError(f"Both browser and WeasyPrint PDF generation failed: {wp_err}")
+
+    raise RuntimeError(
+        "PDF generation requires Microsoft Edge, Google Chrome, or WeasyPrint. "
+        "Neither a compatible browser binary nor WeasyPrint C-libraries were found."
+    )
 
 
 def generate_pdf_from_file(html_path: str, output_path: str, inject_print_css: bool = True) -> str:

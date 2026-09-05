@@ -482,15 +482,21 @@ def _generate_pdf_filename(topic: str) -> str:
 def _extract_pdf_template(query: str) -> str:
     """Detect if the user requested a specific color template in their query."""
     q = query.lower()
-    if "white" in q or "light" in q:
+    if "gold" in q or "audit" in q or "executive" in q:
+        return "gold"
+    elif "cyber" in q or "neon" in q:
+        return "cyber"
+    elif "minimal" in q or "editorial" in q or "black and white" in q:
+        return "minimal"
+    elif "white" in q or "light" in q:
         return "indigo"
     elif "dark" in q:
         return "dark"
-    elif "green" in q or "emerald" in q or "teal" in q:
+    elif "green" in q or "emerald" in q or "teal" in q or "startup" in q or "vc" in q:
         return "emerald"
-    elif "red" in q or "crimson" in q:
+    elif "red" in q or "crimson" in q or "risk" in q:
         return "crimson"
-    elif "amber" in q or "yellow" in q or "orange" in q:
+    elif "amber" in q or "yellow" in q or "orange" in q or "corporate" in q:
         return "amber"
     return "indigo"
 

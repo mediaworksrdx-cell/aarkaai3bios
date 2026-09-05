@@ -949,8 +949,17 @@ async def google_token_verify(payload: GoogleAuthRequest):
             )
             if token_info_resp.status_code == 200:
                 data = token_info_resp.json()
+                # SEC: Validate audience claim — token must be issued for THIS app
+                from config import GOOGLE_CLIENT_ID
+                token_aud = data.get("aud", "")
+                if GOOGLE_CLIENT_ID and token_aud != GOOGLE_CLIENT_ID:
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Invalid Google token: audience mismatch. Token was not issued for this application.",
+                    )
                 email = data.get("email")
                 name = data.get("name") or data.get("given_name") or name
+
 
         if not email and payload.access_token:
             user_info_resp = await client.get(
@@ -1198,7 +1207,7 @@ async def metrics(current_user=fastapi.Depends(modules.auth.require_admin)):
 
 
 @app.post("/prompt", response_model=PromptResponse, tags=["core"])
-def prompt(
+async def prompt(
     req: PromptRequest, 
     request: Request,
     current_user = fastapi.Depends(modules.auth.get_optional_user)
@@ -1207,7 +1216,9 @@ def prompt(
     Main query endpoint. Supports optional JWT authentication / guest visitors.
 
     Runs the full pipeline. The user_id is automatically attached from the token or guest identity.
+    Uses asyncio.to_thread so the synchronous pipeline does not block the event loop.
     """
+    import asyncio
     from pipeline import process_query
 
     _metrics["requests_total"] += 1
@@ -1216,8 +1227,14 @@ def prompt(
     mode = request.headers.get("x-aarkaai-mode", req.mode or "production").lower()
 
     try:
-        # Pass the verified user_id from the token, not the JSON body
-        result = process_query(query=req.query, user_id=current_user.id, session_id=req.session_id, mode=mode)
+        # Run the synchronous pipeline in a thread pool to avoid blocking the event loop
+        result = await asyncio.to_thread(
+            process_query,
+            query=req.query,
+            user_id=current_user.id,
+            session_id=req.session_id,
+            mode=mode,
+        )
         _metrics["total_processing_time"] += result.processing_time
         return result
     except Exception as exc:
@@ -1227,6 +1244,7 @@ def prompt(
             status_code=500,
             detail="Processing failed. Please try again or contact support.",
         )
+
 
 
 @app.post("/prompt/stream", tags=["core"])

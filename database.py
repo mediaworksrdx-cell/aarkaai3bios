@@ -182,7 +182,7 @@ class PortfolioHolding(Base):
     quantity = Column(Float, nullable=False)
     avg_price = Column(Float, nullable=False)
     added_at = Column(DateTime, default=_utcnow)
-    updated_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 class WatchlistItem(Base):
@@ -216,12 +216,20 @@ class UserSettings(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(128), ForeignKey("users.id"), unique=True, nullable=False, index=True)
-    default_model = Column(String(64), default="aarkaa-7b")
-    response_style = Column(String(32), default="balanced")  # concise | balanced | detailed
+    default_model = Column(String(64), default="aarka-2.0")
+    response_style = Column(String(32), default="balanced")  # concise | balanced | detailed | professional
     theme = Column(String(16), default="dark")               # dark | light | auto
     language = Column(String(8), default="en")               # ISO 639-1
     streaming_enabled = Column(Integer, default=1)            # 1 = True, 0 = False (SQLite compat)
-    reasoning_depth = Column(String(16), default="balanced")  # fast | balanced | deep
+    reasoning_depth = Column(String(16), default="balanced")  # fast | balanced | deep | low | medium | high
+    # Extended settings (added to match full API contract and MongoDB schema)
+    about_you = Column(Text, nullable=True)                              # User role / industry profile
+    system_directives = Column(Text, nullable=True)                      # Account-wide system prompt
+    extended_thinking = Column(Integer, default=1)                       # 1 = True (SQLite compat)
+    thinking_budget = Column(Integer, default=4096)                      # Max thinking tokens
+    web_search_enabled = Column(Integer, default=1)                      # 1 = True
+    deep_research_enabled = Column(Integer, default=1)                   # 1 = True
+    market_data_enabled = Column(Integer, default=1)                     # 1 = True
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 

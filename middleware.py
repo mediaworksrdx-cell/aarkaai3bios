@@ -131,6 +131,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         is_auth = path.startswith("/auth/")
         effective_rpm = self._auth_rpm if is_auth else self.rpm
 
+        # Build CORS headers for 429 responses so browsers can read the error body
+        # (RateLimitMiddleware fires before CORSMiddleware in the stack)
+        origin = request.headers.get("origin", "*")
+        _cors_headers = {
+            "Retry-After": "",          # filled per-response below
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true",
+        }
+
+        def _rate_limit_response(retry_after: int) -> JSONResponse:
+            headers = {**_cors_headers, "Retry-After": str(retry_after)}
+            return JSONResponse(
+                status_code=429,
+                content={"detail": f"Rate limit exceeded. Try again in {retry_after}s."},
+                headers=headers,
+            )
+
         # Try Redis first
         r = self._get_redis()
         if r is not None:
@@ -146,16 +164,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
                 if current_count >= effective_rpm:
                     r.zrem(key, str(now))  # rollback the added entry
-                    retry_after = int(self.window)
                     logger.warning(
                         "Rate limit exceeded for %s on %s (%d/%d RPM)",
                         client_ip, path, current_count, effective_rpm,
                     )
-                    return JSONResponse(
-                        status_code=429,
-                        content={"detail": f"Rate limit exceeded. Try again in {retry_after}s."},
-                        headers={"Retry-After": str(retry_after)},
-                    )
+                    return _rate_limit_response(int(self.window))
                 return await call_next(request)
             except Exception as exc:
                 logger.warning("Redis rate limit error (falling back): %s", exc)
@@ -183,14 +196,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 len(self._requests[client_ip]),
                 effective_rpm,
             )
-            return JSONResponse(
-                status_code=429,
-                content={"detail": f"Rate limit exceeded. Try again in {retry_after}s."},
-                headers={"Retry-After": str(retry_after)},
-            )
+            return _rate_limit_response(retry_after)
 
         self._requests[client_ip].append(now)
         return await call_next(request)
+
 
 
 # ─── Request Logging & Tracking ──────────────────────────────────────────────

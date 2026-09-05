@@ -98,13 +98,17 @@ def get_user_settings(user_id: str) -> dict:
             del doc["_id"]
         return doc
 
-    from database import UserSettings  # deferred to avoid circular import at module level
-
     session = SessionLocal()
     try:
         row = session.query(UserSettings).filter(UserSettings.user_id == user_id).first()
         if not row:
             return {**DEFAULT_SETTINGS, "user_id": user_id}
+
+        def _bool(val, default: bool) -> bool:
+            """Convert SQLite INTEGER (0/1/None) to bool."""
+            if val is None:
+                return default
+            return bool(val)
 
         return {
             "user_id": user_id,
@@ -112,8 +116,16 @@ def get_user_settings(user_id: str) -> dict:
             "response_style": row.response_style or DEFAULT_SETTINGS["response_style"],
             "theme": row.theme or DEFAULT_SETTINGS["theme"],
             "language": row.language or DEFAULT_SETTINGS["language"],
-            "streaming_enabled": row.streaming_enabled if row.streaming_enabled is not None else DEFAULT_SETTINGS["streaming_enabled"],
+            "streaming_enabled": _bool(row.streaming_enabled, DEFAULT_SETTINGS["streaming_enabled"]),
             "reasoning_depth": row.reasoning_depth or DEFAULT_SETTINGS["reasoning_depth"],
+            # Extended fields — present in all paths after migration
+            "about_you": row.about_you or DEFAULT_SETTINGS["about_you"],
+            "system_directives": row.system_directives or DEFAULT_SETTINGS["system_directives"],
+            "extended_thinking": _bool(row.extended_thinking, DEFAULT_SETTINGS["extended_thinking"]),
+            "thinking_budget": row.thinking_budget if row.thinking_budget is not None else DEFAULT_SETTINGS["thinking_budget"],
+            "web_search_enabled": _bool(row.web_search_enabled, DEFAULT_SETTINGS["web_search_enabled"]),
+            "deep_research_enabled": _bool(row.deep_research_enabled, DEFAULT_SETTINGS["deep_research_enabled"]),
+            "market_data_enabled": _bool(row.market_data_enabled, DEFAULT_SETTINGS["market_data_enabled"]),
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
     except Exception as exc:
@@ -121,6 +133,7 @@ def get_user_settings(user_id: str) -> dict:
         return {**DEFAULT_SETTINGS, "user_id": user_id}
     finally:
         session.close()
+
 
 
 def update_user_settings(user_id: str, **kwargs) -> dict:
@@ -166,6 +179,14 @@ def update_user_settings(user_id: str, **kwargs) -> dict:
                 language=kwargs.get("language", DEFAULT_SETTINGS["language"]),
                 streaming_enabled=kwargs.get("streaming_enabled", DEFAULT_SETTINGS["streaming_enabled"]),
                 reasoning_depth=kwargs.get("reasoning_depth", DEFAULT_SETTINGS["reasoning_depth"]),
+                # Extended fields
+                about_you=kwargs.get("about_you", DEFAULT_SETTINGS["about_you"]),
+                system_directives=kwargs.get("system_directives", DEFAULT_SETTINGS["system_directives"]),
+                extended_thinking=kwargs.get("extended_thinking", DEFAULT_SETTINGS["extended_thinking"]),
+                thinking_budget=kwargs.get("thinking_budget", DEFAULT_SETTINGS["thinking_budget"]),
+                web_search_enabled=kwargs.get("web_search_enabled", DEFAULT_SETTINGS["web_search_enabled"]),
+                deep_research_enabled=kwargs.get("deep_research_enabled", DEFAULT_SETTINGS["deep_research_enabled"]),
+                market_data_enabled=kwargs.get("market_data_enabled", DEFAULT_SETTINGS["market_data_enabled"]),
             )
             session.add(row)
         else:
@@ -178,14 +199,26 @@ def update_user_settings(user_id: str, **kwargs) -> dict:
         session.refresh(row)
         logger.info("Updated settings for user %s: %s", user_id, list(kwargs.keys()))
 
+        def _bool(val, default: bool) -> bool:
+            if val is None:
+                return default
+            return bool(val)
+
         return {
             "user_id": user_id,
             "default_model": row.default_model,
             "response_style": row.response_style,
             "theme": row.theme,
             "language": row.language,
-            "streaming_enabled": row.streaming_enabled,
+            "streaming_enabled": _bool(row.streaming_enabled, DEFAULT_SETTINGS["streaming_enabled"]),
             "reasoning_depth": row.reasoning_depth,
+            "about_you": row.about_you or DEFAULT_SETTINGS["about_you"],
+            "system_directives": row.system_directives or DEFAULT_SETTINGS["system_directives"],
+            "extended_thinking": _bool(row.extended_thinking, DEFAULT_SETTINGS["extended_thinking"]),
+            "thinking_budget": row.thinking_budget if row.thinking_budget is not None else DEFAULT_SETTINGS["thinking_budget"],
+            "web_search_enabled": _bool(row.web_search_enabled, DEFAULT_SETTINGS["web_search_enabled"]),
+            "deep_research_enabled": _bool(row.deep_research_enabled, DEFAULT_SETTINGS["deep_research_enabled"]),
+            "market_data_enabled": _bool(row.market_data_enabled, DEFAULT_SETTINGS["market_data_enabled"]),
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
     except ValueError:
@@ -197,4 +230,3 @@ def update_user_settings(user_id: str, **kwargs) -> dict:
         raise
     finally:
         session.close()
-

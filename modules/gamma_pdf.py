@@ -118,6 +118,57 @@ TEMPLATES = {
         "callout_bg": "#FFFDF5",
         "callout_border": "#D97706",
         "callout_text": "#B45309"
+    },
+    "gold": {
+        "bg_color": "#0F172A",
+        "text_color": "#E2E8F0",
+        "primary_color": "#F59E0B",
+        "secondary_color": "#22C55E",
+        "card_bg": "#1E293B",
+        "card_border": "#334155",
+        "h1_color": "#F8FAFC",
+        "h2_color": "#F59E0B",
+        "cover_bg": "linear-gradient(135deg, #020617 0%, #0F172A 50%, #1E293B 100%)",
+        "cover_text": "#FFFFFF",
+        "badge_bg": "#1E293B",
+        "badge_text": "#F59E0B",
+        "callout_bg": "#1E293B",
+        "callout_border": "#F59E0B",
+        "callout_text": "#FDE68A"
+    },
+    "cyber": {
+        "bg_color": "#020617",
+        "text_color": "#E0F2FE",
+        "primary_color": "#06B6D4",
+        "secondary_color": "#8B5CF6",
+        "card_bg": "#0B1329",
+        "card_border": "#1E293B",
+        "h1_color": "#FFFFFF",
+        "h2_color": "#38BDF8",
+        "cover_bg": "linear-gradient(135deg, #020617 0%, #0F172A 100%)",
+        "cover_text": "#FFFFFF",
+        "badge_bg": "#082F49",
+        "badge_text": "#38BDF8",
+        "callout_bg": "#082F49",
+        "callout_border": "#06B6D4",
+        "callout_text": "#BAE6FD"
+    },
+    "minimal": {
+        "bg_color": "#FFFFFF",
+        "text_color": "#18181B",
+        "primary_color": "#09090B",
+        "secondary_color": "#71717A",
+        "card_bg": "#FAFAFA",
+        "card_border": "#E4E4E7",
+        "h1_color": "#09090B",
+        "h2_color": "#18181B",
+        "cover_bg": "linear-gradient(135deg, #18181B 0%, #09090B 100%)",
+        "cover_text": "#FFFFFF",
+        "badge_bg": "#F4F4F5",
+        "badge_text": "#18181B",
+        "callout_bg": "#F4F4F5",
+        "callout_border": "#71717A",
+        "callout_text": "#27272A"
     }
 }
 
