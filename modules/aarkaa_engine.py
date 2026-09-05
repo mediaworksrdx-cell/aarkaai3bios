@@ -584,32 +584,126 @@ def _get_temperature(query: str, intent: str, context: str = "") -> float:
 
 
 def _generate(prompt, max_new_tokens=150, stop=None, temperature=0.7, force_general=False):
-    """Run generation via llama.cpp."""
-    model_instance = _get_model(force_gpu=True, force_general=force_general)
-    if _is_stub or model_instance is None:
-        return _stub_response(prompt)
-    
+    """Run generation via Modal GPU (primary) or local llama.cpp (fallback)."""
     tokens = list(_generate_stream(prompt, max_new_tokens=max_new_tokens, stop=stop, temperature=temperature, force_general=force_general))
     text = "".join(tokens).strip()
     if not text:
-        logger.warning("_generate: model returned empty output — context overflow or KV cache failure. Returning stub fallback.")
+        logger.warning("_generate: model returned empty output. Returning stub fallback.")
         return _stub_response(prompt)
     return _clean_response(text)
 
 
-def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, force_general=False):
-    """Run generation via llama.cpp and yield tokens with repetition guard."""
-    model_instance = _get_model(force_gpu=True, force_general=force_general)
-    if _is_stub or model_instance is None:
-        yield _stub_response(prompt)
-        return
+def _stream_modal_gpu(prompt, max_new_tokens=150, stop=None, temperature=0.7, model_name="7b"):
+    """Stream tokens directly from the serverless Modal GPU endpoint with automatic fallback."""
+    import json
+    import urllib.request
+    from config import MODAL_GPU_ENDPOINT, MODAL_GPU_ENABLED
 
+    if not MODAL_GPU_ENABLED or not MODAL_GPU_ENDPOINT:
+        return None
+
+    payload = {
+        "prompt": prompt,
+        "max_tokens": max_new_tokens,
+        "temperature": temperature,
+        "top_p": 0.9,
+        "repeat_penalty": 1.15,
+        "stop": stop or [],
+        "model": model_name,
+        "stream": True
+    }
+
+    try:
+        req = urllib.request.Request(
+            MODAL_GPU_ENDPOINT,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        resp = urllib.request.urlopen(req, timeout=90)
+
+        def generator():
+            for line in resp:
+                line_str = line.decode("utf-8", errors="replace")
+                if line_str.startswith("data: "):
+                    data_str = line_str[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        if "token" in chunk and chunk["token"]:
+                            yield chunk["token"]
+                    except Exception:
+                        pass
+        return generator()
+    except Exception as exc:
+        logger.warning("Modal GPU invocation failed (%s). Falling back to local engine.", exc)
+        return None
+
+
+def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, force_general=False):
+    """Run generation via Modal GPU (primary) or local llama.cpp (fallback), yielding tokens with repetition guard."""
     stop_tokens = [
         "<|im_end|>", "<|im_start|>", "<|endoftext|>", "\n\n---",
         "<|im_start|>user", "<|im_start|>system", "\nuser\n", "\nUser:", "\nQuestion:"
     ]
     if stop:
         stop_tokens.extend(stop)
+
+    # Keywords that indicate code/architecture is requested
+    code_keywords = [
+        "code", "script", "program", "function", "write code", "python",
+        "javascript", "implement", "fastapi", "design", "system", "api",
+        "architecture", "backend", "service", "build", "create", "app",
+        "server", "oms", "database", "class", "structure"
+    ]
+    prompt_requests_code = any(w in prompt.lower() for w in code_keywords)
+
+    # ── 1. Attempt Modal Serverless GPU First ──
+    modal_model = "7b"
+    if not force_general:
+        req_dom = request_domain.get()
+        if req_dom == "technology":
+            modal_model = "coder"
+
+    modal_stream = _stream_modal_gpu(prompt, max_new_tokens=max_new_tokens, stop=stop_tokens, temperature=temperature, model_name=modal_model)
+    if modal_stream is not None:
+        generated_text = ""
+        stripped_header = False
+        yielded_any = False
+        for token in modal_stream:
+            yielded_any = True
+            generated_text += token
+
+            # Anti-hallucination guard: Stop streaming if model begins unrequested code blocks
+            if "```" in generated_text.lower() and not prompt_requests_code:
+                logger.warning("Unrequested code block detected in Modal GPU stream; terminating generation.")
+                break
+
+            if "[Finance Data]" in generated_text or "Target (TGT)" in generated_text:
+                logger.warning("Unrequested financial ticker drift detected in Modal GPU stream; terminating generation.")
+                break
+
+            # Strip leading "Thought:" / "Action Input:" header token
+            if not stripped_header and len(generated_text) <= 30:
+                low_token = token.lower().strip()
+                if low_token in ["thought:", "thought", "action input:", "action input"]:
+                    stripped_header = True
+                    continue
+
+            if _has_repetition(generated_text):
+                logger.warning("Repetition loop detected in Modal GPU stream; terminating early.")
+                break
+
+            yield token
+
+        if yielded_any:
+            return
+
+    # ── 2. Local Fallback (llama.cpp) ──
+    model_instance = _get_model(force_gpu=True, force_general=force_general)
+    if _is_stub or model_instance is None:
+        yield _stub_response(prompt)
+        return
 
     with _model_lock:
         stream = model_instance(
