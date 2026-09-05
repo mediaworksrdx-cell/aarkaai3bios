@@ -16,12 +16,12 @@ import os
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 KEY = r"C:\Users\daarv\.ssh\id_ed25519"
-USER = "sathishbadri2015"
+USER = "mediaworksr"
 HOST = "35.225.45.190"
 SSH_OPTS = ["-o", "StrictHostKeyChecking=no", "-i", KEY]
 
 LOCAL_BACKEND = os.path.dirname(os.path.abspath(__file__))
-REMOTE_BACKEND = "/home/sathishbadri2015/aarkaai3b"
+REMOTE_BACKEND = "/home/mediaworksr/aarkaai3b"
 PYTHON_BIN = f"{REMOTE_BACKEND}/venv/bin/python"
 
 # Files/dirs to sync (only application code, never .env or venv)

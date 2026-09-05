@@ -605,7 +605,8 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
         return
 
     stop_tokens = [
-        "<|im_end|>", "<|im_start|>", "<|endoftext|>", "\n\n---"
+        "<|im_end|>", "<|im_start|>", "<|endoftext|>", "\n\n---",
+        "<|im_start|>user", "<|im_start|>system", "\nuser\n", "\nUser:", "\nQuestion:"
     ]
     if stop:
         stop_tokens.extend(stop)
@@ -1678,9 +1679,10 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "- Analyze financial information using sound business reasoning.\n"
                     "- Avoid making unsupported investment predictions.\n"
                     "- For future prices, valuations, elections, or unknown future events, explain that the outcome cannot be known with certainty.\n\n"
-                    "Trading:\n"
-                    "- Understand technical analysis, market structure, liquidity, order blocks, fair value gaps, BOS, CHOCH, MSS, risk management, probability, and risk/reward concepts.\n"
-                    "- Explain trading concepts objectively.\n"
+                    "Trading & Technical Analysis:\n"
+                    "- Understand technical analysis, market structure, liquidity, order blocks, fair value gaps (FVG), break of structure (BOS), change of character (CHOCH), market structure shift (MSS), Smart Money Concepts (SMC), order flow, liquidity sweeps, and price action.\n"
+                    "- In trading, financial markets, and technical chart analysis, 'SMC' stands for Smart Money Concepts — a methodology focused on tracking institutional order flow, smart money accumulation/distribution, order blocks (OB), fair value gaps (FVG), liquidity pools/sweeps, and structural breaks (BOS/CHoCH).\n"
+                    "- Explain trading concepts objectively, comprehensively, and with clear market structure mechanics.\n"
                     "- Never guarantee profits or future market outcomes.\n\n"
                     "Coding:\n"
                     "- No Toy Architectures or Placeholders: When asked to implement complex data structures (including B/B+ trees, AVL/Red-Black trees, heap structures, priority queues, segment trees, and graph algorithms), the code must be fully functional, compiling/interpreting, and compliant with textbook definitions.\n"
@@ -1701,7 +1703,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
                 )
                 is_general = intent in ["general_query", "web_lookup", "news_search", "science_query", "tech_info", "finance_general", "health_query", "history_query", ""] or not intent
-                tokens = min(MAX_TOKENS, 300)
+                tokens = min(MAX_TOKENS, 600)
                 is_tutor_or_concise = any(w in query.lower() for w in ["tutor", "concise", "brief", "2 paragraph", "in two", "short", "quick", "explain in", "context: lesson", "lesson", "user question:"])
                 if is_tutor_or_concise:
                     tokens = min(tokens, 260)
@@ -1709,6 +1711,10 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
                     all(w in query.lower() for w in ["gpu", "schedul", "queu", "cost", "isolation"])
                 )
+                is_rate_hike_query = any(w in query.lower() for w in [
+                    "rate hike", "repo rate", "interest rate hike", "tightening",
+                    "monetary policy hike", "stagflation", "bond duration", "mclr", "eblr", "nim dynamics"
+                ])
                 if is_general:
                     if is_design_query:
                         system_prompt = (
@@ -1716,7 +1722,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                             "Provide a comprehensive, production-grade technical design architecture. "
                             "Detail every requested component in depth with clear headers, technical details, and structured analysis."
                         )
-                    else:
+                    elif is_rate_hike_query:
                         system_prompt = (
                             "You are Aarkaa AI, a Principal Macroeconomic Analyst and Quantitative Financial Strategist built by Synthetix Analytics.\n"
                             "Your objective is to provide institutional-grade, highly rigorous, and multi-dimensional analysis.\n\n"
@@ -1734,6 +1740,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                             "   - Macroeconomic Trade-Offs: Detail monetary policy transmission lags, real vs nominal rates, and inflation-growth trade-offs.\n"
                             "Do NOT output any disclaimers, code snippets, or unrelated market analyses. Stay 100% focused on the requested scope."
                         )
+                    # Otherwise, retain the full comprehensive system_prompt defined above
                 user_prompt = f"Question: {query}\n\n"
                 if context:
                     has_finance = "[Finance Data]" in context
@@ -1761,9 +1768,13 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                             "Explain each requirement/component thoroughly in its own section. "
                             "Do NOT stop early or truncate the explanation."
                         )
-                    else:
+                    elif is_rate_hike_query:
                         user_prompt += (
                             "Answer the question above in full technical depth with structured sections, granular financial mechanics, and clear analytical rigor."
+                        )
+                    else:
+                        user_prompt += (
+                            "Answer the question above accurately, directly, and comprehensively with clear structure and technical precision."
                         )
                 # Always add step-by-step formatting instruction for recipe/guide queries
                 if is_step_by_step:
@@ -1776,8 +1787,6 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 if lang != "en":
                     user_prompt += f" Write your entire response ONLY in the following language: {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
-                if "has_finance" not in locals() or not has_finance:
-                    tokens = min(MAX_TOKENS, 300)
     temp = _get_temperature(query, intent, context)
     return prompt, tokens, temp
 
