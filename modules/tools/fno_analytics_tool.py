@@ -6,6 +6,28 @@ import modules.finance
 
 logger = logging.getLogger(__name__)
 
+
+def _convert_chain_format(chain_data: dict) -> dict:
+    """Convert get_options_chain() output to {strike: {call_oi, put_oi}} format
+    expected by fno_analytics functions (compute_max_pain, compute_pcr, oi_analysis)."""
+    if not isinstance(chain_data, dict) or "error" in chain_data:
+        return {}
+    result = {}
+    for c in chain_data.get("calls", []):
+        strike = c.get("strike", 0)
+        if strike not in result:
+            result[strike] = {"call_oi": 0, "put_oi": 0, "call_volume": 0, "put_volume": 0}
+        result[strike]["call_oi"] = c.get("openInterest", 0)
+        result[strike]["call_volume"] = c.get("volume", 0)
+    for p in chain_data.get("puts", []):
+        strike = p.get("strike", 0)
+        if strike not in result:
+            result[strike] = {"call_oi": 0, "put_oi": 0, "call_volume": 0, "put_volume": 0}
+        result[strike]["put_oi"] = p.get("openInterest", 0)
+        result[strike]["put_volume"] = p.get("volume", 0)
+    return result
+
+
 class FnOAnalyticsTool(Tool):
     """
     Futures and Options analytics tool for greeks, max pain, PCR, etc.
@@ -43,7 +65,8 @@ class FnOAnalyticsTool(Tool):
                 symbol = params.get("symbol", "")
                 chain = params.get("options_chain", None)
                 if not chain and symbol:
-                    chain = modules.finance.get_options_chain(symbol)
+                    raw_chain = modules.finance.get_options_chain(symbol)
+                    chain = _convert_chain_format(raw_chain)
                 result = modules.fno_analytics.compute_max_pain(chain)
                 return f"Max Pain Analysis:\n{str(result)}"
                 
@@ -51,7 +74,8 @@ class FnOAnalyticsTool(Tool):
                 symbol = params.get("symbol", "")
                 chain = params.get("options_chain", None)
                 if not chain and symbol:
-                    chain = modules.finance.get_options_chain(symbol)
+                    raw_chain = modules.finance.get_options_chain(symbol)
+                    chain = _convert_chain_format(raw_chain)
                 result = modules.fno_analytics.compute_pcr(chain)
                 return f"PCR Analysis:\n{str(result)}"
                 
@@ -65,7 +89,8 @@ class FnOAnalyticsTool(Tool):
                 symbol = params.get("symbol", "")
                 chain = params.get("options_chain", None)
                 if not chain and symbol:
-                    chain = modules.finance.get_options_chain(symbol)
+                    raw_chain = modules.finance.get_options_chain(symbol)
+                    chain = _convert_chain_format(raw_chain)
                 result = modules.fno_analytics.oi_analysis(chain)
                 return f"Open Interest Analysis:\n{str(result)}"
                 
@@ -73,3 +98,4 @@ class FnOAnalyticsTool(Tool):
         except Exception as e:
             logger.error(f"Error in FnOAnalyticsTool: {str(e)}")
             return f"Error: {e}"
+

@@ -55,8 +55,9 @@ class FinancialCalculatorTool(Tool):
             elif action == "dcf":
                 cf = params.get("cash_flows", [])
                 discount_rate = float(params.get("discount_rate", 0))
-                terminal_value = float(params.get("terminal_value", 0))
-                res = modules.financial_calculator.dcf(cf, discount_rate, terminal_value)
+                terminal_growth = float(params.get("terminal_growth", 0))
+                shares_outstanding = float(params.get("shares_outstanding", 1))
+                res = modules.financial_calculator.dcf(cf, discount_rate, terminal_growth, shares_outstanding)
                 return f"DCF Valuation: {res}"
                 
             elif action == "pe_value":
@@ -74,9 +75,9 @@ class FinancialCalculatorTool(Tool):
                 
             elif action == "risk_reward":
                 entry = float(params.get("entry_price", 0))
-                stop_loss = float(params.get("stop_loss", 0))
                 target = float(params.get("target_price", 0))
-                res = modules.financial_calculator.risk_reward(entry, stop_loss, target)
+                stop_loss = float(params.get("stop_loss", 0))
+                res = modules.financial_calculator.risk_reward(entry, target, stop_loss)
                 return f"Risk/Reward Ratio: {res}"
                 
             elif action == "position_size":
@@ -88,9 +89,10 @@ class FinancialCalculatorTool(Tool):
                 return f"Position Size Calculation: {res}"
                 
             elif action == "margin":
-                trade_value = float(params.get("trade_value", 0))
-                margin_req = float(params.get("margin_requirement", 0))
-                res = modules.financial_calculator.margin(trade_value, margin_req)
+                price = float(params.get("price", 0))
+                lot_size = int(params.get("lot_size", 1))
+                margin_pct = float(params.get("margin_percentage", 0))
+                res = modules.financial_calculator.margin(price, lot_size, margin_pct)
                 return f"Margin Requirement: {res}"
                 
             elif action == "emi":
@@ -103,9 +105,9 @@ class FinancialCalculatorTool(Tool):
             elif action == "compound_interest":
                 principal = float(params.get("principal", 0))
                 rate = float(params.get("rate", 0))
-                times = float(params.get("compounds_per_year", 1))
                 years = float(params.get("years", 0))
-                res = modules.financial_calculator.compound_interest(principal, rate, times, years)
+                compounds_per_year = int(params.get("compounds_per_year", 12))
+                res = modules.financial_calculator.compound_interest(principal, rate, years, compounds_per_year)
                 return f"Compound Interest Calculation: {res}"
                 
             return f"Unknown action: {action}"

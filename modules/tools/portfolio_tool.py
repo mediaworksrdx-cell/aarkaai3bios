@@ -41,12 +41,11 @@ class PortfolioTool(Tool):
                 
             elif action == "remove":
                 symbol = params.get("symbol", "")
-                qty = float(params.get("quantity", 0))
-                data = modules.portfolio.remove_holding(user_id, symbol, qty)
+                data = modules.portfolio.remove_holding(user_id, symbol)
                 return f"Removed Holding for {user_id}:\n{str(data)}"
                 
             elif action == "summary":
-                data = modules.portfolio.get_summary(user_id)
+                data = modules.portfolio.get_portfolio_summary(user_id)
                 return f"Portfolio Summary for {user_id}:\n{str(data)}"
                 
             elif action == "risk":
@@ -64,7 +63,7 @@ class PortfolioTool(Tool):
                 return f"Removed {symbol} from Watchlist for {user_id}:\n{str(data)}"
                 
             elif action == "watchlist_view":
-                data = modules.portfolio.view_watchlist(user_id)
+                data = modules.portfolio.get_watchlist(user_id)
                 return f"Watchlist for {user_id}:\n{str(data)}"
                 
             return f"Unknown action: {action}"
