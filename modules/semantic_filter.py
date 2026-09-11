@@ -32,6 +32,10 @@ _DOMAIN_KEYWORDS: dict[str, list[str]] = {
         "commodity", "gold", "silver", "oil", "nifty", "sensex", "nasdaq",
         "trading", "investment", "dividend", "portfolio", "etf", "mutual fund",
         "bull", "bear", "ipo", "ticker", "earnings", "revenue",
+        "small cap", "small caps", "smallcap", "smallcaps", "mid cap", "mid caps", "midcap",
+        "large cap", "large caps", "penny stock", "penny stocks", "bullish", "bearish", "breakout",
+        "swing trading", "stocks to buy", "stocks to watch", "nse", "bse", "screener", "multibagger",
+        "nifty smallcap", "nifty midcap",
         "smc", "smart money", "smart money concepts", "order block", "order flow",
         "fvg", "fair value gap", "bos", "choch", "mss", "liquidity", "liquidity sweep",
         "market structure", "price action", "technical chart", "technical analysis",
@@ -370,22 +374,48 @@ def classify(query: str) -> dict:
 
     intent = _refine_intent(query, best_domain)
 
+    q_low = query.lower()
+    code_phrases_to_ignore = [
+        "project code", "secret code", "postal code", "zip code", "discount code",
+        "promo code", "coupon code", "area code", "pin code"
+    ]
+    is_not_programming_code = any(p in q_low for p in code_phrases_to_ignore)
+
     coding_keywords = [
         "python", "javascript", "typescript", "java", "c++", "rust", "golang", "sql",
-        "script", "subprocess", "shell=true", "code", "run code", "program",
+        "script", "subprocess", "shell=true", "run code", "program",
         "function", "compile", "execute", "implement", "algorithm", "class",
         "sort", "traversal", "binary search", "binary tree", "linked list",
         "stack", "queue", "graph", "hash map", "array", "recursion",
         "time complexity", "space complexity", "big o", "debug", "fix this code",
         "write a", "create a function", "build a", "make a function",
     ]
-    q_low = query.lower()
+    if not is_not_programming_code:
+        coding_keywords.append("code")
+
     if _is_coding_syntax(query) or any(w in q_low for w in coding_keywords):
         best_domain = "technology"
         intent = "coding_help"
         confidence = max(confidence, 0.92)
 
     import re
+    screener_patterns = [
+        r"\bsmall\s*cap[s]?\b", r"\bsmallcap[s]?\b",
+        r"\bmid\s*cap[s]?\b", r"\bmidcap[s]?\b",
+        r"\blarge\s*cap[s]?\b", r"\blargecap[s]?\b",
+        r"\bpenny\s*stock[s]?\b",
+        r"\b(bullish|bearish|momentum|breakout|multibagger|growth|dividend|value)\s*stocks?\b",
+        r"\bstocks?\s+to\s+(buy|watch|invest|trade|hold)\b",
+        r"\bstocks?\s+in\s+(nse|bse|india)\b",
+        r"\b(best|top|good)\s+.*stocks?\b",
+        r"\bstock\s*screener\b",
+        r"\bnifty\s*(smallcap|midcap|50|100)\b",
+    ]
+    if any(re.search(pat, q_low) for pat in screener_patterns):
+        best_domain = "finance"
+        intent = "finance_screener"
+        confidence = max(confidence, 0.95)
+
     trading_keywords = [
         "smc", "smart money", "smart money concepts", "order block", "order flow",
         "fvg", "fair value gap", "bos", "choch", "mss", "liquidity sweep",
@@ -420,6 +450,21 @@ def _refine_intent(query: str, domain: str) -> str:
         return "roleplay"
 
     if domain == "finance":
+        screener_patterns = [
+            r"\bsmall\s*cap[s]?\b", r"\bsmallcap[s]?\b",
+            r"\bmid\s*cap[s]?\b", r"\bmidcap[s]?\b",
+            r"\blarge\s*cap[s]?\b", r"\blargecap[s]?\b",
+            r"\bpenny\s*stock[s]?\b",
+            r"\b(bullish|bearish|momentum|breakout|multibagger|growth|dividend|value)\s*stocks?\b",
+            r"\bstocks?\s+to\s+(buy|watch|invest|trade|hold)\b",
+            r"\bstocks?\s+in\s+(nse|bse|india)\b",
+            r"\b(best|top|good)\s+.*stocks?\b",
+            r"\bstock\s*screener\b",
+            r"\bnifty\s*(smallcap|midcap|50|100)\b",
+        ]
+        import re
+        if any(re.search(pat, q) for pat in screener_patterns):
+            return "finance_screener"
         if any(w in q for w in ["price", "quote", "value", "how much"]):
             return "price_check"
         if any(w in q for w in ["news", "latest", "update"]):
@@ -434,7 +479,15 @@ def _refine_intent(query: str, domain: str) -> str:
         return "web_lookup"
 
     if domain == "technology":
-        if any(w in q for w in ["code", "program", "function", "error", "bug", "debug"]):
+        code_phrases_to_ignore = [
+            "project code", "secret code", "postal code", "zip code", "discount code",
+            "promo code", "coupon code", "area code", "pin code"
+        ]
+        is_not_programming_code = any(p in q for p in code_phrases_to_ignore)
+        tech_words = ["program", "function", "error", "bug", "debug"]
+        if not is_not_programming_code:
+            tech_words.append("code")
+        if any(w in q for w in tech_words):
             return "coding_help"
         return "tech_info"
 

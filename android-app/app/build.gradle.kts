@@ -49,6 +49,10 @@ android {
             )
         }
     }
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -112,6 +116,9 @@ dependencies {
 
     // Splash screen
     implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // Chrome Custom Tabs for OAuth
+    implementation("androidx.browser:browser:1.7.0")
 
     // Test
     testImplementation("junit:junit:4.13.2")

@@ -3,51 +3,76 @@ package com.aarkaai.app.ui.chat
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.aarkaai.app.data.ConversationRepository
+import com.aarkaai.app.data.SettingsRepository
+import com.aarkaai.app.data.TokenManager
 import com.aarkaai.app.network.PromptRequest
 import com.aarkaai.app.network.RetrofitClient
 import com.aarkaai.app.network.RlhfRequest
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import com.aarkaai.app.network.SseAuthException
+import com.aarkaai.app.network.SseClient
+import androidx.annotation.Keep
+import com.google.gson.annotations.SerializedName
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
-import com.aarkaai.app.data.TokenManager
-import kotlinx.coroutines.flow.collectLatest
 
 // ──────── Data Classes ────────
 
+@Keep
 data class ChatMessage(
-    val id: String = UUID.randomUUID().toString(),
-    val text: String,
-    val isUser: Boolean,
-    val isLoading: Boolean = false,
-    val isError: Boolean = false,
-    val processingTime: Double? = null,
-    val intent: String? = null,
-    val sources: List<String> = emptyList(),
-    val timestamp: Long = System.currentTimeMillis(),
-    val rlhfRating: Int? = null   // null = not rated, 1 = positive, -1 = negative
+    @SerializedName("id") val id: String = UUID.randomUUID().toString(),
+    @SerializedName("text") val text: String = "",
+    @SerializedName("isUser") val isUser: Boolean = false,
+    @SerializedName("isLoading") val isLoading: Boolean = false,
+    @SerializedName("isError") val isError: Boolean = false,
+    @SerializedName("processingTime") val processingTime: Double? = null,
+    @SerializedName("intent") val intent: String? = null,
+    @SerializedName("sources") val sources: List<String> = emptyList(),
+    @SerializedName("timestamp") val timestamp: Long = System.currentTimeMillis(),
+    @SerializedName("rlhfRating") val rlhfRating: Int? = null,   // null = not rated, 1 = positive, -1 = negative
+    @SerializedName("modelUsed") val modelUsed: String? = null
 )
 
+@Keep
 data class Conversation(
-    val id: String = UUID.randomUUID().toString(),
-    val title: String = "New Chat",
-    val messages: List<ChatMessage> = emptyList(),
-    val createdAt: Long = System.currentTimeMillis()
+    @SerializedName("id") val id: String = UUID.randomUUID().toString(),
+    @SerializedName("title") val title: String = "New Chat",
+    @SerializedName("messages") val messages: List<ChatMessage> = emptyList(),
+    @SerializedName("createdAt") val createdAt: Long = System.currentTimeMillis(),
+    @SerializedName("model") val model: String = "aarka-2.0",
+    @SerializedName("effort") val effort: String = "medium"
 )
 
 data class ChatUiState(
     val conversations: List<Conversation> = listOf(Conversation()),
     val activeConversationId: String = "",
     val isSidebarOpen: Boolean = false,
-    val isTyping: Boolean = false
+    val isTyping: Boolean = false,
+    val selectedModel: String = "aarka-2.0",
+    val reasoningEffort: String = "medium",
+    val searchQuery: String = "",
+    val userName: String = "Web Visitor",
+    val userEmail: String = "visitor@aarkaai.com",
+    val isGuest: Boolean = true,
+    val currentUserId: String? = null,
+    val incognitoMode: Boolean = false,
+    val density: String = "comfortable",
+    val showTimestamps: Boolean = true
 ) {
     val activeConversation: Conversation?
         get() = conversations.find { it.id == activeConversationId }
 
     val messages: List<ChatMessage>
         get() = activeConversation?.messages ?: emptyList()
+
+    val filteredConversations: List<Conversation>
+        get() = if (searchQuery.isBlank()) {
+            conversations
+        } else {
+            conversations.filter { it.title.contains(searchQuery, ignoreCase = true) }
+        }
 }
 
 // ──────── ViewModel ────────
@@ -55,10 +80,14 @@ data class ChatUiState(
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val tokenManager = TokenManager(application)
+    private val conversationRepository = ConversationRepository(application)
+    private val settingsRepository = SettingsRepository(application)
+
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     var bearerToken: String = ""
+    private var streamJob: Job? = null
 
     init {
         val initial = Conversation()
@@ -67,7 +96,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             activeConversationId = initial.id
         )
 
-        // Sync token from TokenManager
+        // Observe user ID once on startup and on genuine user account switches
+        var lastLoadedUserId: String? = null
+        var isFirstLaunch = true
+
+        viewModelScope.launch {
+            tokenManager.userId.collectLatest { userId ->
+                if (isFirstLaunch) {
+                    isFirstLaunch = false
+                    lastLoadedUserId = userId
+                    loadConversationsForUser(userId, openNewChat = true)
+                } else if (userId != null && userId != lastLoadedUserId) {
+                    lastLoadedUserId = userId
+                    loadConversationsForUser(userId, openNewChat = false)
+                }
+            }
+        }
+
+        // Sync token
         viewModelScope.launch {
             tokenManager.token.collectLatest { token ->
                 if (token != null) {
@@ -75,6 +121,119 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+
+        // Sync user profile name
+        viewModelScope.launch {
+            tokenManager.userName.collectLatest { name ->
+                if (!name.isNullOrBlank()) {
+                    val isGuestUser = name == "Web Visitor" || name == "Guest User" || name.startsWith("Guest") || name.startsWith("offline_guest")
+                    _uiState.update { it.copy(userName = name, isGuest = isGuestUser) }
+                }
+            }
+        }
+
+        // Sync settings (model, effort, density, timestamps, incognito)
+        viewModelScope.launch {
+            settingsRepository.localSettings.collectLatest { settings ->
+                _uiState.update { current ->
+                    current.copy(
+                        selectedModel = settings.defaultModel ?: current.selectedModel,
+                        reasoningEffort = settings.reasoningDepth ?: current.reasoningEffort,
+                        density = settings.density ?: current.density,
+                        showTimestamps = settings.showTimestamps,
+                        incognitoMode = settings.incognitoChat
+                    )
+                }
+            }
+        }
+    }
+
+    fun loadConversationsForUser(userId: String?, openNewChat: Boolean = true) {
+        viewModelScope.launch {
+            val rawSaved = conversationRepository.loadConversations(userId)
+            val saved = rawSaved.map { conv ->
+                val cleanedMsgs = conv.messages.map { msg ->
+                    if (msg.isLoading) {
+                        msg.copy(
+                            isLoading = false,
+                            text = if (msg.text.isBlank()) "⚠️ Connection was interrupted. Tap regenerate to retry." else cleanAssistantText(msg.text)
+                        )
+                    } else msg
+                }
+                conv.copy(messages = cleanedMsgs)
+            }
+
+            if (openNewChat) {
+                // When launching fresh, start on a clean new chat so welcome screen is shown,
+                // while preserving all saved conversations in history/drawer.
+                val topEmpty = saved.firstOrNull()?.takeIf { it.messages.isEmpty() }
+                if (topEmpty != null) {
+                    _uiState.update { current ->
+                        current.copy(
+                            conversations = saved,
+                            activeConversationId = topEmpty.id,
+                            currentUserId = userId
+                        )
+                    }
+                    tokenManager.saveActiveConversationId(topEmpty.id)
+                } else {
+                    val freshChat = Conversation(
+                        model = _uiState.value.selectedModel,
+                        effort = _uiState.value.reasoningEffort
+                    )
+                    _uiState.update { current ->
+                        current.copy(
+                            conversations = listOf(freshChat) + saved,
+                            activeConversationId = freshChat.id,
+                            currentUserId = userId
+                        )
+                    }
+                    tokenManager.saveActiveConversationId(freshChat.id)
+                }
+            } else {
+                val storedActiveId = tokenManager.activeConversationId.firstOrNull()
+                val targetActive = saved.find { it.id == storedActiveId }
+                    ?: saved.firstOrNull()
+                    ?: Conversation()
+
+                val allConvs = if (saved.isEmpty()) listOf(targetActive) else saved
+                _uiState.update { current ->
+                    current.copy(
+                        conversations = allConvs,
+                        activeConversationId = targetActive.id,
+                        currentUserId = userId
+                    )
+                }
+            }
+        }
+    }
+
+    fun onUserLoggedIn(token: String, userId: String, name: String?) {
+        bearerToken = token
+        _uiState.update {
+            it.copy(
+                userName = name ?: "Aarka User",
+                isGuest = false,
+                currentUserId = userId
+            )
+        }
+        loadConversationsForUser(userId, openNewChat = true)
+    }
+
+    fun onUserLoggedOut() {
+        bearerToken = ""
+        val initial = Conversation()
+        _uiState.update {
+            ChatUiState(
+                conversations = listOf(initial),
+                activeConversationId = initial.id,
+                userName = "Web Visitor",
+                userEmail = "visitor@aarkaai.com",
+                isGuest = true,
+                currentUserId = null
+            )
+        }
+        loadConversationsForUser(null)
     }
 
     fun toggleSidebar() {
@@ -85,38 +244,134 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(isSidebarOpen = false) }
     }
 
-    fun newConversation() {
-        val conv = Conversation()
+    fun setSearchQuery(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
+    }
+
+    fun selectModel(model: String) {
+        _uiState.update { it.copy(selectedModel = model) }
+    }
+
+    fun selectEffort(effort: String) {
+        _uiState.update { it.copy(reasoningEffort = effort) }
+    }
+
+    fun newConversation(model: String? = null, effort: String? = null) {
+        val currentConvs = _uiState.value.conversations
+        // If the top conversation is already empty, just select it
+        val topEmpty = currentConvs.firstOrNull()?.takeIf { it.messages.isEmpty() }
+        if (topEmpty != null) {
+            _uiState.update { it.copy(activeConversationId = topEmpty.id, isSidebarOpen = false, isTyping = false) }
+            viewModelScope.launch {
+                tokenManager.saveActiveConversationId(topEmpty.id)
+            }
+            return
+        }
+
+        val conv = Conversation(
+            model = model ?: _uiState.value.selectedModel,
+            effort = effort ?: _uiState.value.reasoningEffort
+        )
         _uiState.update {
             it.copy(
-                conversations = it.conversations + conv,
+                conversations = listOf(conv) + it.conversations,
                 activeConversationId = conv.id,
-                isSidebarOpen = false
+                isSidebarOpen = false,
+                isTyping = false
             )
         }
+        viewModelScope.launch {
+            tokenManager.saveActiveConversationId(conv.id)
+        }
+        persistConversations()
     }
 
     fun selectConversation(id: String) {
-        _uiState.update { it.copy(activeConversationId = id, isSidebarOpen = false) }
+        val targetConv = _uiState.value.conversations.find { it.id == id }
+        val hasActiveLoading = targetConv?.messages?.any { it.isLoading } == true && streamJob?.isActive == true
+        _uiState.update { it.copy(activeConversationId = id, isSidebarOpen = false, isTyping = hasActiveLoading) }
+        viewModelScope.launch {
+            tokenManager.saveActiveConversationId(id)
+        }
+    }
+
+    fun renameConversation(id: String, newTitle: String) {
+        if (newTitle.isBlank()) return
+        _uiState.update { state ->
+            val updated = state.conversations.map {
+                if (it.id == id) it.copy(title = newTitle.trim()) else it
+            }
+            state.copy(conversations = updated)
+        }
+        persistConversations()
+    }
+
+    fun deleteConversation(id: String) {
+        _uiState.update { state ->
+            val remaining = state.conversations.filter { it.id != id }
+            val nextList = if (remaining.isEmpty()) listOf(Conversation()) else remaining
+            val nextActive = if (state.activeConversationId == id) nextList.first().id else state.activeConversationId
+            state.copy(conversations = nextList, activeConversationId = nextActive)
+        }
+        persistConversations()
     }
 
     fun clearAllHistory() {
         val initial = Conversation()
-        bearerToken = ""
+        val userId = _uiState.value.currentUserId
         _uiState.update {
-            ChatUiState(
+            it.copy(
                 conversations = listOf(initial),
                 activeConversationId = initial.id,
                 isSidebarOpen = false
             )
         }
+        viewModelScope.launch {
+            conversationRepository.clearConversations(userId)
+        }
+    }
+
+    fun stopGeneration() {
+        val activeId = _uiState.value.activeConversationId
+        streamJob?.cancel()
+        streamJob = null
+        finishLoading(activeId)
+        _uiState.update { it.copy(isTyping = false) }
+        persistConversations()
+    }
+
+    fun regenerateResponse(assistantMessageId: String) {
+        val active = _uiState.value.activeConversation ?: return
+        val messages = active.messages
+        val assistantIdx = messages.indexOfFirst { it.id == assistantMessageId }
+        if (assistantIdx <= 0) return
+
+        val userMessage = messages[assistantIdx - 1]
+        if (!userMessage.isUser) return
+
+        // Remove the assistant message and regenerate
+        _uiState.update { state ->
+            val updatedConvs = state.conversations.map { conv ->
+                if (conv.id == state.activeConversationId) {
+                    conv.copy(messages = messages.filter { it.id != assistantMessageId })
+                } else conv
+            }
+            state.copy(conversations = updatedConvs)
+        }
+
+        val loadingMsg = ChatMessage(text = "", isUser = false, isLoading = true, modelUsed = _uiState.value.selectedModel)
+        addMessages(loadingMsg)
+        _uiState.update { it.copy(isTyping = true) }
+
+        executeStreaming(userMessage.text)
     }
 
     fun sendMessage(query: String) {
         if (query.isBlank()) return
 
+        val currentModel = _uiState.value.selectedModel
         val userMsg = ChatMessage(text = query, isUser = true)
-        val loadingMsg = ChatMessage(text = "", isUser = false, isLoading = true)
+        val loadingMsg = ChatMessage(text = "", isUser = false, isLoading = true, modelUsed = currentModel)
 
         addMessages(userMsg, loadingMsg)
 
@@ -130,20 +385,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             state.copy(conversations = convs, isTyping = true)
         }
 
-        viewModelScope.launch {
+        // Persist immediately so query is saved even if user navigates away or network drops
+        persistConversations()
+
+        executeStreaming(query)
+    }
+
+    private fun executeStreaming(query: String) {
+        val targetConversationId = _uiState.value.activeConversationId
+        streamJob?.cancel()
+        streamJob = viewModelScope.launch {
             try {
                 var tokenHeader = if (bearerToken.startsWith("Bearer ")) bearerToken else "Bearer $bearerToken"
-                val currentSessionId = _uiState.value.activeConversationId
+                val model = _uiState.value.selectedModel
+                val effort = _uiState.value.reasoningEffort
+
                 try {
-                    streamOrFallback(tokenHeader, query, currentSessionId)
+                    streamOrFallback(targetConversationId, tokenHeader, query, targetConversationId, model, effort)
                 } catch (e: Exception) {
-                    val isAuthError = (e is retrofit2.HttpException && (e.code() == 401 || e.code() == 403)) || 
-                                      (e is com.aarkaai.app.network.SseAuthException)
+                    val isAuthError = (e is retrofit2.HttpException && (e.code() == 401 || e.code() == 403)) ||
+                                      (e is SseAuthException)
                     if (isAuthError) {
                         val newToken = refreshGuestToken()
                         if (newToken != null) {
                             tokenHeader = if (newToken.startsWith("Bearer ")) newToken else "Bearer $newToken"
-                            streamOrFallback(tokenHeader, query, currentSessionId)
+                            streamOrFallback(targetConversationId, tokenHeader, query, targetConversationId, model, effort)
                         } else {
                             throw e
                         }
@@ -151,19 +417,38 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         throw e
                     }
                 }
-
-
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // User clicked stop - keep partial response
+                finishLoading(targetConversationId)
             } catch (e: Exception) {
                 replaceLoading(
+                    targetConversationId,
                     ChatMessage(
                         text = "⚠️ ${e.localizedMessage ?: "Connection failed. Is the backend running?"}",
                         isUser = false,
-                        isError = true
+                        isError = true,
+                        isLoading = false
                     )
                 )
             } finally {
+                finishLoading(targetConversationId)
                 _uiState.update { it.copy(isTyping = false) }
+                persistConversations()
             }
+        }
+    }
+
+    private fun persistConversations() {
+        if (_uiState.value.incognitoMode) return // Don't persist incognito sessions
+        val userId = _uiState.value.currentUserId
+        val currentConvs = _uiState.value.conversations
+        val activeId = _uiState.value.activeConversationId
+        viewModelScope.launch {
+            // Keep all conversations that have messages, plus the current active one if empty
+            val toSave = currentConvs.filter { conv ->
+                conv.messages.isNotEmpty() || conv.id == activeId
+            }
+            conversationRepository.saveConversations(toSave, userId)
         }
     }
 
@@ -173,7 +458,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val guestName = "Web Visitor"
         return try {
             val res = RetrofitClient.api.login(com.aarkaai.app.network.AuthRequest(email = guestEmail, password = guestPassword))
-            tokenManager.saveAuth(res.access_token, res.user_id, res.name)
+            tokenManager.saveToken(res.access_token)
             bearerToken = res.access_token
             res.access_token
         } catch (loginEx: Exception) {
@@ -181,7 +466,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val res = RetrofitClient.api.register(
                     com.aarkaai.app.network.AuthRequest(email = guestEmail, password = guestPassword, name = guestName)
                 )
-                tokenManager.saveAuth(res.access_token, res.user_id, res.name)
+                tokenManager.saveToken(res.access_token)
                 bearerToken = res.access_token
                 res.access_token
             } catch (regEx: Exception) {
@@ -190,9 +475,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ── RLHF Feedback ──────────────────────────────────────────────
     fun submitRlhf(messageId: String, rating: Int) {
-        // Update the UI immediately
         _uiState.update { state ->
             val convs = state.conversations.map { conv ->
                 if (conv.id == state.activeConversationId) {
@@ -205,7 +488,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             state.copy(conversations = convs)
         }
 
-        // Send to backend asynchronously
         viewModelScope.launch {
             try {
                 var tokenHeader = if (bearerToken.startsWith("Bearer ")) bearerToken else "Bearer $bearerToken"
@@ -213,7 +495,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     RetrofitClient.api.submitRlhf(
                         token = tokenHeader,
                         request = RlhfRequest(
-                            user_id = "android_user",  // Will be overridden by JWT on backend
+                            user_id = "android_user",
                             rating = rating
                         )
                     )
@@ -233,9 +515,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
-                // Silently fail — feedback is best-effort
             }
         }
+        persistConversations()
     }
 
     private fun addMessages(vararg msgs: ChatMessage) {
@@ -249,14 +531,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun replaceLoading(replacement: ChatMessage) {
+    companion object {
+        fun cleanAssistantText(text: String): String {
+            return text
+                .replace(Regex("""(?i)\s*(?:\*{1,2}|[\(\[])?\s*end of (?:answer|response|text|explanation)\s*(?:\*{1,2}|[\)\]])?\.?[\s`]*$"""), "")
+                .replace(Regex("""(?i)\s*---+\s*end\s+(?:of\s+)?(?:answer|response|disclaimer|text)\s*---+[\s`]*$"""), "")
+                .replace(Regex("""(?i)\s*#Aarkaa(?:AI)?\b.*$"""), "")
+                .replace(Regex("""(?i)\s*#Aarka(?:AI)?\b.*$"""), "")
+                .replace(Regex("""(?:\s*#[A-Za-z0-9_\-\/]+)+\s*$"""), "")
+                .trimEnd()
+        }
+    }
+
+    private fun replaceLoading(conversationId: String, replacement: ChatMessage) {
+        val cleanMsg = if (!replacement.isUser) {
+            replacement.copy(text = cleanAssistantText(replacement.text), isLoading = false)
+        } else replacement
         _uiState.update { state ->
             val convs = state.conversations.map { conv ->
-                if (conv.id == state.activeConversationId) {
+                if (conv.id == conversationId) {
                     val updated = conv.messages.toMutableList()
                     val loadingIdx = updated.indexOfLast { it.isLoading }
-                    if (loadingIdx >= 0) updated[loadingIdx] = replacement
-                    else updated.add(replacement)
+                    if (loadingIdx >= 0) updated[loadingIdx] = cleanMsg
+                    else updated.add(cleanMsg)
                     conv.copy(messages = updated)
                 } else conv
             }
@@ -264,40 +561,50 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun streamOrFallback(tokenHeader: String, query: String, currentSessionId: String) {
+    private suspend fun streamOrFallback(
+        targetConversationId: String,
+        tokenHeader: String,
+        query: String,
+        currentSessionId: String,
+        model: String,
+        effort: String
+    ) {
         try {
             var hasReceivedTokens = false
-            com.aarkaai.app.network.SseClient.streamPrompt(tokenHeader, query, currentSessionId).collect { token ->
+            SseClient.streamPrompt(tokenHeader, query, currentSessionId, model, effort).collect { token ->
                 hasReceivedTokens = true
-                appendToLoading(token)
+                appendToLoading(targetConversationId, token)
             }
             if (!hasReceivedTokens) {
                 throw Exception("Stream ended without tokens")
             }
-            finishLoading()
-        } catch (e: com.aarkaai.app.network.SseAuthException) {
+            finishLoading(targetConversationId)
+        } catch (e: SseAuthException) {
             throw e
         } catch (e: Exception) {
             val response = RetrofitClient.api.sendPrompt(
                 token = tokenHeader,
-                request = PromptRequest(query = query, session_id = currentSessionId)
+                request = PromptRequest(query = query, session_id = currentSessionId, model = model, effort = effort)
             )
             replaceLoading(
+                targetConversationId,
                 ChatMessage(
                     text = response.response,
                     isUser = false,
+                    isLoading = false,
                     processingTime = response.processing_time,
                     intent = response.intent,
-                    sources = response.sources
+                    sources = response.sources,
+                    modelUsed = model
                 )
             )
         }
     }
 
-    private fun appendToLoading(textToAppend: String) {
+    private fun appendToLoading(conversationId: String, textToAppend: String) {
         _uiState.update { state ->
             val convs = state.conversations.map { conv ->
-                if (conv.id == state.activeConversationId) {
+                if (conv.id == conversationId) {
                     val updated = conv.messages.toMutableList()
                     val loadingIdx = updated.indexOfLast { it.isLoading }
                     if (loadingIdx >= 0) {
@@ -311,15 +618,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun finishLoading() {
+    private fun finishLoading(conversationId: String) {
         _uiState.update { state ->
             val convs = state.conversations.map { conv ->
-                if (conv.id == state.activeConversationId) {
+                if (conv.id == conversationId) {
                     val updated = conv.messages.toMutableList()
                     val loadingIdx = updated.indexOfLast { it.isLoading }
                     if (loadingIdx >= 0) {
                         val msg = updated[loadingIdx]
-                        updated[loadingIdx] = msg.copy(isLoading = false)
+                        updated[loadingIdx] = msg.copy(
+                            text = cleanAssistantText(msg.text),
+                            isLoading = false
+                        )
                     }
                     conv.copy(messages = updated)
                 } else conv

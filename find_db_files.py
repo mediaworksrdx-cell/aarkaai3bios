@@ -1,7 +1,7 @@
-import subprocess
+﻿import subprocess
 
 ssh_key = r"C:\Users\daarv\Downloads\aarkaai3b.pem"
-remote_host = "ec2-user@16.170.206.243"
+remote_host = "ec2-user@35.225.45.190"
 
 remote_python_code = """
 import subprocess

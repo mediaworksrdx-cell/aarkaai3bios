@@ -1,6 +1,6 @@
 import requests
 
-base_url = "http://16.170.206.243:5000"
+base_url = "http://35.225.45.190:5000"
 
 # 1. Register a test user
 reg_payload = {

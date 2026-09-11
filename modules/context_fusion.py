@@ -113,12 +113,12 @@ class ContextFusion:
     def fuse(
         self,
         results: list[SourceResult],
-        plan: QueryPlan,
+        plan: QueryPlan | None = None,
         chat_history: list[dict[str, Any]] | None = None,
         user_facts: str = "",
     ) -> FusedContext:
         """Merges results from multiple data sources into a single coherent context string."""
-        if not results:
+        if not results and not chat_history and not user_facts:
             return FusedContext(
                 context="",
                 sources_used=[],
@@ -129,14 +129,15 @@ class ContextFusion:
 
         # Step 1: Filter Invalid Results
         valid_results: list[SourceResult] = []
-        for res in results:
-            if not getattr(res, "is_valid", True):
-                logger.warning(f"ContextFusion: Filtering invalid result from {res.source}")
-                continue
-            if not res.data or not str(res.data).strip():
-                logger.warning(f"ContextFusion: Filtering empty result from {res.source}")
-                continue
-            valid_results.append(res)
+        if results:
+            for res in results:
+                if not getattr(res, "is_valid", True):
+                    logger.warning(f"ContextFusion: Filtering invalid result from {res.source}")
+                    continue
+                if not res.data or not str(res.data).strip():
+                    logger.warning(f"ContextFusion: Filtering empty result from {res.source}")
+                    continue
+                valid_results.append(res)
 
         # Step 2: Source Priority Ordering
         valid_results.sort(key=lambda x: self._get_priority(x, plan))
@@ -229,7 +230,8 @@ class ContextFusion:
         final_parts = []
         
         if chat_history:
-            recent_history = chat_history[-6:]
+            # Preserve up to 20 messages (10 full Q&A turns)
+            recent_history = chat_history[-20:]
             history_lines = ["[Conversation History]"]
             has_content = False
             for msg in recent_history:

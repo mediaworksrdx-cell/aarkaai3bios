@@ -19,10 +19,18 @@ object SseClient {
     private const val BASE_URL = BuildConfig.BASE_URL
     private val gson = Gson()
     
-    fun streamPrompt(token: String, query: String, sessionId: String): Flow<String> = flow {
+    fun streamPrompt(
+        token: String,
+        query: String,
+        sessionId: String,
+        model: String? = "aarka-2.0",
+        effort: String? = "medium"
+    ): Flow<String> = flow {
         val jsonRequest = JsonObject().apply {
             addProperty("query", query)
             addProperty("session_id", sessionId)
+            if (!model.isNullOrBlank()) addProperty("model", model)
+            if (!effort.isNullOrBlank()) addProperty("effort", effort)
         }
         val requestBody = jsonRequest.toString().toRequestBody("application/json".toMediaType())
         

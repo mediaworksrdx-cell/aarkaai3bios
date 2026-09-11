@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
         if (data != null && data.scheme == "aarkaai" && data.host == "auth-callback") {
             val token = data.getQueryParameter("token")
             val userId = data.getQueryParameter("user_id")
-            val name = data.getQueryParameter("name") ?: "GitHub User"
+            val name = data.getQueryParameter("name") ?: "Aarka User"
             
             if (token != null && userId != null) {
                 // Initialize ViewModel instance and login session directly

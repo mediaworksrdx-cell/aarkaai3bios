@@ -1,4 +1,4 @@
-# GitHub Secrets Setup for Android CI/CD
+﻿# GitHub Secrets Setup for Android CI/CD
 
 This document details the configuration of GitHub Secrets required for automated, secure building and signing of the AARKAAI Android application in CI/CD pipelines.
 
@@ -33,7 +33,7 @@ To add secrets to your GitHub repository:
 | `RELEASE_STORE_PASSWORD` | Password for the release keystore | `your_keystore_password` |
 | `RELEASE_KEY_ALIAS` | Key alias within the keystore | `aarkaai_key` |
 | `RELEASE_KEY_PASSWORD` | Password for the specific key alias | `your_key_password` |
-| `AARKAAI_BACKEND_URL` | Production backend base URL | `http://43.204.153.162:5000/` |
+| `AARKAAI_BACKEND_URL` | Production backend base URL | `http://35.225.45.190:5000/` |
 
 ---
 

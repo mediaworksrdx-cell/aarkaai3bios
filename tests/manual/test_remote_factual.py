@@ -2,7 +2,7 @@ import requests
 import uuid
 import json
 
-BASE_URL = "http://16.170.206.243:5000"
+BASE_URL = "http://35.225.45.190:5000"
 
 def run_tests():
     email = "testadmin@aarkaai.com"

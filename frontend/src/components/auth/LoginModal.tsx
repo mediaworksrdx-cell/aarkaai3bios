@@ -42,8 +42,8 @@ export function LoginModal({
         </button>
 
         {/* Logo and Headline */}
-        <div className="w-12 h-12 rounded-2xl bg-[var(--accent-muted)] border border-[var(--border-accent)] flex items-center justify-center text-[var(--accent-primary)] mb-5 shadow-sm">
-          <Sparkles className="w-6 h-6" />
+        <div className="w-14 h-14 rounded-2xl bg-white border border-[var(--border)] flex items-center justify-center p-2 mb-5 shadow-sm">
+          <img src="/logo.png" alt="Aarka AI" className="w-10 h-10 object-contain" />
         </div>
 
         <h2 className="text-2xl sm:text-3xl font-display font-bold text-[var(--text-primary)] mb-2 tracking-tight text-center">

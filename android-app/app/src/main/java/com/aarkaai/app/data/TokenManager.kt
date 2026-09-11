@@ -18,11 +18,19 @@ class TokenManager(private val context: Context) {
         private val TOKEN_KEY = stringPreferencesKey("jwt_token")
         private val USER_ID_KEY = stringPreferencesKey("user_id")
         private val USER_NAME_KEY = stringPreferencesKey("user_name")
+        private val ACTIVE_CONV_ID_KEY = stringPreferencesKey("active_conv_id")
     }
 
     val token: Flow<String?> = context.dataStore.data.map { it[TOKEN_KEY] }
     val userId: Flow<String?> = context.dataStore.data.map { it[USER_ID_KEY] }
     val userName: Flow<String?> = context.dataStore.data.map { it[USER_NAME_KEY] }
+    val activeConversationId: Flow<String?> = context.dataStore.data.map { it[ACTIVE_CONV_ID_KEY] }
+
+    suspend fun saveToken(token: String) {
+        context.dataStore.edit { prefs ->
+            prefs[TOKEN_KEY] = token
+        }
+    }
 
     suspend fun saveAuth(token: String, userId: String, name: String?) {
         context.dataStore.edit { prefs ->
@@ -32,7 +40,18 @@ class TokenManager(private val context: Context) {
         }
     }
 
+    suspend fun saveActiveConversationId(id: String) {
+        context.dataStore.edit { prefs ->
+            prefs[ACTIVE_CONV_ID_KEY] = id
+        }
+    }
+
     suspend fun clearAuth() {
-        context.dataStore.edit { it.clear() }
+        context.dataStore.edit { prefs ->
+            prefs.remove(TOKEN_KEY)
+            prefs.remove(USER_ID_KEY)
+            prefs.remove(USER_NAME_KEY)
+            prefs.remove(ACTIVE_CONV_ID_KEY)
+        }
     }
 }

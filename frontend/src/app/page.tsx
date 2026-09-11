@@ -6,7 +6,7 @@ import { ChatContainer } from '@/components/chat/ChatContainer';
 import { Sidebar } from '@/components/sidebar/Sidebar';
 import { LoginModal } from '@/components/auth/LoginModal';
 import { SettingsModal } from '@/components/settings/SettingsModal';
-import { getStoredToken, setStoredToken, clearToken } from '@/lib/api';
+import { getStoredToken, setStoredToken, clearToken, fetchVisitorToken } from '@/lib/api';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import { User } from '@/types';
 
@@ -114,6 +114,7 @@ function MainChatLayout({
         <ChatContainer
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={sidebarOpen}
+          user={user}
         />
       </main>
 
@@ -186,15 +187,35 @@ export default function HomePage() {
       const rawUser = localStorage.getItem('aarka-user') || localStorage.getItem('aarkaa-user');
       const savedAnonymous = localStorage.getItem('aarka-anonymous') || localStorage.getItem('aarkaa-anonymous');
 
-      if (token && rawUser && rawUser !== 'undefined' && rawUser !== 'null') {
+      if (rawUser && rawUser !== 'undefined' && rawUser !== 'null') {
         try {
           const parsedUser = JSON.parse(rawUser);
           if (parsedUser && typeof parsedUser === 'object') {
             setUser(parsedUser);
+            if (parsedUser.email === 'guest@aarka-ai.com') {
+              setIsAnonymous(true);
+            }
           }
         } catch {}
       } else if (savedAnonymous === 'true') {
         setIsAnonymous(true);
+        const guestUser: User = {
+          id: 'guest-' + Date.now(),
+          name: 'Guest User',
+          email: 'guest@aarka-ai.com',
+        };
+        setUser(guestUser);
+        try {
+          localStorage.setItem('aarka-user', JSON.stringify(guestUser));
+        } catch {}
+      }
+
+      if (!token) {
+        fetchVisitorToken().then((res) => {
+          if (res?.access_token) {
+            setStoredToken(res.access_token);
+          }
+        }).catch((err) => console.warn('Visitor token restore error:', err));
       }
     } catch (e) {
       console.warn('Auth state read error:', e);
@@ -215,10 +236,37 @@ export default function HomePage() {
 
   const handleContinueAsGuest = useCallback(() => {
     setIsAnonymous(true);
+    setShowLoginModal(false);
     try {
       localStorage.setItem('aarka-anonymous', 'true');
     } catch {}
-    setShowLoginModal(false);
+
+    // Always fetch a fresh visitor token and establish guest user session
+    fetchVisitorToken().then((res) => {
+      if (res?.access_token) {
+        setStoredToken(res.access_token);
+      }
+      const guestUser: User = {
+        id: res?.user_id || 'guest-' + Date.now(),
+        name: res?.name || 'Guest User',
+        email: 'guest@aarka-ai.com',
+      };
+      setUser(guestUser);
+      try {
+        localStorage.setItem('aarka-user', JSON.stringify(guestUser));
+      } catch {}
+    }).catch((err) => {
+      console.warn('Visitor token fetch error:', err);
+      const guestUser: User = {
+        id: 'guest-' + Date.now(),
+        name: 'Guest User',
+        email: 'guest@aarka-ai.com',
+      };
+      setUser(guestUser);
+      try {
+        localStorage.setItem('aarka-user', JSON.stringify(guestUser));
+      } catch {}
+    });
   }, []);
 
   const handleLogout = useCallback(() => {
@@ -230,10 +278,7 @@ export default function HomePage() {
       localStorage.removeItem('aarkaa-user');
       localStorage.removeItem('aarka-anonymous');
       localStorage.removeItem('aarkaa-anonymous');
-      localStorage.removeItem('aarka-conv-v3-guest');
-      localStorage.removeItem('aarka-conversations-v3');
-      localStorage.removeItem('aarkaa-conversations-v3');
-      localStorage.removeItem('aarkaa-conversations');
+      sessionStorage.removeItem('aarka-active-conv-id');
     } catch {}
   }, []);
 

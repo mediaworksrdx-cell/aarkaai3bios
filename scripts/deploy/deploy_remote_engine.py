@@ -5,7 +5,7 @@ Splits large files into base64 chunks to bypass the 10,000 char query limit.
 import requests
 import base64
 
-base_url = "http://16.170.206.243:5000"
+base_url = "http://35.225.45.190:5000"
 
 reg_payload = {
     "email": "testadmin@aarkaai.com",

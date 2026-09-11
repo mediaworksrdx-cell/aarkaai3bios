@@ -10,6 +10,8 @@ import retrofit2.http.GET
 data class PromptRequest(
     val query: String,
     val session_id: String = "1",
+    val model: String? = "aarka-2.0",
+    val effort: String? = "medium",
     val context: Map<String, Any>? = null
 )
 
@@ -63,6 +65,9 @@ interface ApiService {
     @POST("auth/login")
     suspend fun login(@Body request: AuthRequest): AuthResponse
 
+    @POST("auth/visitor-token")
+    suspend fun getVisitorToken(): AuthResponse
+
     @POST("prompt")
     suspend fun sendPrompt(
         @Header("Authorization") token: String,
@@ -77,4 +82,15 @@ interface ApiService {
 
     @GET("health")
     suspend fun health(): HealthResponse
+
+    @GET("settings")
+    suspend fun getSettings(
+        @Header("Authorization") token: String
+    ): UserSettingsDto
+
+    @retrofit2.http.PUT("settings")
+    suspend fun updateSettings(
+        @Header("Authorization") token: String,
+        @Body request: UserSettingsDto
+    ): UserSettingsDto
 }

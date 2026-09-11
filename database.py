@@ -230,6 +230,15 @@ class UserSettings(Base):
     web_search_enabled = Column(Integer, default=1)                      # 1 = True
     deep_research_enabled = Column(Integer, default=1)                   # 1 = True
     market_data_enabled = Column(Integer, default=1)                     # 1 = True
+    connected_apps = Column(Text, default="{}")                          # JSON-encoded connected apps map
+    # UI preference fields (synced from frontend settings modal)
+    density = Column(String(16), default="comfortable")                   # compact | comfortable
+    enter_to_send = Column(Integer, default=1)                            # 1 = True (SQLite compat)
+    show_timestamps = Column(Integer, default=1)                          # 1 = True
+    incognito_chat = Column(Integer, default=0)                           # 0 = False
+    two_factor_enabled = Column(Integer, default=0)                       # 0 = False
+    email_alerts = Column(Integer, default=1)                             # 1 = True
+    security_alerts = Column(Integer, default=1)                          # 1 = True
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
@@ -243,6 +252,28 @@ def init_db() -> None:
     except Exception:
         pass
     Base.metadata.create_all(bind=engine)
+    # Safe column migration for connected_apps and UI preference fields on existing databases
+    _migration_columns = [
+        ("connected_apps", "TEXT", "'{}'"),
+        ("density", "VARCHAR(16)", "'comfortable'"),
+        ("enter_to_send", "INTEGER", "1"),
+        ("show_timestamps", "INTEGER", "1"),
+        ("incognito_chat", "INTEGER", "0"),
+        ("two_factor_enabled", "INTEGER", "0"),
+        ("email_alerts", "INTEGER", "1"),
+        ("security_alerts", "INTEGER", "1"),
+    ]
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            for col_name, col_type, col_default in _migration_columns:
+                try:
+                    conn.execute(text(f"ALTER TABLE user_settings ADD COLUMN {col_name} {col_type} DEFAULT {col_default}"))
+                except Exception:
+                    pass  # Column already exists
+            conn.commit()
+    except Exception:
+        pass
 
 
 def get_session():

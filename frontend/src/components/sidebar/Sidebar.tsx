@@ -87,8 +87,8 @@ export function Sidebar({
       {/* Sidebar Header */}
       <div className="p-4 border-b border-[var(--border)] flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-[var(--accent-muted)] border border-[var(--border-accent)] flex items-center justify-center text-[var(--accent-primary)] shadow-sm">
-            <Sparkles className="w-4 h-4" />
+          <div className="w-8 h-8 rounded-xl bg-white border border-[var(--border)] flex items-center justify-center p-1 shadow-sm">
+            <img src="/logo.png" alt="Aarka AI" className="w-6 h-6 object-contain" />
           </div>
           <span className="font-display text-lg font-bold text-[var(--text-primary)] tracking-tight">
             Aarka <span className="text-[var(--accent-primary)] font-bold">AI</span>
@@ -188,7 +188,12 @@ export function Sidebar({
                 )}
               </div>
               <div className="flex flex-col min-w-0">
-                <span className="text-xs font-semibold text-[var(--text-primary)] truncate">{user.name}</span>
+                <span className="text-xs font-semibold text-[var(--text-primary)] truncate flex items-center gap-1.5">
+                  {user.name}
+                  {user.email === 'guest@aarka-ai.com' && (
+                    <span className="text-[9px] px-1.5 py-0.2 bg-[var(--accent-muted)] text-[var(--accent-primary)] font-mono rounded-md font-bold">GUEST</span>
+                  )}
+                </span>
                 <span className="text-[10px] text-[var(--text-tertiary)] truncate">{user.email}</span>
               </div>
             </div>
@@ -196,7 +201,7 @@ export function Sidebar({
             <button
               onClick={onLogin}
               type="button"
-              className="flex items-center gap-2 text-xs font-medium text-[var(--text-primary)] hover:text-[var(--accent-primary)] transition-colors"
+              className="flex items-center gap-2 text-xs font-medium text-[var(--text-primary)] hover:text-[var(--accent-primary)] transition-colors cursor-pointer"
             >
               <LogIn className="w-4 h-4 text-[var(--accent-primary)]" />
               <span>Sign In</span>
@@ -204,6 +209,16 @@ export function Sidebar({
           )}
 
           <div className="flex items-center gap-1">
+            {user && user.email === 'guest@aarka-ai.com' && (
+              <button
+                onClick={onLogin}
+                type="button"
+                className="p-1.5 rounded-lg text-[var(--accent-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+                title="Sign In with Google / GitHub"
+              >
+                <LogIn className="w-4 h-4" />
+              </button>
+            )}
             <button
               onClick={onOpenSettings}
               type="button"

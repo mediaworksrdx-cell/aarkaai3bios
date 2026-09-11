@@ -216,6 +216,15 @@ class UserSettingsUpdate(BaseModel):
     web_search_enabled: Optional[bool] = Field(default=None, description="Enable live web search")
     deep_research_enabled: Optional[bool] = Field(default=None, description="Enable deep research mode")
     market_data_enabled: Optional[bool] = Field(default=None, description="Enable live market data")
+    connected_apps: Optional[str] = Field(default=None, description="JSON-encoded connected apps mapping")
+    # UI preference fields (synced from frontend)
+    density: Optional[str] = Field(default=None, description="compact | comfortable")
+    enter_to_send: Optional[bool] = Field(default=None, description="Press Enter to send messages")
+    show_timestamps: Optional[bool] = Field(default=None, description="Display message timestamps")
+    incognito_chat: Optional[bool] = Field(default=None, description="Incognito chat mode — sessions not saved")
+    two_factor_enabled: Optional[bool] = Field(default=None, description="Two-factor authentication enabled")
+    email_alerts: Optional[bool] = Field(default=None, description="Email notification preferences")
+    security_alerts: Optional[bool] = Field(default=None, description="Security alert notification preferences")
 
 
 class UserSettingsResponse(BaseModel):
@@ -234,6 +243,15 @@ class UserSettingsResponse(BaseModel):
     web_search_enabled: bool = True
     deep_research_enabled: bool = True
     market_data_enabled: bool = True
+    connected_apps: Optional[str] = "{}"
+    # UI preference fields
+    density: str = "comfortable"
+    enter_to_send: bool = True
+    show_timestamps: bool = True
+    incognito_chat: bool = False
+    two_factor_enabled: bool = False
+    email_alerts: bool = True
+    security_alerts: bool = True
     updated_at: Optional[str] = None
 
 

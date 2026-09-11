@@ -384,7 +384,7 @@ class CognitiveOrchestrator:
         from modules.external_agents import stream_aarka_response
         agent_context_str = "\n\n".join([f"[{r.agent_name} Insights]:\n{r.output}" for r in accumulated_results if r.output])
         full_ans = ""
-        for token in stream_aarka_response(query, context=agent_context_str):
+        for token in stream_aarka_response(query, context=agent_context_str, history=ctx.get("history")):
             full_ans += token
             yield {"type": "content", "token": token}
             await asyncio.sleep(0.001)

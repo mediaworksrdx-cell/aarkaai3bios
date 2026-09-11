@@ -1,7 +1,15 @@
 # Proguard rules for release builds
 
-# ─── Network models (Gson serialization) ───
+# ─── Network & Data models (Gson serialization) ───
 -keep class com.aarkaai.app.network.** { *; }
+-keep class com.aarkaai.app.data.** { *; }
+-keep class com.aarkaai.app.ui.chat.Conversation { *; }
+-keep class com.aarkaai.app.ui.chat.ChatMessage { *; }
+-keep class com.aarkaai.app.ui.chat.** { *; }
+-keep @androidx.annotation.Keep class * { *; }
+-keepclassmembers class * {
+    @androidx.annotation.Keep *;
+}
 -keepattributes Signature
 -keepattributes *Annotation*
 
