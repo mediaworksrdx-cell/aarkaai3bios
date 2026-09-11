@@ -422,18 +422,19 @@ def _is_pdf_generation_query(query: str) -> bool:
     action_words = ["create", "generate", "make", "compile", "build", "produce", "export", "write"]
     pdf_words = ["pdf", "report", "document", "business report"]
     
-    # Must have both action word and pdf/report word
+    # Must have both action word and pdf/report word, or explicit @pdf/@gamma-pdf/@premium-report tag
     has_action = any(aw in q for aw in action_words)
     has_pdf = any(pw in q for pw in pdf_words)
     
-    if has_action and has_pdf:
+    if (has_action and has_pdf) or bool(re.search(r'(?:^|\s)[@/](?:pdf|gamma-pdf|premium-report)\b', q)):
         return True
         
     return False
 
 def _extract_pdf_topic(query: str) -> str:
     """Extract a clean topic from a PDF generation query."""
-    q = query.lower()
+    topic = re.sub(r'^\s*[@/](?:pdf|gamma-pdf|premium-report)\s*', '', query, flags=re.IGNORECASE).strip()
+    q = topic.lower()
     # Remove common prefix phrases
     prefixes = [
         "create a premium pdf report about",
@@ -523,9 +524,85 @@ def _is_calculation_query(query: str) -> bool:
     return False
 
 
+def _extract_and_load_skill(query: str) -> tuple[Optional[str], Optional[str], str]:
+    """
+    Detect explicit skill invocation via @<skill-name> or /<skill-name> tags.
+    Loads the corresponding SKILL.md guidelines from skills/ or .agents/skills/
+    and returns (skill_name, skill_content, cleaned_query).
+    """
+    from pathlib import Path
+
+    # Match @skill-name or /skill-name (e.g. @finance, /architecture, @codebase-design)
+    match = re.search(r'(?:^|\s)[@/]([a-zA-Z0-9_-]+)', query)
+    if not match:
+        return None, None, query
+
+    raw_name = match.group(1).lower().replace("_", "-")
+
+    # Common aliases and shortcuts
+    aliases = {
+        "strategy": "options-strategy",
+        "option": "options-strategy",
+        "options": "options-strategy",
+        "report": "premium-report",
+        "reports": "premium-report",
+        "docs": "docx",
+        "word": "docx",
+        "excel": "xlsx",
+        "powerpoint": "pptx",
+        "presentation": "pptx",
+    }
+    target_name = aliases.get(raw_name, raw_name)
+
+    # Search candidates in repository
+    candidate_paths = [
+        Path("./skills") / target_name / "SKILL.md",
+        Path(".agents/skills") / target_name / "SKILL.md",
+        Path("./skills") / raw_name / "SKILL.md",
+        Path(".agents/skills") / raw_name / "SKILL.md",
+    ]
+
+    skill_content = None
+    resolved_name = target_name
+
+    for p in candidate_paths:
+        if p.exists() and p.is_file():
+            try:
+                skill_content = p.read_text(encoding="utf-8")
+                break
+            except Exception as exc:
+                logger.warning("Failed to read %s: %s", p, exc)
+
+    if not skill_content:
+        # Fallback to shared SkillRegistry singleton
+        try:
+            from modules.tools.skill_tools import get_registry, init_skill_registry
+            reg = get_registry()
+            if reg is None:
+                reg = init_skill_registry()
+            if reg and target_name in reg.skills:
+                skill_content = reg.get_skill(target_name)
+        except Exception:
+            pass
+
+    if not skill_content:
+        return None, None, query
+
+    # Clean query by removing the tag
+    clean_q = re.sub(r'(?:^|\s)[@/]' + re.escape(match.group(1)) + r'\b', ' ', query).strip()
+    if not clean_q:
+        clean_q = f"Execute autonomous analysis and execution adhering to the @{resolved_name} skill guidelines."
+
+    return resolved_name, skill_content, clean_q
+
+
 def _needs_skill_routing(query: str) -> bool:
     """Detect queries that involve file formats or document creation which benefit from skill docs."""
     q = query.lower()
+    # Explicit @skill or /skill triggers
+    if re.search(r'(?:^|\s)[@/][a-zA-Z0-9_-]+', query):
+        return True
+
     # Skill creation/management triggers
     skill_management_words = ["create skill", "update skill", "delete skill", "manage skill", "skill creator", "new skill", "test skill"]
     if any(sw in q for sw in skill_management_words):
@@ -811,76 +888,15 @@ def _should_skip_rag(query: str, intent: str, domain: str) -> bool:
 def _follow_up_score(query: str, chat_ctx: list) -> float:
     """Confidence-scored follow-up detection using 7 signal categories.
 
-    Returns a float 0.0–1.0 indicating how strongly the query depends on
-    prior conversation history.  Multiple signals stack (capped at 1.0).
+    Delegates to modules.query_understanding.calculate_follow_up_score.
     """
     if not chat_ctx:
         return 0.0
-
-    q_low = query.lower().strip()
-    word_count = len(q_low.split())
-    words = set(re.findall(r"\b[a-zA-Z]+\b", q_low))
-    score = 0.0
-
-    # ── Signal 1: Short query heuristic ──────────────────────────────────
-    if word_count <= 3:
-        score += 0.85
-    elif word_count <= 6:
-        score += 0.70
-
-    # ── Signal 2: Pronoun / demonstrative references ─────────────────────
-    pronoun_refs = {
-        "it", "its", "they", "them", "their", "he", "him", "his",
-        "she", "her", "this", "that", "these", "those",
-    }
-    if words.intersection(pronoun_refs):
-        score += 0.60
-
-    # ── Signal 3: Continuation phrases ───────────────────────────────────
-    continuation_phrases = [
-        "tell me more", "explain further", "go on", "keep going",
-        "what else", "and then", "continue", "elaborate", "more details",
-        "expand on", "can you elaborate", "more about", "in detail",
-    ]
-    if any(p in q_low for p in continuation_phrases):
-        score += 0.90
-
-    # ── Signal 4: Verification / challenge phrases ───────────────────────
-    verification_phrases = [
-        "are you sure", "really", "is that correct", "is that right",
-        "is that true", "why so", "how come", "can you clarify",
-        "are you certain", "prove it", "source", "how do you know",
-        "double check", "verify", "confirm",
-    ]
-    if any(p in q_low for p in verification_phrases):
-        score += 0.85
-
-    # ── Signal 5: Affirmation / negation ─────────────────────────────────
-    affirmation_negation = {
-        "yes", "no", "ok", "okay", "right", "correct", "wrong",
-        "exactly", "agreed", "nope", "yep", "yeah", "nah",
-    }
-    if q_low in affirmation_negation or (word_count <= 3 and words.intersection(affirmation_negation)):
-        score += 0.80
-
-    # ── Signal 6: Contextual back-references ─────────────────────────────
-    back_refs = [
-        "the above", "you said", "you mentioned", "earlier",
-        "previous", "last answer", "your response", "as you said",
-        "you told me", "your answer", "from before",
-    ]
-    if any(p in q_low for p in back_refs):
-        score += 0.95
-
-    # ── Signal 7: Comparative follow-ups ─────────────────────────────────
-    comparative_phrases = [
-        "what about", "how about", "instead of", "versus", " vs ",
-        "compared to", "rather than", "difference between", "or should",
-    ]
-    if any(p in q_low for p in comparative_phrases):
-        score += 0.70
-
-    return min(score, 1.0)
+    try:
+        from modules.query_understanding import calculate_follow_up_score
+        return calculate_follow_up_score(query, chat_ctx)
+    except Exception:
+        return 0.0
 
 
 def _is_follow_up(query: str, chat_ctx: list) -> bool:
@@ -896,6 +912,10 @@ def _detect_topic_shift(query: str, chat_ctx: list) -> bool:
     stale conversation context.
     """
     if not chat_ctx:
+        return False
+
+    # Never treat a query with strong follow-up or back-reference signals as a topic shift
+    if _follow_up_score(query, chat_ctx) >= 0.4:
         return False
 
     q_low = query.lower().strip()
@@ -914,7 +934,7 @@ def _detect_topic_shift(query: str, chat_ctx: list) -> bool:
     if any(p in q_low for p in shift_phrases):
         return True
 
-    # Content overlap check: compare query words with last 4 messages
+    # Content overlap check: compare query words against the available history
     stop_words = {
         "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
         "have", "has", "had", "do", "does", "did", "will", "would", "could",
@@ -930,16 +950,15 @@ def _detect_topic_shift(query: str, chat_ctx: list) -> bool:
     if len(query_words) < 2:
         return False  # Too few content words to judge
 
-    # Collect content words from last 4 history messages
-    recent = chat_ctx[-4:] if len(chat_ctx) >= 4 else chat_ctx
-    history_text = " ".join(m.get("message", "") for m in recent).lower()
+    # Collect content words from available history (up to 20 messages / 10 turns)
+    history_text = " ".join(m.get("message", "") for m in chat_ctx[-20:]).lower()
     history_words = set(re.findall(r"\b[a-zA-Z]{3,}\b", history_text)) - stop_words
 
     overlap = query_words.intersection(history_words)
     overlap_ratio = len(overlap) / len(query_words) if query_words else 0.0
 
-    # If less than 15% word overlap with recent history, it's likely a new topic
-    if overlap_ratio < 0.15 and word_count > 8:
+    # If less than 10% word overlap across recent history and query is long, it's a new topic
+    if overlap_ratio < 0.10 and word_count > 10:
         return True
 
     return False
@@ -952,6 +971,10 @@ def _build_agent_ctx(chat_ctx, context_parts, sources) -> str:
             if "[Finance Data]" in part:
                 parts.append(part)
                 break
+    for part in context_parts:
+        if "[Active Autonomous Skill Directives" in part:
+            parts.append(part)
+            break
     if chat_ctx:
         # Sanitize chat history: remove Action/Observation outputs to prevent agent confusion in the ReAct loop
         sanitized_messages = []
@@ -1090,12 +1113,20 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
 
     start = time.perf_counter()
     sources: list[str] = []
+    context_parts: list[str] = []
 
     # ── 0. Sanitize + Language Detection ──────────────────────────────────
     query = _sanitize_query(query)
     raw_detected = _detect_language(query)
     detected_lang = _detect_requested_language(query, raw_detected)
     logger.info("Detected language: %s (raw=%s)", detected_lang, raw_detected)
+
+    # ── 0a. Autonomous Skill Tag Detection (@skill / /skill) ─────────────
+    skill_name, skill_content, clean_query = _extract_and_load_skill(query)
+    if skill_name and skill_content:
+        logger.info("Explicit autonomous skill activated: @%s", skill_name)
+        sources.append(f"skill:{skill_name}")
+        context_parts.append(f"[Active Autonomous Skill Directives: @{skill_name}]\n{skill_content}")
 
     # ── 1. Semantic Filter ────────────────────────────────────────────────
     clean_q = re.sub(r"[^\w\s]", "", query.lower()).strip()
@@ -1122,6 +1153,25 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     domain = filter_result["domain"]
     filter_confidence = filter_result["confidence"]
     intent = filter_result["intent"]
+
+    # Align domain and intent when an explicit autonomous skill is activated
+    if skill_name:
+        if skill_name in ["finance", "options-strategy", "strategy"]:
+            domain = "finance"
+            intent = "market_data"
+            filter_confidence = max(filter_confidence, 0.95)
+        elif skill_name in ["architecture", "codebase-design", "domain-modeling", "design-an-interface", "improve-codebase-architecture", "ai-ml"]:
+            domain = "technology"
+            intent = "tech_info"
+            filter_confidence = max(filter_confidence, 0.95)
+        elif skill_name in ["tdd", "qa", "diagnosing-bugs", "review", "resolving-merge-conflicts", "request-refactor-plan"]:
+            domain = "technology"
+            intent = "coding_help"
+            filter_confidence = max(filter_confidence, 0.95)
+        elif skill_name in ["pdf", "gamma-pdf", "premium-report"]:
+            domain = "document"
+            intent = "pdf_generation"
+            filter_confidence = max(filter_confidence, 0.95)
 
     # Fallback to general query if classifier confidence is low
     # Bypassed if the query explicitly asks for systems/software design or architecture
@@ -1354,14 +1404,13 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         logger.error("Memory context error: %s", exc)
 
     # ── 4. Low confidence – route to external modules ─────────────────────
-    context_parts: list[str] = []
+    # Note: context_parts preserves active skill directives if present
 
     # RAG – check the knowledge base first
-    # Confidence-gated RAG skip: high-confidence follow-ups (≥0.7) with ≤8
-    # words skip RAG entirely; medium confidence (≥0.5) reduces top_k to 1.
+    # Confidence-gated RAG skip: conversational follow-ups (≥0.4) skip RAG entirely
     _fu_score = _follow_up_score(query, chat_ctx)
-    _is_short_followup = _fu_score >= 0.7 and len(query.split()) <= 8
-    if not _should_skip_rag(query, intent, domain) and mode != "benchmark" and not _is_short_followup:
+    _is_followup_query = _fu_score >= 0.4
+    if not _should_skip_rag(query, intent, domain) and mode != "benchmark" and not _is_followup_query:
         try:
             from modules.aarkaa_engine import _classify_and_plan
             plan = _classify_and_plan(query)
@@ -1383,8 +1432,8 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # Topic-shift detection: if the user switched to an unrelated topic,
     # trim history to prevent conversation drift from stale context.
     if chat_ctx and _detect_topic_shift(query, chat_ctx):
-        logger.info("Topic shift detected — trimming history to last 2 turns")
-        chat_ctx = chat_ctx[-4:]  # Keep only last 2 user+assistant pairs
+        logger.info("Topic shift detected — trimming history to last 10 messages")
+        chat_ctx = chat_ctx[-10:]  # Retain up to 10 messages (5 user+assistant pairs)
 
     # Architecture self-awareness – detect queries about AARKAA's own internals
     from modules.architecture_verifier import is_architecture_query
@@ -1408,6 +1457,16 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
 
     # Domain-specific routing
     is_fin_intent = _has_live_finance_intent(query, domain, intent)
+    is_screener = finance.is_stock_screener_query(query)
+    if is_screener and mode != "benchmark":
+        try:
+            screener_data = finance.screen_stocks(query, top_k=5)
+            if screener_data.get("summary"):
+                context_parts.append(screener_data["summary"])
+                sources.append("finance_screener")
+        except Exception as exc:
+            logger.error("Stock screener error: %s", exc)
+
     fin_tickers = []
     if is_fin_intent and not is_reasoning and mode != "benchmark":
         fin_tickers = finance.extract_tickers(query)
@@ -1470,7 +1529,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # Skip web search if live finance data was already fetched — web results
     # often contain stale prices that contradict the live Yahoo Finance feed
     # and confuse the model into outputting outdated values.
-    has_finance_context = "finance" in sources
+    has_finance_context = ("finance" in sources or "finance_screener" in sources)
 
     # ── 4a. Code Output Sandbox ───────────────────────────────────────────
     # If this query is a coding query asking for the output of code, we run the code
@@ -1545,7 +1604,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         and not has_finance_context
         and not is_greeting
         and not _is_identity_query(query)
-        and not _is_short_followup
+        and not _is_followup_query
         and (intent != "coding_help" or is_factual)
         and (intent != "reasoning_puzzle" or is_factual)
         and (
@@ -1716,6 +1775,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             logger.info("Verifier skipped for knowledge/design query (domain=%s).", intent)
 
     # ── 8. Store + auto-learn (post-process) ──────────────────────────────
+    final_answer = aarkaa_engine.clean_response(final_answer)
     main_source = sources[-1] if len(sources) > 1 else "aarkaa-3b"
     _post_process(
         user_id, session_id, query, final_answer,
@@ -1778,9 +1838,17 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
 
     start = time.perf_counter()
     sources: list[str] = []
+    context_parts: list[str] = []
 
     # Check for external agent model overrides (Gemini / Claude / GPT-OSS)
     if model_override and (model_override.startswith("gemini") or model_override.startswith("claude") or model_override.startswith("gpt")):
+        # Fetch conversation history for multi-turn follow-up capability
+        chat_ctx = None
+        try:
+            chat_ctx = memory.get_chat_context(user_id, session_id, limit=15)
+        except Exception:
+            pass
+
         # Fetch web context if news/latest is explicitly requested
         web_context = ""
         q_lower = query.lower()
@@ -1802,7 +1870,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             yield {"type": "status", "status": f"Connecting to Google {model_override.replace('-', ' ').title()}..."}
             from modules.external_agents import stream_gemini_response
             full_resp = ""
-            for token in stream_gemini_response(query, context=web_context, model_name=model_override):
+            for token in stream_gemini_response(query, context=web_context, model_name=model_override, history=chat_ctx):
                 full_resp += token
                 yield {"type": "content", "token": token}
                 await asyncio.sleep(0.001)
@@ -1810,19 +1878,39 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             yield {"type": "status", "status": f"Connecting to Anthropic {model_override.replace('-', ' ').title()}..."}
             from modules.external_agents import stream_claude_response
             full_resp = ""
-            for token in stream_claude_response(query, context=web_context, model_name=model_override):
+            for token in stream_claude_response(query, context=web_context, model_name=model_override, history=chat_ctx):
                 full_resp += token
                 yield {"type": "content", "token": token}
                 await asyncio.sleep(0.001)
         
         elapsed = round(time.perf_counter() - start, 3)
         yield {"type": "final", "processing_time": elapsed}
+
+        # Background store conversation in memory for multi-turn continuity
+        def _bg_store_external():
+            try:
+                _post_process(
+                    user_id, session_id, query, full_resp,
+                    "external_agent", 0.95, model_override,
+                    memory, auto_learn,
+                )
+            except Exception as exc:
+                logger.error("Background store failed for external agent: %s", exc)
+        threading.Thread(target=_bg_store_external, daemon=True).start()
         return
 
     # ── 0. Sanitize + Language Detection ──────────────────────────────────
     query = _sanitize_query(query)
     raw_detected = _detect_language(query)
     detected_lang = _detect_requested_language(query, raw_detected)
+
+    # ── 0a. Autonomous Skill Tag Detection (@skill / /skill) ─────────────
+    skill_name, skill_content, clean_query = _extract_and_load_skill(query)
+    if skill_name and skill_content:
+        logger.info("Explicit autonomous skill activated in stream: @%s", skill_name)
+        yield {"type": "status", "status": f"Activating @{skill_name} autonomous skill directives..."}
+        sources.append(f"skill:{skill_name}")
+        context_parts.append(f"[Active Autonomous Skill Directives: @{skill_name}]\n{skill_content}")
 
     # ── 1. Semantic Filter ────────────────────────────────────────────────
     clean_q = re.sub(r"[^\w\s]", "", query.lower()).strip()
@@ -1850,9 +1938,32 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     filter_confidence = filter_result["confidence"]
     intent = filter_result["intent"]
 
+    # Align domain and intent when an explicit autonomous skill is activated
+    if skill_name:
+        if skill_name in ["finance", "options-strategy", "strategy"]:
+            domain = "finance"
+            intent = "market_data"
+            filter_confidence = max(filter_confidence, 0.95)
+        elif skill_name in ["architecture", "codebase-design", "domain-modeling", "design-an-interface", "improve-codebase-architecture", "ai-ml"]:
+            domain = "technology"
+            intent = "tech_info"
+            filter_confidence = max(filter_confidence, 0.95)
+        elif skill_name in ["tdd", "qa", "diagnosing-bugs", "review", "resolving-merge-conflicts", "request-refactor-plan"]:
+            domain = "technology"
+            intent = "coding_help"
+            filter_confidence = max(filter_confidence, 0.95)
+        elif skill_name in ["pdf", "gamma-pdf", "premium-report"]:
+            domain = "document"
+            intent = "pdf_generation"
+            filter_confidence = max(filter_confidence, 0.95)
+
     # Fallback to general query if classifier confidence is low
     _has_design_keywords = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"])
-    _has_code_keywords = any(w in query.lower() for w in ["code", "program", "function", "script", "implement", "write an agent", "create an agent", "tool_1", "tool_2", "tool_3", "pytest", "unit test", "bash tool", "fileedittool", "python class"])
+    code_phrases_to_ignore = ["project code", "secret code", "postal code", "zip code", "discount code", "promo code", "coupon code", "area code", "pin code"]
+    is_not_coding = any(p in query.lower() for p in code_phrases_to_ignore)
+    _has_code_keywords = not is_not_coding and any(
+        w in query.lower() for w in ["write code", "python code", "function", "script", "implement", "write an agent", "create an agent", "tool_1", "tool_2", "tool_3", "pytest", "unit test", "bash tool", "fileedittool", "python class"]
+    )
     if _has_design_keywords:
         domain = "technology"
         intent = "tech_info"
@@ -2016,12 +2127,12 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     except Exception: pass
 
     # ── 4. Gather Context ─────────────────────────────────────────────────
-    context_parts: list[str] = []
+    # Note: context_parts preserves active skill directives if present
     
     # RAG — confidence-gated skip for follow-ups
     _fu_score_s = _follow_up_score(query, chat_ctx)
-    _is_short_followup_s = _fu_score_s >= 0.7 and len(query.split()) <= 8
-    if not _should_skip_rag(query, intent, domain) and mode != "benchmark" and not _is_short_followup_s:
+    _is_followup_query_s = _fu_score_s >= 0.4
+    if not _should_skip_rag(query, intent, domain) and mode != "benchmark" and not _is_followup_query_s:
         try:
             top_k = 1 if _fu_score_s >= 0.5 else 3
             rag_context = rag.get_context(query, top_k=top_k, user_id=user_id, query_domain=domain)
@@ -2032,11 +2143,22 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
 
     # Topic-shift detection: trim stale history on topic change
     if chat_ctx and _detect_topic_shift(query, chat_ctx):
-        logger.info("Topic shift detected (stream) — trimming history to last 2 turns")
-        chat_ctx = chat_ctx[-4:]
+        logger.info("Topic shift detected (stream) — trimming history to last 10 messages")
+        chat_ctx = chat_ctx[-10:]
 
     # Domain-specific routing
     is_fin_intent = _has_live_finance_intent(query, domain, intent)
+    is_screener = finance.is_stock_screener_query(query)
+    if is_screener and mode != "benchmark":
+        try:
+            yield {"type": "status", "status": "Screening live equity markets & computing valuation metrics..."}
+            screener_data = finance.screen_stocks(query, top_k=5)
+            if screener_data.get("summary"):
+                context_parts.append(screener_data["summary"])
+                sources.append("finance_screener")
+        except Exception as exc:
+            logger.error("Stock screener error (stream): %s", exc)
+
     fin_tickers = []
     if is_fin_intent and not is_reasoning and mode != "benchmark":
         fin_tickers = finance.extract_tickers(query)
@@ -2098,14 +2220,14 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     # Skip web search if live finance data was already fetched — web results
     # often contain stale prices that contradict the live Yahoo Finance feed
     # and confuse the model into outputting outdated values.
-    has_finance_context = "finance" in sources
+    has_finance_context = ("finance" in sources or "finance_screener" in sources)
 
     # ── 4a. Code Output Sandbox ───────────────────────────────────────────
     # If this query is a coding query asking for the output of code, we run the code
     # directly in our python sandbox and inject the output to the prompt context.
     # This avoids initiating the slow ReAct agent loop for simple output/tracing queries.
     is_coding_output = False
-    is_coding_query = (intent == "coding_help" or _is_coding_syntax(query))
+    is_coding_query = ((intent == "coding_help" and not is_not_coding) or _is_coding_syntax(query))
     has_output_intent = any(p in query.lower() for p in ["output", "print", "run", "trace", "execute", "result"])
     if is_coding_query and has_output_intent:
         code_snippet = _extract_python_code(query)
@@ -2172,7 +2294,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         and not has_finance_context
         and not is_greeting
         and not _is_identity_query(query)
-        and not _is_short_followup_s
+        and not _is_followup_query_s
         and (intent != "coding_help" or is_factual)
         and (intent != "reasoning_puzzle" or is_factual)
         and (
@@ -2350,14 +2472,29 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             full_response += token
             yield {"type": "content", "token": token}
     else:
-        # Stream tokens live token-by-token using high-performance synthesis engine
+        # Stream tokens live token-by-token using native Aarka Neural Engine
         import asyncio
-        from modules.external_agents import stream_aarka_response
-        async for token in _stream_in_thread(
-            stream_aarka_response, query, context=fused_context, history=chat_ctx
-        ):
-            full_response += token
-            yield {"type": "content", "token": token}
+        if aarkaa_engine.is_available():
+            async for token in _stream_in_thread(
+                aarkaa_engine.stream_final_response,
+                query, fused_context, intent=intent, lang=detected_lang,
+                mode=mode, history=chat_ctx, user_facts=user_facts
+            ):
+                clean_token = re.sub(r'(?i)\s*#Aarkaa(?:AI)?\b', '', token)
+                clean_token = re.sub(r'(?i)\s*#Aarka(?:AI)?\b', '', clean_token)
+                if clean_token:
+                    full_response += clean_token
+                    yield {"type": "content", "token": clean_token}
+        else:
+            from modules.external_agents import stream_aarka_response
+            async for token in _stream_in_thread(
+                stream_aarka_response, query, context=fused_context, history=chat_ctx
+            ):
+                clean_token = re.sub(r'(?i)\s*#Aarkaa(?:AI)?\b', '', token)
+                clean_token = re.sub(r'(?i)\s*#Aarka(?:AI)?\b', '', clean_token)
+                if clean_token:
+                    full_response += clean_token
+                    yield {"type": "content", "token": clean_token}
 
     # ── 7. Yield final stats IMMEDIATELY so the client can close the stream ─
     elapsed = round(time.perf_counter() - start, 3)
