@@ -306,8 +306,117 @@ def extract_tickers(query: str) -> list[str]:
     return list(dict.fromkeys(tickers))  # deduplicate, preserve order
 
 
+def _fetch_twelve_data(symbol: str) -> Optional[dict]:
+    """
+    Fetch live market data from Twelve Data API (Primary source).
+    Supports: US equities, Crypto, Forex, Commodities, Global Indices, and supported Indian equities.
+    Returns None on failure or if API key is not configured, triggering fallback to yfinance.
+    """
+    import json
+    import os
+    import urllib.parse
+    import urllib.request
+    import config
+
+    api_key = getattr(config, "TWELVE_DATA_API_KEY", "") or os.getenv("TWELVE_DATA_API_KEY", "")
+    if not api_key:
+        return None
+
+    # Normalize symbol for Twelve Data conventions
+    td_symbol = symbol.strip().upper()
+    exchange_param = ""
+
+    if td_symbol.endswith(".NS"):
+        td_symbol = td_symbol[:-3]
+        exchange_param = "&exchange=NSE"
+    elif td_symbol.endswith(".BO"):
+        td_symbol = td_symbol[:-3]
+        exchange_param = "&exchange=BSE"
+    elif td_symbol.endswith("-USD"):
+        td_symbol = td_symbol.replace("-USD", "/USD")
+    elif "=X" in td_symbol:
+        pair = td_symbol.replace("=X", "")
+        if len(pair) == 6:
+            td_symbol = f"{pair[:3]}/{pair[3:]}"
+    elif td_symbol == "GC=F":
+        td_symbol = "XAU/USD"
+    elif td_symbol == "SI=F":
+        td_symbol = "XAG/USD"
+    elif td_symbol == "CL=F":
+        td_symbol = "WTI/USD"
+    elif td_symbol == "^GSPC":
+        td_symbol = "SPX"
+    elif td_symbol == "^IXIC":
+        td_symbol = "IXIC"
+    elif td_symbol == "^DJI":
+        td_symbol = "DJI"
+
+    try:
+        url = f"https://api.twelvedata.com/quote?symbol={urllib.parse.quote(td_symbol)}{exchange_param}&apikey={api_key}"
+        req = urllib.request.Request(url, headers={"User-Agent": "AARKAAI/2.0"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        if not isinstance(data, dict) or data.get("status") == "error" or data.get("code") == 400 or not data.get("close"):
+            return None
+
+        def _safe_float(val):
+            try:
+                return round(float(val), 4) if val is not None else None
+            except (ValueError, TypeError):
+                return None
+
+        price = _safe_float(data.get("close") or data.get("price"))
+        prev_close = _safe_float(data.get("previous_close"))
+        change = _safe_float(data.get("change"))
+        pct_change = _safe_float(data.get("percent_change"))
+
+        if price is None:
+            return None
+
+        if change is None and prev_close and price:
+            change = round(price - prev_close, 4)
+        if pct_change is None and prev_close and change:
+            pct_change = round((change / prev_close) * 100, 2)
+
+        vol = None
+        try:
+            vol = int(float(data.get("volume", 0)))
+        except (ValueError, TypeError):
+            pass
+
+        currency = data.get("currency") or ("INR" if ".NS" in symbol or exchange_param else "USD")
+
+        return {
+            "symbol": symbol,
+            "name": data.get("name") or symbol,
+            "price": price,
+            "previous_close": prev_close,
+            "open": _safe_float(data.get("open")),
+            "day_high": _safe_float(data.get("high")),
+            "day_low": _safe_float(data.get("low")),
+            "volume": vol,
+            "market_cap": None,
+            "currency": currency,
+            "change": change,
+            "change_percent": pct_change,
+            "source": "twelvedata",
+        }
+    except Exception as exc:
+        logger.debug("Twelve Data fetch failed for %s (%s): %s", symbol, td_symbol, exc)
+        return None
+
+
 def _fetch_ticker_data(symbol: str) -> dict:
-    """Fetch live data for a single ticker."""
+    """Fetch live data for a single ticker. Primary: Twelve Data API, Fallback: yfinance."""
+    # ─── 1. Primary Source: Twelve Data API ────────────────────────────────────
+    td_data = _fetch_twelve_data(symbol)
+    if td_data and td_data.get("price") is not None:
+        logger.info("Market data for %s fetched from Twelve Data (price: %s)", symbol, td_data["price"])
+        return td_data
+
+    # ─── 2. Fallback Source: yfinance ──────────────────────────────────────────
+    logger.debug("Falling back to yfinance for symbol %s", symbol)
     try:
         tk = yf.Ticker(symbol)
         
@@ -328,6 +437,7 @@ def _fetch_ticker_data(symbol: str) -> dict:
                 "volume": fast.get("lastVolume") or fast.get("volume"),
                 "market_cap": fast.get("marketCap"),
                 "currency": fast.get("currency", "INR" if ".NS" in symbol or symbol.startswith("^N") else "USD"),
+                "source": "yfinance",
             }
         except Exception:
             # Fallback to legacy info if fast_info fails
@@ -348,6 +458,7 @@ def _fetch_ticker_data(symbol: str) -> dict:
                 "volume": info.get("volume") or info.get("regularMarketVolume"),
                 "market_cap": info.get("marketCap"),
                 "currency": info.get("currency", "INR" if ".NS" in symbol or symbol.startswith("^N") else "USD"),
+                "source": "yfinance",
             }
 
         # Fallback: use history if price is still empty

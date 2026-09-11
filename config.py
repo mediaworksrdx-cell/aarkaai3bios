@@ -65,6 +65,7 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY", "")
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "")
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")  # Must be a valid Vertex AI model ID
 # WARNING: Default changed from 'gemini-3.7-flash' (non-standard alias) to 'gemini-2.5-flash'.
