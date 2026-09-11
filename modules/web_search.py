@@ -11,6 +11,72 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+# ─── Tavily AI Search ─────────────────────────────────────────────────────────
+
+
+def search_tavily(
+    query: str,
+    max_results: int = 5,
+    topic: str = "general",
+    include_answer: bool = True,
+) -> list[dict]:
+    """
+    Search using Tavily AI Search API when TAVILY_API_KEY is configured in env.
+    Returns list of dicts with keys: title, url, snippet
+    """
+    import json
+    import os
+    import urllib.request
+    import config
+
+    api_key = getattr(config, "TAVILY_API_KEY", "") or os.getenv("TAVILY_API_KEY", "")
+    if not api_key:
+        return []
+
+    try:
+        payload = json.dumps({
+            "api_key": api_key,
+            "query": query,
+            "search_depth": "basic",
+            "topic": topic,
+            "max_results": min(max_results, 10),
+            "include_answer": include_answer,
+            "include_raw_content": False,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.tavily.com/search",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "AARKAAI/2.0",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8) as response:
+            data = json.loads(response.read().decode("utf-8"))
+
+        results = []
+        if data.get("answer"):
+            results.append({
+                "title": "Tavily AI Direct Answer",
+                "url": "https://tavily.com",
+                "snippet": data["answer"],
+            })
+
+        for item in data.get("results", []):
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": item.get("content", ""),
+            })
+
+        logger.info("Tavily returned %d results for: %s", len(results), query[:60])
+        return results
+    except Exception as exc:
+        logger.error("Tavily search failed: %s", exc)
+        return []
+
+
 # ─── Google Custom Search ───────────────────────────────────────────────────
 
 
@@ -241,8 +307,10 @@ def get_web_context(query: str, max_results: int = 5, lang: str = "en", filter_l
     """
     candidates = []
 
-    # 1. Search Google Custom Search first; fallback to DuckDuckGo if CSE is not configured or fails
-    search_results = search_google_cse(query, max_results=max_results)
+    # 1. Search Tavily AI Search first (specialized for LLMs); fallback to Google CSE then DuckDuckGo
+    search_results = search_tavily(query, max_results=max_results)
+    if not search_results:
+        search_results = search_google_cse(query, max_results=max_results)
     if not search_results:
         search_results = search_ddg(query, max_results=max_results)
 
