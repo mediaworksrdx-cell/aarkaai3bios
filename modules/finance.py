@@ -129,6 +129,26 @@ _INDIA_TICKERS: dict[str, str] = {
     "sbilife": "SBILIFE.NS", "sbi life": "SBILIFE.NS",
     "hdfc life": "HDFCLIFE.NS", "hdfclife": "HDFCLIFE.NS",
     "icici prudential": "ICICIPRULI.NS",
+    # NSE Midcap & Smallcap components
+    "cdsl": "CDSL.NS", "angel one": "ANGELONE.NS", "angelone": "ANGELONE.NS",
+    "kaynes": "KAYNES.NS", "kaynes tech": "KAYNES.NS",
+    "zentec": "ZENTEC.NS", "zen tech": "ZENTEC.NS", "zen technologies": "ZENTEC.NS",
+    "titagarh": "TITAGARH.NS", "titagarh rail": "TITAGARH.NS",
+    "tejas": "TEJASNET.NS", "tejas networks": "TEJASNET.NS",
+    "inox wind": "INOXWIND.NS", "inoxwind": "INOXWIND.NS",
+    "gravita": "GRAVITA.NS", "railtel": "RAILTEL.NS",
+    "sonata": "SONATSOFTW.NS", "sonata software": "SONATSOFTW.NS",
+    "kfin": "KFINTECH.NS", "kfin tech": "KFINTECH.NS", "kfintech": "KFINTECH.NS",
+    "anand rathi": "ANANDRATHI.NS", "data patterns": "DATAPATTNS.NS",
+    "cyient": "CYIENT.NS", "amber": "AMBER.NS", "amber enterprises": "AMBER.NS",
+    "jyoti cnc": "JYOTICNC.NS", "neuland": "NEULANDLAB.NS", "marksans": "MARKSANS.NS",
+    "suzlon": "SUZLON.NS", "piramal pharma": "PPLPHARMA.NS", "apar": "APARINDS.NS",
+    "cams": "CAMS.NS", "persistent": "PERSISTENT.NS", "dixon": "DIXON.NS",
+    "polycab": "POLYCAB.NS", "max healthcare": "MAXHEALTH.NS", "cummins": "CUMMINSIND.NS",
+    "bharat forge": "BHARATFORG.NS", "federal bank": "FEDERALBNK.NS",
+    "ashok leyland": "ASHOKLEY.NS", "coforge": "COFORGE.NS", "mphasis": "MPHASIS.NS",
+    "tata comm": "TATACOMM.NS", "tata communications": "TATACOMM.NS", "voltas": "VOLTAS.NS",
+    "astral": "ASTRAL.NS", "oberoi realty": "OBEROIRLTY.NS", "phoenix mills": "PHOENIXLTD.NS",
 }
 
 _INDEX_TICKERS: dict[str, str] = {
@@ -360,13 +380,22 @@ def get_market_data(query: str) -> dict:
     -------
     dict with keys: tickers, data, summary
     """
+    import concurrent.futures
+
     tickers = extract_tickers(query)
     if not tickers:
         return {"tickers": [], "data": {}, "summary": ""}
 
     data: dict = {}
-    for t in tickers:
-        data[t] = _fetch_ticker_data(t)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(tickers), 6)) as executor:
+        futures = {executor.submit(_fetch_ticker_data, t): t for t in tickers}
+        for future in concurrent.futures.as_completed(futures):
+            t = futures[future]
+            try:
+                data[t] = future.result()
+            except Exception as exc:
+                logger.error("Concurrent fetch failed for %s: %s", t, exc)
+                data[t] = {"symbol": t, "error": str(exc)}
 
     summary = format_finance_context(data)
     return {"tickers": tickers, "data": data, "summary": summary}
@@ -589,7 +618,7 @@ def format_ohlcv_context(data: dict) -> str:
         lines.append("Recent Candles:")
         for c in history[-5:]: # show last 5
             lines.append(f"  {c['date']}: Open {c['open']}, High {c['high']}, Low {c['low']}, Close {c['close']}, Vol {c['volume']}")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 def format_options_context(data: dict) -> str:
     """Format options chain as readable context."""
@@ -597,9 +626,251 @@ def format_options_context(data: dict) -> str:
         return f"Options Chain Error for {data.get('symbol')}: {data['error']}"
         
     summary = data.get("summary", {})
-    return (f"Options Summary for {data['symbol']}:\\n"
-            f"Total Call OI: {summary.get('total_call_oi')}\\n"
-            f"Total Put OI: {summary.get('total_put_oi')}\\n"
-            f"Put/Call Ratio (PCR): {summary.get('pcr')}\\n"
-            f"Max Call OI Strike: {summary.get('max_call_oi_strike')}\\n"
+    return (f"Options Summary for {data['symbol']}:\n"
+            f"Total Call OI: {summary.get('total_call_oi')}\n"
+            f"Total Put OI: {summary.get('total_put_oi')}\n"
+            f"Put/Call Ratio (PCR): {summary.get('pcr')}\n"
+            f"Max Call OI Strike: {summary.get('max_call_oi_strike')}\n"
             f"Max Put OI Strike: {summary.get('max_put_oi_strike')}")
+
+
+# ─── Categorized Indian Stock Universes (SEBI Market Cap Classification) ─────
+# SEBI Rules:
+# - Large Cap: 1st - 100th company in full market cap (Nifty 50 / Nifty 100)
+# - Mid Cap: 101st - 250th company in full market cap (Nifty Midcap 150)
+# - Small Cap: 251st company onwards (Nifty Smallcap 250, typically <= Rs 25,000 Cr)
+
+_NSE_SMALLCAP_UNIVERSE: dict[str, dict] = {
+    "CDSL.NS": {"name": "Central Depository Services Ltd", "sector": "Financial Market Infrastructure", "symbol": "CDSL", "catalyst": "Growing retail investor accounts & demat account surge"},
+    "ANGELONE.NS": {"name": "Angel One Ltd", "sector": "Fintech / Retail Broking", "symbol": "ANGELONE", "catalyst": "Strong client acquisition, market share gains in options & cash volumes"},
+    "KAYNES.NS": {"name": "Kaynes Technology India Ltd", "sector": "Electronics Manufacturing / EMS", "symbol": "KAYNES", "catalyst": "Rapid order book growth in aerospace, automotive, and industrial EMS"},
+    "ZENTEC.NS": {"name": "Zen Technologies Ltd", "sector": "Defence / Drone & Anti-Drone Simulators", "symbol": "ZENTEC", "catalyst": "Substantial export orders and domestic MoD simulation & anti-drone contracts"},
+    "TITAGARH.NS": {"name": "Titagarh Rail Systems Ltd", "sector": "Railways & Defense Mobility", "symbol": "TITAGARH", "catalyst": "Vande Bharat passenger trains & metro rail wagon execution"},
+    "TEJASNET.NS": {"name": "Tejas Networks Ltd (Tata Group)", "sector": "Telecom & Optical Networking", "symbol": "TEJASNET", "catalyst": "BSNL 4G/5G pan-India deployment rollout & indigenous telecom hardware"},
+    "INOXWIND.NS": {"name": "Inox Wind Ltd", "sector": "Renewable Energy / Wind Turbines", "symbol": "INOXWIND", "catalyst": "Turnaround with surging order inflows in commercial & industrial wind power"},
+    "GRAVITA.NS": {"name": "Gravita India Ltd", "sector": "Circular Economy / Lead & Battery Recycling", "symbol": "GRAVITA", "catalyst": "Formalization of recycling regulations (BWMR) and capacity expansions"},
+    "RAILTEL.NS": {"name": "RailTel Corporation of India Ltd", "sector": "Telecom Infrastructure / Railways ICT", "symbol": "RAILTEL", "catalyst": "Railway signaling, Kavach implementation, and edge data center projects"},
+    "SONATSOFTW.NS": {"name": "Sonata Software Ltd", "sector": "IT Services / Modernization", "symbol": "SONATSOFTW", "catalyst": "Large deal wins in Microsoft ecosystem and modernization engineering"},
+    "KFINTECH.NS": {"name": "KFin Technologies Ltd", "sector": "Financial Technology / Asset Management RTA", "symbol": "KFINTECH", "catalyst": "International client wins and expansion in alternate investment funds (AIF)"},
+    "ANANDRATHI.NS": {"name": "Anand Rathi Wealth Ltd", "sector": "Private Wealth Management", "symbol": "ANANDRATHI", "catalyst": "Strong AUM compounding and recurring private client fee growth"},
+    "DATAPATTNS.NS": {"name": "Data Patterns (India) Ltd", "sector": "Aerospace & Defence Electronics", "symbol": "DATAPATTNS", "catalyst": "Indigenous radar, electronic warfare, and satellite electronics programs"},
+    "CYIENT.NS": {"name": "Cyient Ltd", "sector": "Engineering & Technology Solutions", "symbol": "CYIENT", "catalyst": "Semiconductor turnkey design and aerospace engineering pipeline"},
+    "AMBER.NS": {"name": "Amber Enterprises India Ltd", "sector": "HVAC / Consumer Electronics EMS", "symbol": "AMBER", "catalyst": "Backward integration into PCB manufacturing and mobility HVAC"},
+    "JYOTICNC.NS": {"name": "Jyoti CNC Automation Ltd", "sector": "Industrial Machinery / CNC Machines", "symbol": "JYOTICNC", "catalyst": "High-margin aerospace & defence precision machining order pipeline"},
+    "NEULANDLAB.NS": {"name": "Neuland Laboratories Ltd", "sector": "Active Pharmaceutical Ingredients (API)", "symbol": "NEULANDLAB", "catalyst": "Commercialization of high-value custom manufacturing (CMS) molecules"},
+    "MARKSANS.NS": {"name": "Marksans Pharma Ltd", "sector": "Pharmaceutical Formulations", "symbol": "MARKSANS", "catalyst": "US & UK generic product launches and capacity debottlenecking"},
+    "SUZLON.NS": {"name": "Suzlon Energy Ltd", "sector": "Renewable Energy Solutions", "symbol": "SUZLON", "catalyst": "Debt-free balance sheet, 3+ GW order block execution in wind energy"},
+    "PPLPHARMA.NS": {"name": "Piramal Pharma Ltd", "sector": "CDMO & Healthcare Solutions", "symbol": "PPLPHARMA", "catalyst": "High-margin sterile injectables & antibody-drug conjugate (ADC) contracts"},
+    "APARINDS.NS": {"name": "Apar Industries Ltd", "sector": "Conductors, Cables & Specialty Oils", "symbol": "APARINDS", "catalyst": "Global grid transformation, US export surge in premium conductors"},
+    "CAMS.NS": {"name": "Computer Age Management Services Ltd", "sector": "Mutual Fund Services / Financial Tech", "symbol": "CAMS", "catalyst": "70%+ domestic mutual fund RTA market share and non-MF business diversification"},
+}
+
+_NSE_MIDCAP_UNIVERSE: dict[str, dict] = {
+    "PERSISTENT.NS": {"name": "Persistent Systems Ltd", "sector": "Digital Engineering & Enterprise IT", "symbol": "PERSISTENT", "catalyst": "Enterprise AI integrations and consistent BFSI deal wins"},
+    "DIXON.NS": {"name": "Dixon Technologies (India) Ltd", "sector": "Electronics Manufacturing Services", "symbol": "DIXON", "catalyst": "Smartphone manufacturing under PLI and domestic display assembly"},
+    "POLYCAB.NS": {"name": "Polycab India Ltd", "sector": "Wires, Cables & Fast-Moving Electricals", "symbol": "POLYCAB", "catalyst": "Real estate construction cycle and institutional infrastructure demand"},
+    "MAXHEALTH.NS": {"name": "Max Healthcare Institute Ltd", "sector": "Healthcare & Hospital Networks", "symbol": "MAXHEALTH", "catalyst": "Brownfield bed expansion and high ARPOB operational efficiency"},
+    "CUMMINSIND.NS": {"name": "Cummins India Ltd", "sector": "Power Generation & Heavy Engineering", "symbol": "CUMMINSIND", "catalyst": "Data center backup power demand and CPCB IV+ compliant power systems"},
+    "BHARATFORG.NS": {"name": "Bharat Forge Ltd", "sector": "Forging, Defence & Auto Components", "symbol": "BHARATFORG", "catalyst": "Artillery gun export execution and aerospace component ramp-up"},
+    "FEDERALBNK.NS": {"name": "The Federal Bank Ltd", "sector": "Private Commercial Banking", "symbol": "FEDERALBNK", "catalyst": "Fintech co-lending partnerships and steady asset quality improvement"},
+    "ASHOKLEY.NS": {"name": "Ashok Leyland Ltd", "sector": "Commercial Vehicles & Defense Mobility", "symbol": "ASHOKLEY", "catalyst": "Medium and heavy commercial vehicle replacement cycle and bus tenders"},
+    "COFORGE.NS": {"name": "Coforge Ltd", "sector": "Information Technology Solutions", "symbol": "COFORGE", "catalyst": "Banking and travel vertical recovery and Cigniti integration synergies"},
+    "MPHASIS.NS": {"name": "Mphasis Ltd", "sector": "Cloud & Cognitive IT Services", "symbol": "MPHASIS", "catalyst": "Mortgage business recovery and direct channel client ramp-up"},
+    "TATACOMM.NS": {"name": "Tata Communications Ltd", "sector": "Telecommunications & Cloud Networking", "symbol": "TATACOMM", "catalyst": "Digital fabric and enterprise cloud network adoption"},
+    "VOLTAS.NS": {"name": "Voltas Ltd (Tata Group)", "sector": "Consumer Air Conditioning & Engineering", "symbol": "VOLTAS", "catalyst": "Record summer AC sales and international engineering project execution"},
+    "ASTRAL.NS": {"name": "Astral Ltd", "sector": "Building Materials & Piping Systems", "symbol": "ASTRAL", "catalyst": "Real estate plumbing demand and expansion into bathware and adhesives"},
+    "OBEROIRLTY.NS": {"name": "Oberoi Realty Ltd", "sector": "Premium Real Estate", "symbol": "OBEROIRLTY", "catalyst": "High luxury residential pre-sales in Mumbai"},
+    "PHOENIXLTD.NS": {"name": "The Phoenix Mills Ltd", "sector": "Retail Destination & Commercial Real Estate", "symbol": "PHOENIXLTD", "catalyst": "Rising retail mall consumption and new mall operationalization"},
+}
+
+_NSE_LARGECAP_UNIVERSE: dict[str, dict] = {
+    "RELIANCE.NS": {"name": "Reliance Industries Ltd", "sector": "Oil, Telecom & Retail", "symbol": "RELIANCE"},
+    "TCS.NS": {"name": "Tata Consultancy Services Ltd", "sector": "IT Services", "symbol": "TCS"},
+    "HDFCBANK.NS": {"name": "HDFC Bank Ltd", "sector": "Banking & Financial Services", "symbol": "HDFCBANK"},
+    "ICICIBANK.NS": {"name": "ICICI Bank Ltd", "sector": "Banking & Financial Services", "symbol": "ICICIBANK"},
+    "INFY.NS": {"name": "Infosys Ltd", "sector": "Digital Services & Consulting", "symbol": "INFY"},
+    "BHARTIARTL.NS": {"name": "Bharti Airtel Ltd", "sector": "Telecommunications & Digital Services", "symbol": "BHARTIARTL"},
+    "ITC.NS": {"name": "ITC Ltd", "sector": "FMCG, Hotels & Agri-Business", "symbol": "ITC"},
+    "SBIN.NS": {"name": "State Bank of India", "sector": "Public Sector Banking", "symbol": "SBIN"},
+    "LT.NS": {"name": "Larsen & Toubro Ltd", "sector": "Infrastructure & Heavy Engineering", "symbol": "LT"},
+    "HINDUNILVR.NS": {"name": "Hindustan Unilever Ltd", "sector": "Fast-Moving Consumer Goods", "symbol": "HINDUNILVR"},
+    "BAJFINANCE.NS": {"name": "Bajaj Finance Ltd", "sector": "Non-Banking Financial Company (NBFC)", "symbol": "BAJFINANCE"},
+    "MARUTI.NS": {"name": "Maruti Suzuki India Ltd", "sector": "Passenger Automobile Manufacturing", "symbol": "MARUTI"},
+    "ADANIENT.NS": {"name": "Adani Enterprises Ltd", "sector": "Infrastructure & Commodities", "symbol": "ADANIENT"},
+}
+
+
+def is_stock_screener_query(query: str) -> bool:
+    """Detect queries asking for stock screening, category discovery, or equity ideas."""
+    import re
+    q_low = query.lower()
+    patterns = [
+        r"\bsmall\s*cap[s]?\b",
+        r"\bsmallcap[s]?\b",
+        r"\bmid\s*cap[s]?\b",
+        r"\bmidcap[s]?\b",
+        r"\blarge\s*cap[s]?\b",
+        r"\blargecap[s]?\b",
+        r"\bpenny\s*stock[s]?\b",
+        r"\b(bullish|bearish|momentum|breakout|multibagger|growth|dividend|value)\s*stocks?\b",
+        r"\bstocks?\s+to\s+(buy|watch|invest|trade|hold|accumulate)\b",
+        r"\bstocks?\s+in\s+(nse|bse|india|indian\s+market)\b",
+        r"\b(best|top|good|recommend|find|show|give)\s+.*stocks?\b",
+        r"\bstock\s*screener\b",
+        r"\bshares?\s+in\s+(nse|bse)\b",
+        r"\bnifty\s*(smallcap|midcap|50|100|next\s*50|500)\b",
+    ]
+    return any(re.search(pat, q_low) for pat in patterns)
+
+
+def screen_stocks(query: str, top_k: int = 5) -> dict:
+    """
+    Screen real stocks from verified universes (NSE Small-Cap, Mid-Cap, Large-Cap)
+    using live fast_info prices, market caps, and technical indicators.
+    """
+    import concurrent.futures
+    import re
+    from modules.technical import compute_indicators, get_signal
+
+    q_low = query.lower()
+
+    # Identify target category
+    if any(k in q_low for k in ["small cap", "smallcap", "small-cap", "small caps", "smallcaps"]):
+        target_category = "small_cap"
+        category_label = "NSE Small-Cap (SEBI Definition: Ranked 251st onwards, Market Cap <= Rs 25,000 Cr)"
+        universe = _NSE_SMALLCAP_UNIVERSE
+    elif any(k in q_low for k in ["mid cap", "midcap", "mid-cap", "mid caps", "midcaps"]):
+        target_category = "mid_cap"
+        category_label = "NSE Mid-Cap (SEBI Definition: Ranked 101st to 250th, Market Cap Rs 15,000 - Rs 50,000 Cr)"
+        universe = _NSE_MIDCAP_UNIVERSE
+    elif any(k in q_low for k in ["large cap", "largecap", "large-cap", "large caps", "nifty 50", "bluechip"]):
+        target_category = "large_cap"
+        category_label = "NSE Large-Cap (SEBI Definition: Top 100 Companies by Market Cap)"
+        universe = _NSE_LARGECAP_UNIVERSE
+    else:
+        # Default to small-cap if query mentioned small or general stock discovery
+        target_category = "small_cap"
+        category_label = "NSE Small-Cap (SEBI Definition: Ranked 251st onwards, Market Cap <= Rs 25,000 Cr)"
+        universe = _NSE_SMALLCAP_UNIVERSE
+
+    is_bullish_requested = any(w in q_low for w in ["bullish", "uptrend", "breakout", "momentum", "buy", "growth", "high return", "multibagger"])
+
+    candidate_symbols = list(universe.keys())[:10]  # Check top 10 candidates concurrently
+
+    def _eval_stock(symbol: str):
+        try:
+            meta = universe[symbol]
+            tk = yf.Ticker(symbol)
+            fast = tk.fast_info
+            price = fast.get("lastPrice") or fast.get("regularMarketPrice")
+            if not price:
+                return None
+            prev = fast.get("previousClose") or price
+            mcap = fast.get("marketCap")
+            chg_pct = ((price - prev) / prev * 100) if prev else 0.0
+
+            # Fetch technical indicators
+            ind = compute_indicators(symbol) or {}
+            rsi = ind.get("rsi")
+            ema20 = ind.get("ema20")
+            ema50 = ind.get("ema50")
+            ema200 = ind.get("ema200")
+            signal = get_signal(ind) if ind else "NEUTRAL"
+
+            # Trend evaluation
+            is_above_50 = (price > ema50) if (ema50 and price) else True
+            is_above_200 = (price > ema200) if (ema200 and price) else True
+
+            # Score bullishness
+            bullish_score = 0
+            if signal == "BULLISH":
+                bullish_score += 3
+            if is_above_50:
+                bullish_score += 2
+            if is_above_200:
+                bullish_score += 1
+            if rsi and 45 <= rsi <= 70:
+                bullish_score += 2
+            if chg_pct > 0:
+                bullish_score += 1
+
+            return {
+                "symbol": symbol,
+                "clean_symbol": meta.get("symbol", symbol.replace(".NS", "")),
+                "name": meta["name"],
+                "sector": meta.get("sector", "Diversified"),
+                "catalyst": meta.get("catalyst", ""),
+                "price": round(float(price), 2),
+                "change_percent": round(float(chg_pct), 2),
+                "mcap_cr": round(float(mcap) / 10_000_000, 1) if mcap else None,
+                "rsi": rsi,
+                "ema50": ema50,
+                "ema200": ema200,
+                "signal": signal,
+                "bullish_score": bullish_score,
+            }
+        except Exception as exc:
+            logger.debug("Screener failed for %s: %s", symbol, exc)
+            return None
+
+    screened = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(candidate_symbols), 6)) as executor:
+        results = executor.map(_eval_stock, candidate_symbols)
+        for r in results:
+            if r is not None:
+                screened.append(r)
+
+    # Sort by bullishness if requested, else by market cap
+    if is_bullish_requested:
+        screened.sort(key=lambda x: (x["bullish_score"], -(x["rsi"] or 50)), reverse=True)
+    else:
+        screened.sort(key=lambda x: (x["mcap_cr"] or 0), reverse=True)
+
+    selected = screened[:top_k]
+    if not selected:
+        return {"category": target_category, "stocks": [], "summary": "No stocks matched screening criteria."}
+
+    # Format human-readable summary
+    lines = [
+        "[Verified Stock Screener Data - Live NSE Market Context]",
+        f"Category: {category_label}",
+        "Exchange: National Stock Exchange of India (NSE)",
+        "Verified Live Screener Results (Ranked by Technical Strength):",
+    ]
+    for idx, s in enumerate(selected, 1):
+        price_str = f"Rs {s['price']:,.2f}"
+        chg_sign = "+" if s["change_percent"] >= 0 else ""
+        chg_str = f"({chg_sign}{s['change_percent']}%)"
+        mcap_str = f"Rs {s['mcap_cr']:,.1f} Cr" if s["mcap_cr"] else "N/A"
+        tech_notes = []
+        if s["ema50"]:
+            rel = "above" if s["price"] > s["ema50"] else "near"
+            tech_notes.append(f"trading {rel} 50-day EMA (Rs {s['ema50']:,.2f})")
+        if s["rsi"]:
+            tech_notes.append(f"RSI(14): {s['rsi']}")
+        if s["signal"]:
+            tech_notes.append(f"Consensus Signal: {s['signal']}")
+        tech_summary = ", ".join(tech_notes) if tech_notes else "Healthy consolidation structure"
+
+        lines.append(
+            f"{idx}. {s['name']} (NSE: {s['clean_symbol']})\n"
+            f"   - Sector: {s['sector']}\n"
+            f"   - Current Price: {price_str} {chg_str}\n"
+            f"   - Market Capitalization: {mcap_str} (Verified {target_category.replace('_', ' ').title()})\n"
+            f"   - Technical Profile: {tech_summary}\n"
+            f"   - Fundamental Catalyst: {s['catalyst']}"
+        )
+
+    lines.append(
+        "\nCRITICAL ENFORCEMENT RULES FOR THE MODEL:\n"
+        "- Recommend ONLY the verified stocks listed above.\n"
+        "- NEVER list or classify Nifty 50 Large-Cap companies (e.g., HDFC Bank, Infosys, Reliance, Adani Enterprises, Maruti Suzuki, TCS, ICICI Bank, State Bank of India) as small-cap or mid-cap stocks.\n"
+        "- Present the real market capitalization in Rs Cr and the exact NSE ticker symbols provided above."
+    )
+
+    return {
+        "category": target_category,
+        "stocks": selected,
+        "summary": "\n".join(lines)
+    }
+

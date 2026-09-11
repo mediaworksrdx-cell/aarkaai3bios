@@ -7,6 +7,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from database import Base, SessionLocal, _utcnow, PortfolioHolding, WatchlistItem
 
+logger = logging.getLogger(__name__)
+
 
 def init() -> None:
     """Create tables if they don't exist."""
