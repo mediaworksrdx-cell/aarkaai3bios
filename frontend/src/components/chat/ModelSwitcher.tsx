@@ -27,6 +27,8 @@ export function ModelSwitcher({
     ? 'aarka-2.0'
     : selectedModel.startsWith('gemini')
     ? 'gemini-3.7'
+    : (selectedModel.startsWith('claude') || selectedModel.includes('sonnet'))
+    ? 'claude-sonnet-5'
     : selectedModel;
 
   const currentModel = MODEL_OPTIONS.find(m => m.id === activeModelId) || MODEL_OPTIONS[0];

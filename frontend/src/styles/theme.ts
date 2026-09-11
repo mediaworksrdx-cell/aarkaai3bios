@@ -46,7 +46,13 @@ export const MODEL_OPTIONS: ModelOption[] = [
     label: 'Google Gemini 3.7',
     icon: '✨',
   },
+  {
+    id: 'claude-sonnet-5',
+    label: 'Claude Sonnet 5',
+    icon: '🟣',
+  },
 ];
+
 
 export const EFFORT_OPTIONS: EffortOption[] = [
   {

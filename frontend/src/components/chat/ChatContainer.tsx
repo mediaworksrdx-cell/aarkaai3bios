@@ -12,11 +12,13 @@ import { exportToPdf, exportToWord, exportToMarkdown, PdfTemplateId } from '@/li
 interface ChatContainerProps {
   onToggleSidebar?: () => void;
   isSidebarOpen?: boolean;
+  user?: any;
 }
 
 export function ChatContainer({
   onToggleSidebar,
   isSidebarOpen,
+  user,
 }: ChatContainerProps) {
   const {
     messages,
@@ -64,7 +66,7 @@ export function ChatContainer({
     exportToPdf({
       title: activeConversation?.title || 'Aarka AI Conversation',
       content: getFullConversationText(),
-      modelUsed: selectedModel === 'gemini-3.7' ? 'Google Gemini 3.7' : 'Aarka AI',
+      modelUsed: selectedModel === 'gemini-3.7' ? 'Google Gemini 3.7' : (selectedModel.startsWith('claude') || selectedModel.includes('sonnet')) ? 'Claude Sonnet 5' : 'Aarka AI',
       template,
     });
   };
@@ -74,7 +76,7 @@ export function ChatContainer({
     exportToWord({
       title: activeConversation?.title || 'Aarka AI Conversation',
       content: getFullConversationText(),
-      modelUsed: selectedModel === 'gemini-3.7' ? 'Google Gemini 3.7' : 'Aarka AI',
+      modelUsed: selectedModel === 'gemini-3.7' ? 'Google Gemini 3.7' : (selectedModel.startsWith('claude') || selectedModel.includes('sonnet')) ? 'Claude Sonnet 5' : 'Aarka AI',
     });
   };
 
@@ -207,7 +209,12 @@ export function ChatContainer({
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto w-full">
         {messages.length === 0 ? (
-          <WelcomeScreen onSelectPrompt={handleSend} selectedModel={selectedModel} />
+          <WelcomeScreen
+            onSelectPrompt={handleSend}
+            selectedModel={selectedModel}
+            userName={user?.name}
+            isGuest={!user || user?.email === 'guest@aarka-ai.com' || user?.name === 'Guest User'}
+          />
         ) : (
           <div className="max-w-4xl mx-auto py-8 px-4 sm:px-6 w-full flex flex-col">
             {messages.map((msg) => (

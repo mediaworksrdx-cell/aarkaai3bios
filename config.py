@@ -66,13 +66,14 @@ GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY", "")
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")  # Must be a valid Vertex AI model ID
 # WARNING: Default changed from 'gemini-3.7-flash' (non-standard alias) to 'gemini-2.5-flash'.
 # Verify the model ID is listed in your GCP Vertex AI region before deployment.
 # Override via GEMINI_MODEL env var for custom internal aliases.
 
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
 
 # Guard against insecure default secret key in production
 _DEFAULT_KEY = "dev-secret-key-do-not-use-in-prod-change-me"
