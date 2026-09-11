@@ -6,7 +6,7 @@ import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { useChatContext } from '@/context/ChatContext';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
-import { Menu, Plus, Download, FileText, FileDown, Share2 } from 'lucide-react';
+import { Menu, Plus, Download, FileText, FileDown, Share2, ArrowDown } from 'lucide-react';
 import { exportToPdf, exportToWord, exportToMarkdown, PdfTemplateId } from '@/lib/api';
 
 interface ChatContainerProps {
@@ -34,15 +34,116 @@ export function ChatContainer({
   } = useChatContext();
 
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isAutoScrollLockedRef = useRef(false);
+  const touchStartYRef = useRef<number | null>(null);
+  const prevMessagesCountRef = useRef(messages.length);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (smooth = false) => {
+    isAutoScrollLockedRef.current = false;
+    setShowScrollBottom(false);
+    const container = scrollContainerRef.current;
+    if (container) {
+      if (smooth) {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: 'smooth',
+        });
+      } else {
+        container.scrollTop = container.scrollHeight;
+      }
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+    }
   };
 
+  // Detect user scroll position
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+
+    // If user scrolled up more than 90px from bottom, disengage auto-scroll
+    if (distanceFromBottom > 90) {
+      isAutoScrollLockedRef.current = true;
+      setShowScrollBottom(true);
+    } else {
+      isAutoScrollLockedRef.current = false;
+      setShowScrollBottom(false);
+    }
+  };
+
+  // Immediate detection of wheel-up / touch-up to prevent scroll jump
   useEffect(() => {
-    scrollToBottom();
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) {
+        // User is scrolling UP - immediately freeze auto-scroll
+        isAutoScrollLockedRef.current = true;
+        setShowScrollBottom(true);
+      }
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      touchStartYRef.current = e.touches[0].clientY;
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (touchStartYRef.current !== null) {
+        const deltaY = e.touches[0].clientY - touchStartYRef.current;
+        if (deltaY > 8) {
+          // User swiping downward (content moves down, viewing older messages)
+          isAutoScrollLockedRef.current = true;
+          setShowScrollBottom(true);
+        }
+      }
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: true });
+    el.addEventListener('touchstart', handleTouchStart, { passive: true });
+    el.addEventListener('touchmove', handleTouchMove, { passive: true });
+
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, []);
+
+  // Handle auto-scroll on new messages or streaming chunks
+  useEffect(() => {
+    // If a brand new user message was added, always scroll to bottom
+    if (messages.length > prevMessagesCountRef.current) {
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg?.role === 'user') {
+        scrollToBottom(true);
+        prevMessagesCountRef.current = messages.length;
+        return;
+      }
+    }
+    prevMessagesCountRef.current = messages.length;
+
+    // During streaming or message updates: ONLY auto-scroll if user has NOT scrolled up!
+    if (!isAutoScrollLockedRef.current) {
+      const container = scrollContainerRef.current;
+      if (container) {
+        // Direct scrollTop assignment prevents fighting ongoing smooth animation
+        container.scrollTop = container.scrollHeight;
+      }
+    }
   }, [messages, isStreaming]);
+
+  // When switching conversations, reset to bottom
+  useEffect(() => {
+    isAutoScrollLockedRef.current = false;
+    setShowScrollBottom(false);
+    scrollToBottom(false);
+  }, [activeConversation?.id]);
 
   const handleSend = (text: string) => {
     sendMessage(text, selectedModel, reasoningEffort);
@@ -207,7 +308,11 @@ export function ChatContainer({
       </header>
 
       {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto w-full">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto w-full relative"
+      >
         {messages.length === 0 ? (
           <WelcomeScreen
             onSelectPrompt={handleSend}
@@ -227,6 +332,27 @@ export function ChatContainer({
           </div>
         )}
       </div>
+
+      {/* Floating Scroll-to-Bottom Button */}
+      {showScrollBottom && (
+        <div className="absolute bottom-24 right-6 sm:right-8 z-30 animate-fade-in">
+          <button
+            onClick={() => scrollToBottom(true)}
+            type="button"
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] border border-[var(--border)] text-xs font-medium text-[var(--text-primary)] shadow-lg hover:shadow-xl transition-all duration-200 cursor-pointer backdrop-blur-md group"
+            title="Scroll to latest message"
+          >
+            <ArrowDown className="w-3.5 h-3.5 text-[var(--accent-primary)] transition-transform group-hover:translate-y-0.5" />
+            <span>Scroll to bottom</span>
+            {isStreaming && (
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Chat Input Bar */}
       <ChatInput
