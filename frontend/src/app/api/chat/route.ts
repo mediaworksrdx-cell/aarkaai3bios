@@ -28,6 +28,8 @@ export async function POST(request: NextRequest) {
     // Map to active backend engine targets
     if (modelOverride === 'gemini-3.7' || modelOverride.startsWith('gemini')) {
       modelOverride = 'gemini-3.7';
+    } else if (modelOverride === 'claude-sonnet-5' || modelOverride.startsWith('claude') || modelOverride.includes('sonnet')) {
+      modelOverride = 'claude-sonnet-5';
     } else {
       modelOverride = 'aarka-2.0';
     }

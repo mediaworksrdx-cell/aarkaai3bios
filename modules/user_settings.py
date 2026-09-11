@@ -19,11 +19,13 @@ VALID_MODELS = {
     "aarka-2.0", "aarkaa-7b", "aarkaa-3b",
     "gemini-3.7", "gemini-3.7-flash",
     "gemini-2.5", "gemini-2.5-flash", "gemini-2.5-pro",  # backward compat with stored user prefs
+    "claude-sonnet-5", "claude-5", "claude-3.7", "claude-3.5", "claude-3-5-sonnet",
 }
 VALID_RESPONSE_STYLES = {"concise", "balanced", "detailed", "professional"}
 VALID_THEMES = {"dark", "light", "auto"}
 VALID_LANGUAGES = {"en", "hi", "ta", "te", "kn", "ml", "mr", "bn", "gu", "pa"}
 VALID_REASONING_DEPTHS = {"fast", "balanced", "deep", "low", "medium", "high"}
+VALID_DENSITIES = {"compact", "comfortable"}
 
 # Default settings applied when a user has no stored preferences
 DEFAULT_SETTINGS = {
@@ -40,6 +42,15 @@ DEFAULT_SETTINGS = {
     "web_search_enabled": True,
     "deep_research_enabled": True,
     "market_data_enabled": True,
+    "connected_apps": "{}",
+    # UI preference fields
+    "density": "comfortable",
+    "enter_to_send": True,
+    "show_timestamps": True,
+    "incognito_chat": False,
+    "two_factor_enabled": False,
+    "email_alerts": True,
+    "security_alerts": True,
 }
 
 
@@ -59,6 +70,15 @@ def _validate_setting(key: str, value) -> tuple[bool, str]:
         "web_search_enabled": (None, "bool"),
         "deep_research_enabled": (None, "bool"),
         "market_data_enabled": (None, "bool"),
+        "connected_apps": (None, "string"),
+        # UI preference fields
+        "density": (VALID_DENSITIES, "string"),
+        "enter_to_send": (None, "bool"),
+        "show_timestamps": (None, "bool"),
+        "incognito_chat": (None, "bool"),
+        "two_factor_enabled": (None, "bool"),
+        "email_alerts": (None, "bool"),
+        "security_alerts": (None, "bool"),
     }
 
     if key not in validators:
@@ -126,6 +146,15 @@ def get_user_settings(user_id: str) -> dict:
             "web_search_enabled": _bool(row.web_search_enabled, DEFAULT_SETTINGS["web_search_enabled"]),
             "deep_research_enabled": _bool(row.deep_research_enabled, DEFAULT_SETTINGS["deep_research_enabled"]),
             "market_data_enabled": _bool(row.market_data_enabled, DEFAULT_SETTINGS["market_data_enabled"]),
+            "connected_apps": getattr(row, "connected_apps", None) or DEFAULT_SETTINGS["connected_apps"],
+            # UI preference fields
+            "density": getattr(row, "density", None) or DEFAULT_SETTINGS["density"],
+            "enter_to_send": _bool(getattr(row, "enter_to_send", None), DEFAULT_SETTINGS["enter_to_send"]),
+            "show_timestamps": _bool(getattr(row, "show_timestamps", None), DEFAULT_SETTINGS["show_timestamps"]),
+            "incognito_chat": _bool(getattr(row, "incognito_chat", None), DEFAULT_SETTINGS["incognito_chat"]),
+            "two_factor_enabled": _bool(getattr(row, "two_factor_enabled", None), DEFAULT_SETTINGS["two_factor_enabled"]),
+            "email_alerts": _bool(getattr(row, "email_alerts", None), DEFAULT_SETTINGS["email_alerts"]),
+            "security_alerts": _bool(getattr(row, "security_alerts", None), DEFAULT_SETTINGS["security_alerts"]),
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
     except Exception as exc:
@@ -187,6 +216,15 @@ def update_user_settings(user_id: str, **kwargs) -> dict:
                 web_search_enabled=kwargs.get("web_search_enabled", DEFAULT_SETTINGS["web_search_enabled"]),
                 deep_research_enabled=kwargs.get("deep_research_enabled", DEFAULT_SETTINGS["deep_research_enabled"]),
                 market_data_enabled=kwargs.get("market_data_enabled", DEFAULT_SETTINGS["market_data_enabled"]),
+                connected_apps=kwargs.get("connected_apps", DEFAULT_SETTINGS["connected_apps"]),
+                # UI preference fields
+                density=kwargs.get("density", DEFAULT_SETTINGS["density"]),
+                enter_to_send=kwargs.get("enter_to_send", DEFAULT_SETTINGS["enter_to_send"]),
+                show_timestamps=kwargs.get("show_timestamps", DEFAULT_SETTINGS["show_timestamps"]),
+                incognito_chat=kwargs.get("incognito_chat", DEFAULT_SETTINGS["incognito_chat"]),
+                two_factor_enabled=kwargs.get("two_factor_enabled", DEFAULT_SETTINGS["two_factor_enabled"]),
+                email_alerts=kwargs.get("email_alerts", DEFAULT_SETTINGS["email_alerts"]),
+                security_alerts=kwargs.get("security_alerts", DEFAULT_SETTINGS["security_alerts"]),
             )
             session.add(row)
         else:
@@ -219,6 +257,15 @@ def update_user_settings(user_id: str, **kwargs) -> dict:
             "web_search_enabled": _bool(row.web_search_enabled, DEFAULT_SETTINGS["web_search_enabled"]),
             "deep_research_enabled": _bool(row.deep_research_enabled, DEFAULT_SETTINGS["deep_research_enabled"]),
             "market_data_enabled": _bool(row.market_data_enabled, DEFAULT_SETTINGS["market_data_enabled"]),
+            "connected_apps": getattr(row, "connected_apps", None) or DEFAULT_SETTINGS["connected_apps"],
+            # UI preference fields
+            "density": getattr(row, "density", None) or DEFAULT_SETTINGS["density"],
+            "enter_to_send": _bool(getattr(row, "enter_to_send", None), DEFAULT_SETTINGS["enter_to_send"]),
+            "show_timestamps": _bool(getattr(row, "show_timestamps", None), DEFAULT_SETTINGS["show_timestamps"]),
+            "incognito_chat": _bool(getattr(row, "incognito_chat", None), DEFAULT_SETTINGS["incognito_chat"]),
+            "two_factor_enabled": _bool(getattr(row, "two_factor_enabled", None), DEFAULT_SETTINGS["two_factor_enabled"]),
+            "email_alerts": _bool(getattr(row, "email_alerts", None), DEFAULT_SETTINGS["email_alerts"]),
+            "security_alerts": _bool(getattr(row, "security_alerts", None), DEFAULT_SETTINGS["security_alerts"]),
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
     except ValueError:

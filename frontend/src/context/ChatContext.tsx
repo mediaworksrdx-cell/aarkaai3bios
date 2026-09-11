@@ -81,6 +81,8 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
           setSelectedModelState('aarka-2.0');
         } else if (savedModel.startsWith('gemini')) {
           setSelectedModelState('gemini-3.7');
+        } else if (savedModel.startsWith('claude') || savedModel.includes('sonnet')) {
+          setSelectedModelState('claude-sonnet-5');
         } else {
           setSelectedModelState(savedModel);
         }
@@ -141,39 +143,42 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
         }
       }
 
-      // 1. REFRESH SCENARIO: User refreshed/reloaded the current tab.
-      // Retain the exact same conversation they were actively in.
+      // If user is authenticated and has no conversations, check for guest conversations to migrate
+      if (user && user.email && sanitized.length === 0) {
+        try {
+          const guestSaved = localStorage.getItem('aarka-conv-v3-guest');
+          if (guestSaved) {
+            const guestParsed = JSON.parse(guestSaved);
+            if (Array.isArray(guestParsed) && guestParsed.length > 0) {
+              sanitized = guestParsed;
+              try {
+                localStorage.setItem(currentStorageKey, JSON.stringify(sanitized));
+              } catch {}
+            }
+          }
+        } catch {}
+      }
+
       let sessionActiveId: string | null = null;
       try {
         sessionActiveId = sessionStorage.getItem(SESSION_ACTIVE_KEY);
       } catch {}
 
-      if (isReload && sessionActiveId) {
-        const matchingConv = sanitized.find(c => c.id === sessionActiveId);
-        if (matchingConv) {
-          setConversations(sanitized);
-          setActiveConversationId(matchingConv.id);
-          return;
-        }
-      }
+      if (sanitized.length > 0) {
+        // Prioritize session active conversation, or the first conversation with messages, or first conversation
+        const targetConv = (sessionActiveId ? sanitized.find(c => c.id === sessionActiveId) : null)
+          || sanitized.find(c => Array.isArray(c.messages) && c.messages.length > 0)
+          || sanitized[0];
 
-      // 2. NEW OPEN SCENARIO: New browser tab, new window, app launch, or fresh navigation.
-      // Every new open must start with a clean new conversation.
-      // Keep existing non-empty conversations in history so they appear in sidebar.
-      const existingWithMessages = sanitized.filter(c => Array.isArray(c.messages) && c.messages.length > 0);
-
-      // If the top conversation in storage is already empty (0 messages), reuse it
-      const topIsEmpty = sanitized[0] && (!sanitized[0].messages || sanitized[0].messages.length === 0);
-      if (topIsEmpty) {
         setConversations(sanitized);
-        setActiveConversationId(sanitized[0].id);
+        setActiveConversationId(targetConv.id);
         try {
-          sessionStorage.setItem(SESSION_ACTIVE_KEY, sanitized[0].id);
+          sessionStorage.setItem(SESSION_ACTIVE_KEY, targetConv.id);
         } catch {}
         return;
       }
 
-      // Otherwise create a fresh new conversation for this new open session
+      // Otherwise create a fresh new conversation for initial session
       const initialId = generateId();
       const initialConv: Conversation = {
         id: initialId,
@@ -185,17 +190,16 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
         effort: 'high',
       };
 
-      const finalConvs = [initialConv, ...existingWithMessages];
-      setConversations(finalConvs);
+      setConversations([initialConv]);
       setActiveConversationId(initialId);
       try {
         sessionStorage.setItem(SESSION_ACTIVE_KEY, initialId);
-        localStorage.setItem(currentStorageKey, JSON.stringify(finalConvs));
+        localStorage.setItem(currentStorageKey, JSON.stringify([initialConv]));
       } catch {}
     } catch (e) {
       console.warn('Failed to load user conversations', e);
     }
-  }, [currentStorageKey]);
+  }, [currentStorageKey, user]);
 
   // Save conversations to currentStorageKey on change
   useEffect(() => {
@@ -213,6 +217,8 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
       ? 'aarka-2.0'
       : model.startsWith('gemini')
       ? 'gemini-3.7'
+      : (model.startsWith('claude') || model.includes('sonnet'))
+      ? 'claude-sonnet-5'
       : model;
     setSelectedModelState(normalized);
     try {
@@ -331,7 +337,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
         role: 'assistant',
         content: '',
         timestamp: Date.now(),
-        modelUsed: model === 'gemini-3.7' ? 'Google Gemini 3.7' : 'Aarka AI',
+        modelUsed: model === 'gemini-3.7' ? 'Google Gemini 3.7' : (model.startsWith('claude') || model.includes('sonnet')) ? 'Claude Sonnet 5' : 'Aarka AI',
         effort: effort,
         isStreaming: true,
       };
@@ -359,7 +365,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
       abortControllerRef.current = new AbortController();
 
       let accumulated = '';
-      let finalModel = model === 'gemini-3.7' ? 'Google Gemini 3.7' : 'Aarka AI';
+      let finalModel = model === 'gemini-3.7' ? 'Google Gemini 3.7' : (model.startsWith('claude') || model.includes('sonnet')) ? 'Claude Sonnet 5' : 'Aarka AI';
 
       try {
         const stream = streamChat(text, convId, model, effort, undefined, abortControllerRef.current.signal);
@@ -388,6 +394,13 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
           }
         }
 
+        const cleanContent = accumulated
+          .replace(/(?:\r?\n|\s)*(?:\*{1,2}|[\(\[])?\s*end of (?:answer|response|text|explanation)\s*(?:\*{1,2}|[\)\]])?\.?[\s`]*$/gi, '')
+          .replace(/(?:\r?\n|\s)*---+\s*end\s+(?:of\s+)?(?:answer|response|disclaimer|text)\s*---+[\s`]*$/gi, '')
+          .replace(/(?:\r?\n|\s)*(?:#Aarkaa(?:AI)?|#Aarka(?:AI)?)\b.*$/gi, '')
+          .replace(/(?:\r?\n|\s)*(?:#[A-Za-z0-9_\-\/]+)+\s*$/gi, '')
+          .trimEnd();
+
         setConversations(prev =>
           prev.map(c => {
             if (c.id === convId) {
@@ -395,7 +408,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
                 m.id === assistantMsgId
                   ? {
                       ...m,
-                      content: accumulated || 'No response received from engine.',
+                      content: cleanContent || 'No response received from engine.',
                       isStreaming: false,
                       modelUsed: finalModel,
                     }
