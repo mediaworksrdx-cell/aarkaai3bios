@@ -129,6 +129,7 @@ class AarkaaGPU:
             temperature=temperature,
             top_p=top_p,
             repeat_penalty=repeat_penalty,
+            repeat_last_n=1024,
             stop=stop_tokens
         )
         return output["choices"][0]["text"].strip()
@@ -168,6 +169,7 @@ class AarkaaGPU:
             temperature=temperature,
             top_p=top_p,
             repeat_penalty=repeat_penalty,
+            repeat_last_n=1024,
             stop=stop_tokens,
             stream=True
         )
