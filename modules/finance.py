@@ -810,6 +810,107 @@ _NSE_LARGECAP_UNIVERSE: dict[str, dict] = {
     "ADANIENT.NS": {"name": "Adani Enterprises Ltd", "sector": "Infrastructure & Commodities", "symbol": "ADANIENT"},
 }
 
+_US_STOCK_UNIVERSE = {
+    "LCID": {
+        "name": "Lucid Group Inc",
+        "symbol": "LCID",
+        "exchange": "NASDAQ",
+        "sector": "Consumer Discretionary / Electric Vehicles",
+        "catalyst": "High initial capital expenditures, factory scaling, and luxury EV unit production costs depressing short-term EPS.",
+    },
+    "RIVN": {
+        "name": "Rivian Automotive Inc",
+        "symbol": "RIVN",
+        "exchange": "NASDAQ",
+        "sector": "Automotive / Commercial & Consumer EV",
+        "catalyst": "Massive R&D allocations and manufacturing ramp for next-gen R2 platform keeping GAAP earnings negative.",
+    },
+    "INTC": {
+        "name": "Intel Corporation",
+        "symbol": "INTC",
+        "exchange": "NASDAQ",
+        "sector": "Technology / Semiconductors & Foundries",
+        "catalyst": "Multi-billion dollar foundry restructuring, manufacturing facility write-downs, and datacenter market share battle.",
+    },
+    "F": {
+        "name": "Ford Motor Company",
+        "symbol": "F",
+        "exchange": "NYSE",
+        "sector": "Consumer Discretionary / Automobile Manufacturing",
+        "catalyst": "Model e electric division operational losses and elevated warranty remediation expenses dampening net income.",
+    },
+    "GM": {
+        "name": "General Motors Company",
+        "symbol": "GM",
+        "exchange": "NYSE",
+        "sector": "Consumer Discretionary / Automobile Manufacturing",
+        "catalyst": "Significant investments in Cruise autonomous driving tech and EV battery assembly offsetting traditional combustion cash flow.",
+    },
+    "PLTR": {
+        "name": "Palantir Technologies Inc",
+        "symbol": "PLTR",
+        "exchange": "NYSE",
+        "sector": "Technology / Enterprise AI & Big Data",
+        "catalyst": "Recent transition into GAAP profitability driven by AIP commercial adoption, producing modest positive EPS on high multiple.",
+    },
+    "UBER": {
+        "name": "Uber Technologies Inc",
+        "symbol": "UBER",
+        "exchange": "NYSE",
+        "sector": "Consumer Discretionary / Mobility Platform",
+        "catalyst": "Platform network effects and delivery cost discipline achieving sustained positive operating cash flow.",
+    },
+    "SNAP": {
+        "name": "Snap Inc",
+        "symbol": "SNAP",
+        "exchange": "NYSE",
+        "sector": "Communication Services / Social Media & AR",
+        "catalyst": "Direct response ad platform rebuild and heavy augmented reality cloud infrastructure costs limiting net profit.",
+    },
+    "WBD": {
+        "name": "Warner Bros Discovery Inc",
+        "symbol": "WBD",
+        "exchange": "NASDAQ",
+        "sector": "Communication Services / Entertainment",
+        "catalyst": "Amortization of merger debt and secular cord-cutting in legacy linear cable television networks.",
+    },
+    "BA": {
+        "name": "The Boeing Company",
+        "symbol": "BA",
+        "exchange": "NYSE",
+        "sector": "Industrials / Aerospace & Commercial Defense",
+        "catalyst": "Commercial airframe delivery delays, FAA regulatory inspections, and defense contract cost overruns.",
+    },
+    "SOFI": {
+        "name": "SoFi Technologies Inc",
+        "symbol": "SOFI",
+        "exchange": "NASDAQ",
+        "sector": "Financial Services / Digital Banking & Fintech",
+        "catalyst": "Scaling member deposits and financial services productivity driving nascent positive GAAP EPS.",
+    },
+    "AAPL": {
+        "name": "Apple Inc",
+        "symbol": "AAPL",
+        "exchange": "NASDAQ",
+        "sector": "Technology / Hardware & Digital Ecosystem",
+        "catalyst": "High-margin Services division and installed device base supporting robust free cash flow and stable EPS.",
+    },
+    "MSFT": {
+        "name": "Microsoft Corporation",
+        "symbol": "MSFT",
+        "exchange": "NASDAQ",
+        "sector": "Technology / Enterprise Cloud & AI",
+        "catalyst": "Azure cloud dominance and commercial Copilot adoption generating compound double-digit earnings growth.",
+    },
+    "NVDA": {
+        "name": "Nvidia Corporation",
+        "symbol": "NVDA",
+        "exchange": "NASDAQ",
+        "sector": "Technology / AI Accelerated Compute",
+        "catalyst": "Hyperscale AI datacenter demand driving record gross margins and surging earnings per share.",
+    },
+}
+
 
 def is_stock_screener_query(query: str) -> bool:
     """Detect queries asking for stock screening, category discovery, or equity ideas."""
@@ -825,19 +926,26 @@ def is_stock_screener_query(query: str) -> bool:
         r"\bpenny\s*stock[s]?\b",
         r"\b(bullish|bearish|momentum|breakout|multibagger|growth|dividend|value)\s*stocks?\b",
         r"\bstocks?\s+to\s+(buy|watch|invest|trade|hold|accumulate)\b",
-        r"\bstocks?\s+in\s+(nse|bse|india|indian\s+market)\b",
+        r"\bstocks?\s+(in|of|from)\s+(nse|bse|india|indian\s+market|us|usa|united\s+states|nyse|nasdaq|america)\b",
+        r"\b(us|american|nyse|nasdaq)\s+stocks?\b",
+        r"\b(what|which)\s+(are\s+the\s+)?(best\s+|top\s+)?stocks?\b",
+        r"\bstocks?\s+with\s+(low|high|negative|positive|good|bad)\s+(eps|pe|p/e|dividend|earnings|yield)\b",
+        r"\b(low|high|negative|positive)\s+(eps|pe|p/e|earnings|dividend)\s+stocks?\b",
+        r"\b(stocks?\s+with\s+)?(low|negative|high)\s+eps\b",
         r"\b(best|top|good|recommend|find|show|give)\s+.*stocks?\b",
         r"\bstock\s*screener\b",
-        r"\bshares?\s+in\s+(nse|bse)\b",
+        r"\bshares?\s+in\s+(nse|bse|us|nyse|nasdaq)\b",
         r"\bnifty\s*(smallcap|midcap|50|100|next\s*50|500)\b",
+        r"\b(s&p|sp500|nasdaq\s*100|dow\s*jones)\s*stocks?\b",
     ]
     return any(re.search(pat, q_low) for pat in patterns)
 
 
 def screen_stocks(query: str, top_k: int = 5) -> dict:
     """
-    Screen real stocks from verified universes (NSE Small-Cap, Mid-Cap, Large-Cap)
-    using live fast_info prices, market caps, and technical indicators.
+    Screen real stocks from verified universes (US Equities, NSE Small-Cap, Mid-Cap, Large-Cap)
+    using live Twelve Data / yfinance market prices, real trailing EPS, P/E ratios, market caps,
+    and technical momentum indicators.
     """
     import concurrent.futures
     import re
@@ -845,8 +953,19 @@ def screen_stocks(query: str, top_k: int = 5) -> dict:
 
     q_low = query.lower()
 
-    # Identify target category
-    if any(k in q_low for k in ["small cap", "smallcap", "small-cap", "small caps", "smallcaps"]):
+    # 1. Identify Target Market & Universe
+    is_us = any(k in q_low for k in ["us", "usa", "america", "american", "nyse", "nasdaq", "sp500", "s&p", "wall street", "united states"])
+    is_low_eps = any(k in q_low for k in ["low eps", "negative eps", "low earnings per share", "declining eps", "lowest eps"])
+    is_high_eps = any(k in q_low for k in ["high eps", "strong eps", "highest eps", "strong earnings"])
+    is_low_pe = any(k in q_low for k in ["low pe", "low p/e", "cheap", "undervalued", "low valuation"])
+    is_dividend = any(k in q_low for k in ["dividend", "high yield", "dividend yield"])
+    is_bullish_requested = any(w in q_low for w in ["bullish", "uptrend", "breakout", "momentum", "buy", "growth", "high return", "multibagger"])
+
+    if is_us:
+        target_category = "us_equity"
+        category_label = "US Equities (NYSE & NASDAQ)"
+        universe = _US_STOCK_UNIVERSE
+    elif any(k in q_low for k in ["small cap", "smallcap", "small-cap", "small caps", "smallcaps"]):
         target_category = "small_cap"
         category_label = "NSE Small-Cap (SEBI Definition: Ranked 251st onwards, Market Cap <= Rs 25,000 Cr)"
         universe = _NSE_SMALLCAP_UNIVERSE
@@ -859,64 +978,103 @@ def screen_stocks(query: str, top_k: int = 5) -> dict:
         category_label = "NSE Large-Cap (SEBI Definition: Top 100 Companies by Market Cap)"
         universe = _NSE_LARGECAP_UNIVERSE
     else:
-        # Default to small-cap if query mentioned small or general stock discovery
-        target_category = "small_cap"
-        category_label = "NSE Small-Cap (SEBI Definition: Ranked 251st onwards, Market Cap <= Rs 25,000 Cr)"
-        universe = _NSE_SMALLCAP_UNIVERSE
+        # Default to US if not explicit and EPS mentioned, else NSE small-cap
+        if is_low_eps or is_high_eps or is_low_pe:
+            target_category = "us_equity"
+            category_label = "US Equities (NYSE & NASDAQ)"
+            universe = _US_STOCK_UNIVERSE
+            is_us = True
+        else:
+            target_category = "small_cap"
+            category_label = "NSE Small-Cap (SEBI Definition: Ranked 251st onwards, Market Cap <= Rs 25,000 Cr)"
+            universe = _NSE_SMALLCAP_UNIVERSE
 
-    is_bullish_requested = any(w in q_low for w in ["bullish", "uptrend", "breakout", "momentum", "buy", "growth", "high return", "multibagger"])
-
-    candidate_symbols = list(universe.keys())[:10]  # Check top 10 candidates concurrently
+    candidate_symbols = list(universe.keys())
 
     def _eval_stock(symbol: str):
         try:
             meta = universe[symbol]
+            price = None
+            prev = None
+            eps = None
+            pe = None
+            mcap = None
+            currency = "$" if is_us else "Rs "
+
+            # If US stock, query Twelve Data first for live price
+            if is_us:
+                td = _fetch_twelve_data(symbol)
+                if td and td.get("price"):
+                    price = td["price"]
+                    prev = td.get("previous_close") or price
+
+            # Retrieve fundamentals from yfinance
             tk = yf.Ticker(symbol)
-            fast = tk.fast_info
-            price = fast.get("lastPrice") or fast.get("regularMarketPrice")
+            fast = getattr(tk, "fast_info", {})
+            if not price:
+                price = fast.get("lastPrice") or fast.get("regularMarketPrice")
             if not price:
                 return None
-            prev = fast.get("previousClose") or price
+            if not prev:
+                prev = fast.get("previousClose") or price
             mcap = fast.get("marketCap")
+
+            # Fundamental ratios
+            try:
+                inf = tk.info or {}
+                eps = inf.get("trailingEps")
+                pe = inf.get("trailingPE")
+                if not mcap:
+                    mcap = inf.get("marketCap")
+            except Exception:
+                pass
+
             chg_pct = ((price - prev) / prev * 100) if prev else 0.0
 
-            # Fetch technical indicators
+            # Technical indicators
             ind = compute_indicators(symbol) or {}
             rsi = ind.get("rsi")
-            ema20 = ind.get("ema20")
             ema50 = ind.get("ema50")
             ema200 = ind.get("ema200")
             signal = get_signal(ind) if ind else "NEUTRAL"
 
-            # Trend evaluation
-            is_above_50 = (price > ema50) if (ema50 and price) else True
-            is_above_200 = (price > ema200) if (ema200 and price) else True
-
-            # Score bullishness
             bullish_score = 0
             if signal == "BULLISH":
                 bullish_score += 3
-            if is_above_50:
+            if ema50 and price > ema50:
                 bullish_score += 2
-            if is_above_200:
+            if ema200 and price > ema200:
                 bullish_score += 1
             if rsi and 45 <= rsi <= 70:
                 bullish_score += 2
             if chg_pct > 0:
                 bullish_score += 1
 
+            # Format market cap
+            if mcap:
+                if is_us:
+                    mcap_fmt = f"${mcap / 1e9:.2f}B" if mcap >= 1e9 else f"${mcap / 1e6:.1f}M"
+                else:
+                    mcap_fmt = f"Rs {mcap / 1e7:,.1f} Cr"
+            else:
+                mcap_fmt = "N/A"
+
             return {
                 "symbol": symbol,
                 "clean_symbol": meta.get("symbol", symbol.replace(".NS", "")),
                 "name": meta["name"],
+                "exchange": meta.get("exchange", "NSE"),
                 "sector": meta.get("sector", "Diversified"),
                 "catalyst": meta.get("catalyst", ""),
                 "price": round(float(price), 2),
+                "currency": currency,
                 "change_percent": round(float(chg_pct), 2),
-                "mcap_cr": round(float(mcap) / 10_000_000, 1) if mcap else None,
+                "eps": round(float(eps), 2) if eps is not None else None,
+                "pe": round(float(pe), 2) if pe is not None else None,
+                "mcap_str": mcap_fmt,
+                "mcap_numeric": float(mcap) if mcap else 0.0,
                 "rsi": rsi,
                 "ema50": ema50,
-                "ema200": ema200,
                 "signal": signal,
                 "bullish_score": bullish_score,
             }
@@ -925,58 +1083,60 @@ def screen_stocks(query: str, top_k: int = 5) -> dict:
             return None
 
     screened = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(candidate_symbols), 6)) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(candidate_symbols), 8)) as executor:
         results = executor.map(_eval_stock, candidate_symbols)
         for r in results:
             if r is not None:
                 screened.append(r)
 
-    # Sort by bullishness if requested, else by market cap
-    if is_bullish_requested:
+    # 2. Sort by User Criteria
+    if is_low_eps:
+        # Sort ascending by EPS (negative or lowest first)
+        screened.sort(key=lambda x: (x["eps"] if x.get("eps") is not None else 999))
+    elif is_high_eps:
+        screened.sort(key=lambda x: (x["eps"] if x.get("eps") is not None else -999), reverse=True)
+    elif is_low_pe:
+        screened.sort(key=lambda x: (x["pe"] if x.get("pe") and x["pe"] > 0 else 999))
+    elif is_bullish_requested:
         screened.sort(key=lambda x: (x["bullish_score"], -(x["rsi"] or 50)), reverse=True)
     else:
-        screened.sort(key=lambda x: (x["mcap_cr"] or 0), reverse=True)
+        screened.sort(key=lambda x: (x["mcap_numeric"] or 0), reverse=True)
 
     selected = screened[:top_k]
     if not selected:
         return {"category": target_category, "stocks": [], "summary": "No stocks matched screening criteria."}
 
-    # Format human-readable summary
+    # 3. Format Institutional Context
+    filter_label = "Lowest Earnings Per Share (Trailing EPS)" if is_low_eps else ("Highest EPS" if is_high_eps else "Market Capitalization & Technicals")
     lines = [
-        "[Verified Stock Screener Data - Live NSE Market Context]",
+        f"[Verified Institutional Stock Screener Data - Live {('US' if is_us else 'NSE')} Market Context]",
         f"Category: {category_label}",
-        "Exchange: National Stock Exchange of India (NSE)",
-        "Verified Live Screener Results (Ranked by Technical Strength):",
+        f"Metric Filter: {filter_label}",
+        "Verified Live Screener Results:",
     ]
     for idx, s in enumerate(selected, 1):
-        price_str = f"Rs {s['price']:,.2f}"
+        price_str = f"{s['currency']}{s['price']:,.2f}"
         chg_sign = "+" if s["change_percent"] >= 0 else ""
         chg_str = f"({chg_sign}{s['change_percent']}%)"
-        mcap_str = f"Rs {s['mcap_cr']:,.1f} Cr" if s["mcap_cr"] else "N/A"
-        tech_notes = []
-        if s["ema50"]:
-            rel = "above" if s["price"] > s["ema50"] else "near"
-            tech_notes.append(f"trading {rel} 50-day EMA (Rs {s['ema50']:,.2f})")
-        if s["rsi"]:
-            tech_notes.append(f"RSI(14): {s['rsi']}")
-        if s["signal"]:
-            tech_notes.append(f"Consensus Signal: {s['signal']}")
-        tech_summary = ", ".join(tech_notes) if tech_notes else "Healthy consolidation structure"
+        eps_str = f"{s['currency']}{s['eps']:.2f}" if s["eps"] is not None else "N/A"
+        pe_str = f"{s['pe']:.1f}x" if s["pe"] is not None else "N/A (Negative or Unreported)"
 
         lines.append(
-            f"{idx}. {s['name']} (NSE: {s['clean_symbol']})\n"
+            f"{idx}. {s['name']} ({s['exchange']}: {s['clean_symbol']})\n"
             f"   - Sector: {s['sector']}\n"
             f"   - Current Price: {price_str} {chg_str}\n"
-            f"   - Market Capitalization: {mcap_str} (Verified {target_category.replace('_', ' ').title()})\n"
-            f"   - Technical Profile: {tech_summary}\n"
-            f"   - Fundamental Catalyst: {s['catalyst']}"
+            f"   - Trailing EPS: {eps_str}\n"
+            f"   - P/E Ratio: {pe_str}\n"
+            f"   - Market Capitalization: {s['mcap_str']}\n"
+            f"   - Primary Business & Financial Catalyst: {s['catalyst']}"
         )
 
     lines.append(
         "\nCRITICAL ENFORCEMENT RULES FOR THE MODEL:\n"
-        "- Recommend ONLY the verified stocks listed above.\n"
-        "- NEVER list or classify Nifty 50 Large-Cap companies (e.g., HDFC Bank, Infosys, Reliance, Adani Enterprises, Maruti Suzuki, TCS, ICICI Bank, State Bank of India) as small-cap or mid-cap stocks.\n"
-        "- Present the real market capitalization in Rs Cr and the exact NSE ticker symbols provided above."
+        "- Format the final answer starting with a clean markdown table containing: | Company | Ticker | Sector | Current Price | Trailing EPS | P/E Ratio | Financial Catalyst |.\n"
+        "- Base your response on the verified figures provided above. Do NOT fabricate numbers.\n"
+        "- Detail the specific corporate or macroeconomic catalyst behind each company's EPS figures (e.g., EV restructuring, R&D scaling, semiconductor foundry investments).\n"
+        "- Do NOT output generic textbook advice telling the user to 'use Finviz, Google Finance, or Yahoo Finance'. Present the actual screened data and analysis directly."
     )
 
     return {
