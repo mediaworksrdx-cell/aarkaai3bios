@@ -477,20 +477,61 @@ def get_last_metrics() -> dict:
         }
 
 
-def _has_repetition(text: str) -> bool:
-    """Returns True if a sequence of words is repeated consecutively, indicating a loop."""
+def _find_repetition_pos(text: str) -> int | None:
+    """
+    Returns the character position where a repetition loop begins, or None if no loop.
+    Checks:
+    1. Duplicate numbered bold headers (e.g. **1. Revenue Growth...**)
+    2. Duplicate markdown hash headers (e.g. ### 1. ...)
+    3. 10-word phrase duplication across the generation
+    4. Multi-scale consecutive windows (up to 800 words)
+    """
+    if not text or len(text) < 50:
+        return None
+
     import re
-    words = re.findall(r'\b\w+\b', text.lower())
-    n = len(words)
-    if n < 16:
-        return False
-    
-    # Check for consecutive repetition of windows of size w (from 8 to 100 words)
-    # e.g., if words[-w:] == words[-2w:-w]
-    for w in range(8, min(100, n // 2 + 1)):
-        if words[-w:] == words[-2*w:-w]:
-            return True
-    return False
+
+    # 1. Duplicate numbered bold headers (e.g. **1. Revenue Growth and EPS:**)
+    header_matches = list(re.finditer(r'(?i)\*\*(\d+\.\s*[^*\n]{3,100}?):?\*\*', text))
+    if len(header_matches) >= 2:
+        seen = {}
+        for m in header_matches:
+            k = m.group(1).lower().strip()
+            if k in seen:
+                return m.start()
+            seen[k] = m.start()
+
+    # Duplicate markdown hash headers
+    hash_matches = list(re.finditer(r'(?i)(?:^|\n)\s*#{1,4}\s*(\d+\.?\s+[^\n]{3,80})', text))
+    if len(hash_matches) >= 2:
+        seen_h = {}
+        for m in hash_matches:
+            k = m.group(1).lower().strip()
+            if k in seen_h:
+                return m.start()
+            seen_h[k] = m.start()
+
+    # 2. 10-word phrase repetition (detects cyclical paragraph loops)
+    words_matches = list(re.finditer(r'\b\w+\b', text))
+    if len(words_matches) >= 24:
+        words = [m.group(0).lower() for m in words_matches]
+        n = len(words)
+        tail_10 = tuple(words[-10:])
+        for i in range(n - 20):
+            if tuple(words[i:i+10]) == tail_10:
+                return words_matches[n - 10].start()
+
+        # 3. Multi-scale consecutive repetition windows (from 8 to 800 words)
+        for w in range(8, min(800, n // 2 + 1)):
+            if words[-w:] == words[-2*w:-w]:
+                return words_matches[n - w].start()
+
+    return None
+
+
+def _has_repetition(text: str) -> bool:
+    """Returns True if text exhibits an autoregressive repetition loop."""
+    return _find_repetition_pos(text) is not None
 
 
 def _build_chatml(system: str, user: str) -> str:
@@ -623,7 +664,8 @@ def _stream_modal_gpu(prompt, max_new_tokens=150, stop=None, temperature=0.7, mo
         "max_tokens": max_new_tokens,
         "temperature": temperature,
         "top_p": 0.9,
-        "repeat_penalty": 1.15,
+        "repeat_penalty": 1.18,
+        "repeat_last_n": 1024,
         "stop": stop or [],
         "model": model_name,
         "stream": True
@@ -720,9 +762,16 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False):
             logger.warning("Unrequested ticker drift detected; terminating stream.")
             break
 
-        if _has_repetition(accumulated_text):
-            logger.warning("Repetition loop detected; terminating stream.")
-            break
+        rep_pos = _find_repetition_pos(accumulated_text)
+        if rep_pos is not None:
+            logger.warning("Repetition loop detected at pos %d; truncating and terminating stream.", rep_pos)
+            offset = rep_pos - (len(accumulated_text) - len(buf))
+            if offset > 0:
+                valid_tail = buf[:offset].rstrip()
+                valid_tail = re.sub(r'[\s\U00010000-\U0010ffff\*\s`]+$', '', valid_tail)
+                if valid_tail:
+                    yield valid_tail
+            return
 
         # Check termination patterns in current buffer
         match_end = pat_end_marker.search(buf)
@@ -845,6 +894,7 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
             temperature=temperature,
             top_p=0.9,
             repeat_penalty=1.0 if temperature < 0.1 else 1.18,
+            repeat_last_n=1024,
             stop=stop_tokens,
             stream=True
         ))
@@ -970,6 +1020,11 @@ def _clean_response(text):
     # Regex-based disclaimer and meta-scaffolding stripper
     # Strip multi-turn hallucinations and synthetic follow-up turns (e.g. 1user, <|im_start|>user, User:, Human:)
     text = re.sub(r"(?i)(?:\n|\b)(?:1user\b|<\|im_start\|>user|\nUser:|\nQuestion:|\nHuman:).*$", "", text, flags=re.DOTALL).strip()
+
+    # Strip autoregressive repetition loops (e.g. repeated section headers or cyclical paragraphs)
+    rep_pos = _find_repetition_pos(text)
+    if rep_pos is not None:
+        text = text[:rep_pos].rstrip()
 
     # Strip synthetic end-of-answer/response markers (e.g. **End of answer**, (End of answer), End of answer., --- END OF ANSWER ---)
     end_marker_patterns = [
