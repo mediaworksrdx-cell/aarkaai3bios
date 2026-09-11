@@ -411,24 +411,45 @@ def _is_image_generation_query(query: str) -> bool:
 
 
 def _is_pdf_generation_query(query: str) -> bool:
-    """Detect if the query asks to create/generate a PDF report, document, or similar."""
+    """
+    Detect if the query explicitly asks to create/generate a downloadable PDF report or document artifact.
+    Must NOT trigger on ordinary conversational questions or corporate prose (e.g. 'a company reports earnings').
+    """
+    import re
     q = query.lower().strip()
-    # Check if the user is asking to write code, create python scripts, or explain how to generate PDFs,
-    # in which case we should NOT intercept and instead let it go to coding assistant.
-    coding_excludes = ["python", "script", "code", "library", "libraries", "how to", "write code", "separate files", "make skills separate"]
+
+    # 1. Coding / technical explanation exclusion
+    coding_excludes = [
+        "python", "script", "code", "library", "libraries", "how to", "write code", 
+        "separate files", "make skills separate"
+    ]
     if any(ex in q for ex in coding_excludes):
         return False
 
-    action_words = ["create", "generate", "make", "compile", "build", "produce", "export", "write"]
-    pdf_words = ["pdf", "report", "document", "business report"]
-    
-    # Must have both action word and pdf/report word, or explicit @pdf/@gamma-pdf/@premium-report tag
-    has_action = any(aw in q for aw in action_words)
-    has_pdf = any(pw in q for pw in pdf_words)
-    
-    if (has_action and has_pdf) or bool(re.search(r'(?:^|\s)[@/](?:pdf|gamma-pdf|premium-report)\b', q)):
+    # 2. Explicit skill tags
+    if bool(re.search(r'(?:^|\s)[@/](?:pdf|gamma-pdf|premium-report)\b', q)):
         return True
-        
+
+    # 3. Explicit PDF phrases (must contain 'pdf')
+    pdf_action_patterns = [
+        r"\b(create|generate|make|compile|produce|export|write|prepare|build)\s+(a\s+|an\s+|the\s+)?(premium\s+|detailed\s+|executive\s+)?pdf(\s+report|\s+document)?\b",
+        r"\b(as\s+a\s+pdf|in\s+pdf(\s+format)?|export\s+to\s+pdf|download\s+pdf|download\s+as\s+pdf)\b",
+        r"\bpdf\s+(report|dossier|document)\s+(on|about|for)\b",
+    ]
+    if any(re.search(pat, q) for pat in pdf_action_patterns):
+        return True
+
+    # 4. Explicit command to create a standalone report or whitepaper artifact
+    # The action verb must directly precede report/whitepaper/dossier
+    report_action_patterns = [
+        r"\b(create|generate|make|compile|produce|write|prepare)\s+(a\s+|an\s+|the\s+)?(premium\s+|detailed\s+|executive\s+|comprehensive\s+)?(report|whitepaper|dossier)\s+(on|about|for|regarding)\b",
+        r"^(please\s+)?(create|generate|make|compile|write|prepare)\s+(a\s+|an\s+|the\s+)?(premium\s+|detailed\s+|executive\s+|comprehensive\s+)?(report|whitepaper)\b",
+    ]
+    if any(re.search(pat, q) for pat in report_action_patterns):
+        # Exclude false positives like analyzing existing reports
+        if not re.search(r"\b(according\s+to|what\s+does|explain|show\s+me|read|analyze|analyse|audit)\s+the\s+(annual|financial|earnings)?\s*report\b", q):
+            return True
+
     return False
 
 def _extract_pdf_topic(query: str) -> str:

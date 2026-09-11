@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -253,8 +254,16 @@ def _get_gpu_layers() -> int:
 
 
 def _get_threads() -> int:
+    """Optimal thread count for single-token generation to avoid SMT cache thrashing."""
     import os
-    return max(1, os.cpu_count() or 4)
+    cpus = os.cpu_count() or 4
+    return min(cpus, 6) if cpus >= 4 else cpus
+
+
+def _get_batch_threads() -> int:
+    """Use all available vCPUs for parallel prompt prefill batch processing."""
+    import os
+    return os.cpu_count() or 8
 
 
 def _is_ist_nighttime() -> bool:
@@ -291,6 +300,8 @@ def _get_model(force_gpu=True, force_general=False):
                                     model_path=str(_gguf_coder_path),
                                     n_ctx=16384,
                                     n_threads=_get_threads(),
+                                    n_threads_batch=_get_batch_threads(),
+                                    n_batch=1024,
                                     n_gpu_layers=_get_gpu_layers(),
                                     verbose=False,
                                 )
@@ -314,6 +325,8 @@ def _get_model(force_gpu=True, force_general=False):
                             n_ctx=16384,
                             n_gpu_layers=_get_gpu_layers(),
                             n_threads=_get_threads(),
+                            n_threads_batch=_get_batch_threads(),
+                            n_batch=1024,
                             verbose=False
                         )
                         logger.info("Model successfully loaded (gpu_layers=%d).", _get_gpu_layers())
@@ -374,6 +387,8 @@ def _idle_monitor_loop():
                                 n_ctx=16384,
                                 n_gpu_layers=_get_gpu_layers(),
                                 n_threads=_get_threads(),
+                                n_threads_batch=_get_batch_threads(),
+                                n_batch=1024,
                                 verbose=False
                             )
                             logger.info("Model successfully pre-warmed.")
@@ -418,9 +433,11 @@ def init():
             n_ctx=16384,
             n_gpu_layers=_get_gpu_layers(),
             n_threads=_get_threads(),
+            n_threads_batch=_get_batch_threads(),
+            n_batch=1024,
             verbose=False
         )
-        logger.info("AARKAA-%s model loaded successfully (gpu_layers=%d, threads=%d).", model_tier, _get_gpu_layers(), _get_threads())
+        logger.info("AARKAA-%s model loaded successfully (gpu_layers=%d, threads=%d, batch_threads=%d, batch=%d).", model_tier, _get_gpu_layers(), _get_threads(), _get_batch_threads(), 1024)
         
         # Start idle monitor thread
         t = threading.Thread(target=_idle_monitor_loop, daemon=True)
@@ -495,10 +512,9 @@ def _build_chatml_multi(system: str, history: list[dict] | None, user: str,
     if history:
         entries = []
         current_len = 0
-        # Iterate backwards (newest first) to ensure the latest conversation turns are kept
         for msg in reversed(history):
-            role = "user" if msg["role"] == "user" else "assistant"
-            content = msg["message"]
+            role = "user" if msg.get("role") == "user" else "assistant"
+            content = msg.get("message") or msg.get("content", "")
             # Cleanly limit extremely long individual messages without adding ellipsis
             if len(content) > 2000:
                 content = content[:2000]
@@ -644,7 +660,9 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
     """Run generation via Modal GPU (primary) or local llama.cpp (fallback), yielding tokens with repetition guard."""
     stop_tokens = [
         "<|im_end|>", "<|im_start|>", "<|endoftext|>", "\n\n---",
-        "<|im_start|>user", "<|im_start|>system", "\nuser\n", "\nUser:", "\nQuestion:",
+        "<|im_start|>user", "<|im_start|>system", "<|im_start|>assistant",
+        "\nuser\n", "\nUser:", "\nQuestion:", "\n1user", "\n1assistant",
+        " 1user", " 1assistant", "\nUser\n", "\nHuman:", "\nAssistant:",
         "\nBest regards", "\nBest Regards", "\nSincerely", "\n\n#", "\n#Aarkaa",
         "Thank you for your question", "Please let me know if there is anything else",
         "(End of answer)", "(End of response)", "[End of answer]", "[End of response]",
@@ -660,7 +678,14 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
         "architecture", "backend", "service", "build", "create", "app",
         "server", "oms", "database", "class", "structure"
     ]
-    prompt_requests_code = any(w in prompt.lower() for w in code_keywords)
+    code_phrases_to_ignore = [
+        "project code", "secret code", "postal code", "zip code", "discount code",
+        "promo code", "coupon code", "area code", "pin code"
+    ]
+    last_user_idx = prompt.rfind("<|im_start|>user")
+    query_part = prompt[last_user_idx:] if last_user_idx != -1 else prompt
+    is_ignored_code_phrase = any(p in query_part.lower() for p in code_phrases_to_ignore)
+    prompt_requests_code = not is_ignored_code_phrase and any(w in query_part.lower() for w in code_keywords)
 
     # ── 1. Attempt Modal Serverless GPU First ──
     modal_model = "7b"
@@ -675,13 +700,25 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
         stripped_header = False
         yielded_any = False
         for token in modal_stream:
+            # Anti-multi-turn guard: Terminate before yielding if token begins synthetic conversation turn
+            if any(m in token.lower() for m in ["<|im_start|>", "<|im_end|>", "<|endoftext|>", "1user", "1assistant"]):
+                logger.warning("Multi-turn delimiter token %r detected in Modal GPU stream; terminating early.", token)
+                break
+
             yielded_any = True
             generated_text += token
 
-            # Anti-hallucination guard: Stop streaming if model begins unrequested code blocks
-            if "```" in generated_text.lower() and not prompt_requests_code:
-                logger.warning("Unrequested code block detected in Modal GPU stream; terminating generation.")
+            # Anti-multi-turn guard: Terminate immediately if accumulated text exhibits multi-turn drift
+            low_gen = generated_text.lower()
+            if any(marker in low_gen for marker in ["\n1user", " 1user", " 1assistant", "\nuser:", "\nassistant:", "\nhuman:"]):
+                logger.warning("Multi-turn drift marker detected in Modal GPU stream; terminating early.")
                 break
+
+            # Anti-hallucination guard: Stop streaming if model begins unrequested programming code blocks (allow ```markdown or ```text)
+            if "```" in generated_text.lower() and not prompt_requests_code:
+                if any(f"```{lang}" in generated_text.lower() for lang in ["python", "javascript", "bash", "c++", "java", "sql", "sh", "ts", "cpp", "json"]):
+                    logger.warning("Unrequested programming code block detected in Modal GPU stream; terminating generation.")
+                    break
 
             if "[Finance Data]" in generated_text or "Target (TGT)" in generated_text:
                 logger.warning("Unrequested financial ticker drift detected in Modal GPU stream; terminating generation.")
@@ -690,12 +727,11 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
             # Anti-hashtag guard: Terminate immediately if model begins social media hashtag soup
             if "#" in token and len(generated_text) > 30 and not prompt_requests_code:
                 import re
-                if re.search(r'#[A-Za-z0-9_]{3,}', generated_text):
-                    logger.warning("Social media hashtag detected in Modal GPU stream; terminating early.")
+                if re.search(r'(?i)#aarkaa(?:ai)?\b', generated_text) or re.search(r'(?:#[A-Za-z0-9_]{2,}\s*){3,}', generated_text):
+                    logger.warning("Social media hashtag soup detected in Modal GPU stream; terminating early.")
                     break
 
             # Anti-conversational closing guard: Stop if model starts an email sign-off or polite closing
-            low_gen = generated_text.lower()
             if any(s in low_gen for s in ["best regards", "sincerely,", "yours truly", "thank you for your question", "please let me know if there is anything else"]):
                 logger.warning("Conversational closing detected in Modal GPU stream; terminating early.")
                 break
@@ -747,17 +783,36 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
             "architecture", "backend", "service", "build", "create", "app",
             "server", "oms", "database", "class", "structure"
         ]
-        prompt_requests_code = any(w in prompt.lower() for w in code_keywords)
+        code_phrases_to_ignore = [
+            "project code", "secret code", "postal code", "zip code", "discount code",
+            "promo code", "coupon code", "area code", "pin code"
+        ]
+        last_user_idx = prompt.rfind("<|im_start|>user")
+        query_part = prompt[last_user_idx:] if last_user_idx != -1 else prompt
+        is_ignored_code_phrase = any(p in query_part.lower() for p in code_phrases_to_ignore)
+        prompt_requests_code = not is_ignored_code_phrase and any(w in query_part.lower() for w in code_keywords)
 
         for chunk in stream:
             token = chunk["choices"][0]["text"]
             if token:
+                # Anti-multi-turn guard: Terminate before yielding if token begins synthetic conversation turn
+                if any(m in token.lower() for m in ["<|im_start|>", "<|im_end|>", "<|endoftext|>", "1user", "1assistant"]):
+                    logger.warning("Multi-turn delimiter token %r detected in local stream; terminating early.", token)
+                    break
+
                 generated_text += token
 
-                # Anti-hallucination guard: Stop streaming if model begins unrequested code blocks
-                if "```" in generated_text.lower() and not prompt_requests_code:
-                    logger.warning("Unrequested code block detected in stream; terminating generation.")
+                # Anti-multi-turn guard: Terminate immediately if accumulated text exhibits multi-turn drift
+                low_gen = generated_text.lower()
+                if any(marker in low_gen for marker in ["\n1user", " 1user", " 1assistant", "\nuser:", "\nassistant:", "\nhuman:"]):
+                    logger.warning("Multi-turn drift marker detected in local stream; terminating early.")
                     break
+
+                # Anti-hallucination guard: Stop streaming if model begins unrequested programming code blocks (allow ```markdown or ```text)
+                if "```" in generated_text.lower() and not prompt_requests_code:
+                    if any(f"```{lang}" in generated_text.lower() for lang in ["python", "javascript", "bash", "c++", "java", "sql", "sh", "ts", "cpp", "json"]):
+                        logger.warning("Unrequested programming code block detected in stream; terminating generation.")
+                        break
 
                 if "[Finance Data]" in generated_text or "Target (TGT)" in generated_text:
                     logger.warning("Unrequested financial ticker drift detected in stream; terminating generation.")
@@ -766,8 +821,8 @@ def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, for
                 # Anti-hashtag guard: Terminate immediately if model begins social media hashtag soup
                 if "#" in token and len(generated_text) > 30 and not prompt_requests_code:
                     import re
-                    if re.search(r'#[A-Za-z0-9_]{3,}', generated_text):
-                        logger.warning("Social media hashtag detected in stream; terminating early.")
+                    if re.search(r'(?i)#aarkaa(?:ai)?\b', generated_text) or re.search(r'(?:#[A-Za-z0-9_]{2,}\s*){3,}', generated_text):
+                        logger.warning("Social media hashtag soup detected in stream; terminating early.")
                         break
 
                 # Anti-conversational closing guard: Stop if model starts an email sign-off or polite closing
@@ -913,9 +968,13 @@ def _clean_response(text):
         text = text.replace(phrase, "").strip()
 
     # Regex-based disclaimer and meta-scaffolding stripper
-    import re
-    # Strip social media hashtag cascades (e.g. #AarkaaAI #FinancialAnalysis #AMDStockPrice...)
-    text = re.sub(r"(?:\s*#[A-Za-z0-9_\-\/]+){2,}.*$", "", text, flags=re.DOTALL).strip()
+    # Strip multi-turn hallucinations and synthetic follow-up turns (e.g. 1user, <|im_start|>user, User:, Human:)
+    text = re.sub(r"(?i)(?:\n|\b)(?:1user\b|<\|im_start\|>user|\nUser:|\nQuestion:|\nHuman:).*$", "", text, flags=re.DOTALL).strip()
+
+    # Strip social media hashtag cascades and trailing hashtags (e.g. #AarkaaAI #AarkaAI #FinancialAnalysis...)
+    text = re.sub(r"(?i)\s*#Aarkaa(?:AI)?\b.*$", "", text, flags=re.DOTALL).strip()
+    text = re.sub(r"(?i)\s*#Aarka(?:AI)?\b.*$", "", text, flags=re.DOTALL).strip()
+    text = re.sub(r"(?:\s*#[A-Za-z0-9_\-\/]+)+.*$", "", text, flags=re.DOTALL).strip()
 
     # Strip conversational closings, thank you notes, and signoffs
     closing_patterns = [
@@ -926,11 +985,12 @@ def _clean_response(text):
     for pat in closing_patterns:
         text = re.sub(pat, "", text, flags=re.DOTALL).strip()
 
-    # Strip synthetic end-of-answer/response markers (e.g. (End of answer)```, --- END OF ANSWER ---)
+    # Strip synthetic end-of-answer/response markers (e.g. (End of answer), End of answer., --- END OF ANSWER ---)
     end_marker_patterns = [
+        r"(?i)\s*(?:\*{1,2}|[\(\[])?\s*end of (?:answer|response|text|explanation)\s*(?:\*{1,2}|[\)\]])?\.?[\s`]*$",
+        r"(?i)\s*---+\s*end\s+(?:of\s+)?(?:answer|response|disclaimer|text)\s*---+[\s`]*$",
+        r"(?i)\s*###\s*end of (?:answer|response|text)[\s`]*$",
         r"(?i)\s*[\(\[]\s*end of (?:answer|response|text|explanation)\s*[\)\]][\s`]*",
-        r"(?i)\s*---+\s*end\s+(?:of\s+)?(?:answer|response|disclaimer|text)\s*---+[\s`]*",
-        r"(?i)\s*###\s*end of (?:answer|response|text)[\s`]*",
     ]
     for pat in end_marker_patterns:
         text = re.sub(pat, "", text).strip()
@@ -949,14 +1009,12 @@ def _clean_response(text):
 
     greetings_to_remove = ["dear reader", "dear user", "hello reader", "hello user", "dear friend"]
     if lines:
-        import re
         first_line_clean = re.sub(r'[^\w\s]', '', lines[0].lower()).strip()
         if any(first_line_clean.startswith(g) for g in greetings_to_remove):
             lines.pop(0)
 
     signoffs_to_remove = ["sincerely", "best regards", "regards", "yours truly"]
     if lines:
-        import re
         last_line_clean = re.sub(r'[^\w\s]', '', lines[-1].lower()).strip()
         if any(last_line_clean.startswith(s) for s in signoffs_to_remove):
             lines.pop()
@@ -974,7 +1032,6 @@ def _clean_response(text):
             return text + "\n```"
         return text
 
-    import re
     # Remove trailing unfinished list headers or newlines (e.g. \n\n7. or \n-)
     text = re.sub(r'\n+\s*(?:-|\*|\d+\.)\s*$', '', text)
         
@@ -1334,7 +1391,8 @@ def _filter_history_repeats(query: str, history: list[dict] | None) -> list[dict
     while i < len(history):
         msg = history[i]
         if msg.get("role") == "user":
-            hist_q = "".join(c for c in msg.get("message", "").lower() if c.isalnum())
+            raw_msg = msg.get("message") or msg.get("content", "")
+            hist_q = "".join(c for c in raw_msg.lower() if c.isalnum())
             if hist_q == clean_q or (len(hist_q) > 10 and (hist_q in clean_q or clean_q in hist_q)):
                 i += 1
                 if i < len(history) and history[i].get("role") == "assistant":
@@ -1362,7 +1420,7 @@ def _filter_history_reasoning(query: str, history: list[dict] | None) -> list[di
     
     filtered_history = []
     for msg in history:
-        msg_text = msg.get("message", "").lower()
+        msg_text = (msg.get("message") or msg.get("content", "")).lower()
         msg_words = set(re.findall(r"\w+", msg_text))
         is_msg_weighing = bool(msg_words & weighing_kws)
         is_msg_clock = bool(msg_words & clock_kws)
@@ -1417,7 +1475,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
         return global_build_chatml(system, user)
 
     def _build_chatml_multi(system: str, history: list[dict] | None, user: str,
-                           max_history_chars: int = 3000, user_facts: str = "") -> str:
+                           max_history_chars: int = 20000, user_facts: str = "") -> str:
         if alignment_instruction:
             system = system + "\n\n" + alignment_instruction
         return global_build_chatml_multi(system, history, user, max_history_chars, user_facts)
@@ -1671,10 +1729,12 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
         tokens = MAX_TOKENS
         return prompt, tokens, 0.7
 
-    is_code = intent == "coding_help" or any(
+    code_phrases_to_ignore = ["project code", "secret code", "postal code", "zip code", "discount code", "promo code", "coupon code", "area code", "pin code"]
+    is_not_programming_code = any(p in query.lower() for p in code_phrases_to_ignore)
+    is_code = (intent == "coding_help" or any(
         w in query.lower()
-        for w in ["code", "program", "function", "script", "write", "implement"]
-    )
+        for w in ["write code", "python code", "program", "function", "script", "implement", "debug", "refactor", "algorithm code"]
+    ) or (("code" in query.lower() or "write" in query.lower()) and not is_not_programming_code and intent != "general_query")) and not is_not_programming_code
     if is_code:
         if "[Code Execution Result]" in context:
             history = None  # Clear history to avoid bias from previous incorrect code execution outputs in the same conversation session.
@@ -1876,6 +1936,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "rate hike", "repo rate", "interest rate hike", "tightening",
                     "monetary policy hike", "stagflation", "bond duration", "mclr", "eblr", "nim dynamics"
                 ])
+                is_screener_query = (intent == "finance_screener") or ("[Verified Stock Screener Data" in context)
                 if is_general:
                     if is_design_query:
                         system_prompt = (
@@ -1901,11 +1962,34 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                             "   - Macroeconomic Trade-Offs: Detail monetary policy transmission lags, real vs nominal rates, and inflation-growth trade-offs.\n"
                             "Do NOT output any disclaimers, code snippets, or unrelated market analyses. Stay 100% focused on the requested scope."
                         )
+                    elif is_screener_query:
+                        system_prompt = (
+                            "You are Aarkaa AI, a Principal Quantitative Financial Analyst and Equity Research Strategist built by Synthetix Analytics.\n"
+                            "Your objective is to provide institutional-grade, rigorous stock screening and market analysis.\n\n"
+                            "STRICT MARKET CAPITALIZATION BOUNDARIES (SEBI & GLOBAL STANDARDS):\n"
+                            "1. SMALL-CAP DEFINITION: Companies ranked 251st or lower on NSE/BSE by full market cap (typically under Rs 25,000 Cr).\n"
+                            "   - VERIFIED EXAMPLES: Tejas Networks, CDSL, Angel One, Inox Wind, Zen Technologies, Titagarh Rail Systems, Kaynes Technology, Gravita India, RailTel, Sonata Software.\n"
+                            "   - ABSOLUTE PROHIBITION: You MUST NEVER classify Nifty 50 or Large-Cap companies (such as Adani Enterprises, HDFC Bank, Infosys, Reliance, TCS, Maruti Suzuki, ICICI Bank, State Bank of India, Larsen & Toubro) as small-cap or mid-cap stocks. Doing so is factually false and strictly forbidden.\n"
+                            "2. MID-CAP DEFINITION: Companies ranked 101st to 250th on NSE (market cap Rs 15,000 Cr to Rs 50,000 Cr).\n"
+                            "3. LARGE-CAP DEFINITION: Top 100 companies on NSE (market cap > Rs 50,000 Cr).\n\n"
+                            "CRITICAL GROUNDING DIRECTIVE:\n"
+                            "- Recommend ONLY the verified stocks provided in the [Verified Stock Screener Data] context below.\n"
+                            "- Quote the EXACT current market price, day change %, market cap (in Rs Cr), and technical indicators (50-day EMA, RSI, Consensus Signal) from the context.\n"
+                            "- Never invent ticker symbols (e.g., do NOT invent 'ADANIE' or 'HDBCL'; use official NSE tickers like TEJASNET, CDSL, ANGELONE, INOXWIND, ZENTEC, TITAGARH).\n"
+                            "- Present your answer in a clean, professional, structured format detailing for each stock: Company Name & NSE Ticker, Sector, Market Cap, Live Price, Technical Trend Setup, and Fundamental Growth Catalyst."
+                        )
                     # Otherwise, retain the full comprehensive system_prompt defined above
                 user_prompt = f"Question: {query}\n\n"
                 if context:
                     has_finance = "[Finance Data]" in context
-                    if has_finance:
+                    has_screener = "[Verified Stock Screener Data" in context
+                    if has_screener:
+                        user_prompt += (
+                            "CRITICAL FINANCIAL SCREENER DIRECTIVE: You MUST answer the user's question using ONLY the verified stocks from the [Verified Stock Screener Data] below. "
+                            "Under NO circumstances should you mention Adani Enterprises, HDFC Bank, Infosys, Reliance, TCS, or Maruti Suzuki when answering small-cap queries. "
+                            "State the exact company names, NSE tickers, live prices, market caps in Rs Cr, and technical indicators provided in the context.\n\n"
+                        )
+                    elif has_finance:
                         user_prompt += (
                             "CRITICAL FINANCIAL DIRECTIVE: Use the exact prices, change figures, and market capitalization values from the [Finance Data] section below. "
                             "State the factual numbers cleanly and directly. Do NOT include disclaimers, do NOT mention Yahoo Finance or data recency, and do NOT output conversational closings or hashtags.\n\n"
