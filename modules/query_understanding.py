@@ -100,6 +100,82 @@ _CODE_EXEC = ["output", "print", "run", "trace", "execute", "result"]
 _CODER_KEYWORDS = ["def", "class", "import", "function", "code", "script", "implement", "debug", "refactor"]
 
 
+def calculate_follow_up_score(query: str, chat_ctx: list | None) -> float:
+    """Confidence-scored follow-up detection using 7 signal categories.
+
+    Returns a float 0.0–1.0 indicating how strongly the query depends on
+    prior conversation history. Multiple signals stack (capped at 1.0).
+    """
+    if not chat_ctx:
+        return 0.0
+
+    q_low = query.lower().strip()
+    word_count = len(q_low.split())
+    words = set(re.findall(r"\b[a-zA-Z]+\b", q_low))
+    score = 0.0
+
+    # ── Signal 1: Short query heuristic ──────────────────────────────────
+    if word_count <= 3:
+        score += 0.85
+    elif word_count <= 6:
+        score += 0.70
+
+    # ── Signal 2: Pronoun / demonstrative references ─────────────────────
+    pronoun_refs = {
+        "it", "its", "they", "them", "their", "he", "him", "his",
+        "she", "her", "this", "that", "these", "those",
+    }
+    if words.intersection(pronoun_refs):
+        score += 0.60
+
+    # ── Signal 3: Continuation phrases ───────────────────────────────────
+    continuation_phrases = [
+        "tell me more", "explain further", "go on", "keep going",
+        "what else", "and then", "continue", "elaborate", "more details",
+        "expand on", "can you elaborate", "more about", "in detail",
+    ]
+    if any(p in q_low for p in continuation_phrases):
+        score += 0.90
+
+    # ── Signal 4: Verification / challenge phrases ───────────────────────
+    verification_phrases = [
+        "are you sure", "really", "is that correct", "is that right",
+        "is that true", "why so", "how come", "can you clarify",
+        "are you certain", "prove it", "source", "how do you know",
+        "double check", "verify", "confirm",
+    ]
+    if any(p in q_low for p in verification_phrases):
+        score += 0.85
+
+    # ── Signal 5: Affirmation / negation ─────────────────────────────────
+    affirmation_negation = {
+        "yes", "no", "ok", "okay", "right", "correct", "wrong",
+        "exactly", "agreed", "nope", "yep", "yeah", "nah",
+    }
+    if q_low in affirmation_negation or (word_count <= 3 and words.intersection(affirmation_negation)):
+        score += 0.80
+
+    back_refs = [
+        "the above", "you said", "you mentioned", "earlier",
+        "previous", "last answer", "your response", "as you said",
+        "you told me", "your answer", "from before", "what was", "who was",
+        "tell me again", "repeat that", "i told you", "i mentioned", "i said",
+        "beginning", "in the beginning", "first message", "my previous message"
+    ]
+    if any(p in q_low for p in back_refs):
+        score += 0.95
+
+    # ── Signal 7: Comparative follow-ups ─────────────────────────────────
+    comparative_phrases = [
+        "what about", "how about", "instead of", "versus", " vs ",
+        "compared to", "rather than", "difference between", "or should",
+    ]
+    if any(p in q_low for p in comparative_phrases):
+        score += 0.70
+
+    return min(score, 1.0)
+
+
 def analyze(
     query: str,
     domain: str = "general",
@@ -125,6 +201,16 @@ def analyze(
         )
         plan.complexity = "simple"
         logger.info(f"QueryPlan: complexity={plan.complexity}, sources={['model_only']}, bypass_llm={plan.bypass_llm}")
+        return plan
+
+    # Conversational follow-up detection: if the query heavily references conversation history,
+    # route directly to MODEL_ONLY so the LLM relies on chat history rather than search tools.
+    if chat_context and calculate_follow_up_score(query, chat_context) >= 0.65:
+        logger.info("Follow-up query detected (conf >= 0.65) — routing to MODEL_ONLY with chat history")
+        plan.sub_queries.append(
+            SubQuery(query_text=query, source_type=DataSource.MODEL_ONLY, priority=1)
+        )
+        plan.complexity = "simple"
         return plan
 
     query_lower = query.lower()

@@ -129,8 +129,10 @@ class PersonalChatRepo:
         coll = cls.get_collection()
         if coll is None:
             return []
-        cursor = coll.find({"user_id": user_id, "session_id": session_id}).sort("timestamp", ASCENDING).limit(limit)
-        return list(cursor)
+        cursor = coll.find({"user_id": user_id, "session_id": session_id}).sort("timestamp", DESCENDING).limit(limit)
+        docs = list(cursor)
+        docs.reverse()
+        return docs
 
 
 # ─── User Memory Repository ───────────────────────────────────────────────────

@@ -638,7 +638,7 @@ html_template = f"""<!DOCTYPE html>
   <div class="header">
     <div>
       <h1>Infrastructure, DevOps &amp; Cloud Deployment</h1>
-      <div style="font-size: 10px; color: #0284c7; font-weight: 600;">GCP Compute Engine (136.85.114.150), Nginx Proxy &amp; CI/CD</div>
+      <div style="font-size: 10px; color: #0284c7; font-weight: 600;">GCP Compute Engine (35.225.45.190), Nginx Proxy &amp; CI/CD</div>
     </div>
     <div class="meta">
       Section: DevOps &amp; Infrastructure
@@ -647,7 +647,7 @@ html_template = f"""<!DOCTYPE html>
 
   <h2>1. Production Infrastructure Topology</h2>
   <p>
-    AARKAAI is hosted on Google Cloud Platform (GCP) Compute Engine instance <code>136.85.114.150</code>, running an optimized Linux kernel with systemd managed microservices. The external ingress point is managed by Nginx 1.28 acting as a high-throughput reverse proxy, terminating TLS connections with 2048-bit RSA/ECDHE keys, enforcing HTTP/2 protocols, and issuing automatic 301 redirects for insecure port 80 requests.
+    AARKAAI is hosted on Google Cloud Platform (GCP) Compute Engine instance <code>35.225.45.190</code>, running an optimized Linux kernel with systemd managed microservices. The external ingress point is managed by Nginx 1.28 acting as a high-throughput reverse proxy, terminating TLS connections with 2048-bit RSA/ECDHE keys, enforcing HTTP/2 protocols, and issuing automatic 301 redirects for insecure port 80 requests.
   </p>
   <p>
     The internal service mesh isolates internal port communication. The FastAPI backend binds exclusively to <code>127.0.0.1:5000</code>, while the Next.js SSR instance binds to <code>127.0.0.1:3000</code>. Unused background containers (including the legacy Vision service) have been decommissioned, conserving over 1.8 GB of system memory and eliminating attack vectors.

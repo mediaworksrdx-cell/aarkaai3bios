@@ -1,6 +1,6 @@
 import requests
 
-base_url = "http://16.170.206.243:5000"
+base_url = "http://35.225.45.190:5000"
 
 topic = "Top 100 most frequent IP addresses from 5 billion log entries under 2 GB RAM limit"
 content = """To find the top 100 most frequent IP addresses from a massive log file of 5 billion entries with only 2 GB of RAM available, a naive in-memory hash map/dictionary approach will fail because storing all unique IP addresses and their frequencies in memory would exceed the RAM limit. 

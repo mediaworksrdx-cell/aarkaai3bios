@@ -4,12 +4,12 @@
 
 /* === Default & Permanent Theme: Light Theme === */
 :root, .light, [data-theme="light"], html, body {
-  --bg-primary: #FAF8F5;
+  --bg-primary: #FBF8F5;
   --bg-secondary: #FFFFFF;
   --bg-tertiary: #F1EDE5;
   --bg-input: #F6F3EB;
   --bg-hover: #ECE6DA;
-  --bg-glass: rgba(250, 248, 245, 0.92);
+  --bg-glass: rgba(251, 248, 245, 0.92);
 
   --accent-primary: #C15F3D;
   --accent-hover: #B05333;

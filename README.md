@@ -1,4 +1,4 @@
-# AARKAAI – Autonomous Agentic Engine & Backend Services
+﻿# AARKAAI – Autonomous Agentic Engine & Backend Services
 
 > [!IMPORTANT]
 > ### ⚠️ AI AGENT SAFEGUARD & BEHAVIORAL CONSTRAINTS
@@ -98,4 +98,4 @@ Deployment is automated via SSH/SCP pipelines:
 ```bash
 python scratch/deploy.py
 ```
-This packages the core engine, dependency lists, database migrations, and agent configurations, uploads them to the AWS Lightsail node (`16.170.206.243`), configures the target virtual environment, and restarts the systemd service.
+This packages the core engine, dependency lists, database migrations, and agent configurations, uploads them to the AWS Lightsail node (`35.225.45.190`), configures the target virtual environment, and restarts the systemd service.

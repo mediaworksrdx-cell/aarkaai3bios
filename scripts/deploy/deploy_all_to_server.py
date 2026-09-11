@@ -13,7 +13,7 @@ import requests
 
 KEY_PATH = r"C:\Users\daarv\Downloads\aarkaai7b.pem"
 REMOTE_USER = "ubuntu"
-REMOTE_IP = "16.170.206.243"
+REMOTE_IP = "35.225.45.190"
 REMOTE_HOST = f"{REMOTE_USER}@{REMOTE_IP}"
 REMOTE_DIR = "/home/ubuntu/aarkaai3b"
 ARCHIVE_NAME = "deploy_full_package.tar.gz"

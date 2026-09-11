@@ -91,6 +91,13 @@ function CodeBlock({ className, children, ...props }: any) {
 function MarkdownRenderer({ content, className = '', isStreaming = false }: { content: string; className?: string; isStreaming?: boolean }) {
   if (!content) return null;
 
+  const displayContent = content
+    .replace(/(?:\r?\n|\s)*(?:\*{1,2}|[\(\[])?\s*end of (?:answer|response|text|explanation)\s*(?:\*{1,2}|[\)\]])?\.?[\s`]*$/gi, '')
+    .replace(/(?:\r?\n|\s)*---+\s*end\s+(?:of\s+)?(?:answer|response|disclaimer|text)\s*---+[\s`]*$/gi, '')
+    .replace(/(?:\r?\n|\s)*(?:#Aarkaa(?:AI)?|#Aarka(?:AI)?)\b.*$/gi, '')
+    .replace(/(?:\r?\n|\s)*(?:#[A-Za-z0-9_\-\/]+)+\s*$/gi, '')
+    .trimEnd();
+
   return (
     <div className={`prose ${className}`}>
       <ReactMarkdown
@@ -107,7 +114,7 @@ function MarkdownRenderer({ content, className = '', isStreaming = false }: { co
           ),
         }}
       >
-        {content}
+        {displayContent}
       </ReactMarkdown>
       {isStreaming && (
         <span className="inline-block w-1.5 h-4 ml-1 align-middle bg-[var(--accent-primary)] animate-pulse" />

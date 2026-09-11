@@ -1,6 +1,6 @@
-"""
+﻿"""
 AARKAAI – GCP Compute Engine Migration & Deployment Manager
-Automates project packaging, key discovery / connection, remote upload to GCP VM (136.85.114.150),
+Automates project packaging, key discovery / connection, remote upload to GCP VM (35.225.45.190),
 automated environment provisioning, systemd service startup, and health checks.
 """
 import os
@@ -10,7 +10,7 @@ import glob
 import tarfile
 import subprocess
 
-REMOTE_IP = "136.85.114.150"
+REMOTE_IP = "35.225.45.190"
 POSSIBLE_USERS = ["sathishbadri2015", "ubuntu", "daarv", "debian", "admin", "rathish", "root"]
 ARCHIVE_NAME = "aarkaai_gcp_deploy.tar.gz"
 
@@ -63,7 +63,7 @@ def create_archive():
     return True
 
 def discover_ssh_auth():
-    print("\n[2/5] Testing SSH credentials for GCP VM (136.85.114.150)...")
+    print("\n[2/5] Testing SSH credentials for GCP VM (35.225.45.190)...")
     key = r"C:\Users\daarv\.ssh\id_ed25519"
     user = "sathishbadri2015"
     cmd = [

@@ -1,13 +1,13 @@
-"""
+﻿"""
 AARKAAI – Remote Server Deployment Script
-Deploys all 32 updated/new modules, tools, schema, and OAuth endpoints to http://16.170.206.243:5000
+Deploys all 32 updated/new modules, tools, schema, and OAuth endpoints to http://35.225.45.190:5000
 """
 import base64
 import os
 import requests
 import sys
 
-base_url = "http://16.170.206.243:5000"
+base_url = "http://35.225.45.190:5000"
 
 reg_payload = {
     "email": "testadmin@aarkaai.com",

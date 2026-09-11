@@ -160,8 +160,16 @@ class TestDatabaseModel(unittest.TestCase):
     def test_user_settings_columns(self):
         from database import UserSettings
         columns = {c.name for c in UserSettings.__table__.columns}
-        expected = {"id", "user_id", "default_model", "response_style",
-                    "theme", "language", "streaming_enabled", "reasoning_depth", "updated_at"}
+        expected = {
+            "id", "user_id", "default_model", "response_style",
+            "theme", "language", "streaming_enabled", "reasoning_depth", "updated_at",
+            # Extended fields
+            "about_you", "system_directives", "extended_thinking", "thinking_budget",
+            "web_search_enabled", "deep_research_enabled", "market_data_enabled", "connected_apps",
+            # UI preference fields
+            "density", "enter_to_send", "show_timestamps", "incognito_chat",
+            "two_factor_enabled", "email_alerts", "security_alerts",
+        }
         self.assertEqual(columns, expected)
 
 

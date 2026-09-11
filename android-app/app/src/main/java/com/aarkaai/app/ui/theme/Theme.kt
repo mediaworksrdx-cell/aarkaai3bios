@@ -5,43 +5,29 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-private val DarkColorScheme = darkColorScheme(
-    primary = PrimaryDark,
+private val PermanentLightColorScheme = lightColorScheme(
+    primary = AccentPrimary,
     onPrimary = Color.White,
-    background = BgDark,
-    onBackground = TextPrimaryDark,
-    surface = SurfaceDark,
-    onSurface = TextPrimaryDark,
-    surfaceVariant = UserBubbleDark,
-    onSurfaceVariant = TextSecondaryDark,
-    outline = InputBorderDark,
-    outlineVariant = DividerDark,
-    error = ErrorRed,
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = PrimaryLight,
-    onPrimary = Color.White,
-    background = BgLight,
-    onBackground = TextPrimaryLight,
-    surface = SurfaceLight,
-    onSurface = TextPrimaryLight,
-    surfaceVariant = UserBubbleLight,
-    onSurfaceVariant = TextSecondaryLight,
-    outline = InputBorderLight,
-    outlineVariant = DividerLight,
+    primaryContainer = AccentMuted,
+    onPrimaryContainer = AccentHover,
+    background = BgPrimary,
+    onBackground = TextPrimary,
+    surface = BgSecondary,
+    onSurface = TextPrimary,
+    surfaceVariant = UserBubbleBg,
+    onSurfaceVariant = TextSecondary,
+    outline = BorderColor,
+    outlineVariant = BorderStrong,
     error = ErrorRed,
 )
 
 @Composable
 fun AarkaaiTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = false, // Permanent Light Theme matching Aarka AI web policy
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
-
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = PermanentLightColorScheme,
         typography = Typography(),
         content = content
     )

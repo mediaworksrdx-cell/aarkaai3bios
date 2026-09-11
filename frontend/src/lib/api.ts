@@ -22,6 +22,19 @@ export function clearToken(): void {
   }
 }
 
+export async function fetchVisitorToken(): Promise<{ access_token: string; token_type: string; user_id: string; name?: string }> {
+  const res = await fetch('/auth/visitor-token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Visitor token request failed: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function* streamChat(
   query: string,
   sessionId: string,
@@ -35,7 +48,18 @@ export async function* streamChat(
     'Accept': 'text/event-stream',
   };
   
-  const token = authToken || getStoredToken();
+  let token = authToken || getStoredToken();
+  if (!token) {
+    try {
+      const visitor = await fetchVisitorToken();
+      if (visitor?.access_token) {
+        token = visitor.access_token;
+        storeToken(token);
+      }
+    } catch (e) {
+      console.warn('Fallback visitor token fetch failed:', e);
+    }
+  }
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -58,8 +82,28 @@ export async function* streamChat(
     });
   } catch (err: any) {
     // Network error on /prompt/stream — rethrow so callers can surface a proper error message.
-    // (Removed: fallback to /api/chat which did not exist and always 404'd silently.)
     throw err;
+  }
+
+  // If token is expired or unauthorized, automatically fetch a fresh visitor token and retry once
+  if (response.status === 401) {
+    clearToken();
+    try {
+      const visitor = await fetchVisitorToken();
+      if (visitor?.access_token) {
+        token = visitor.access_token;
+        storeToken(token);
+        headers['Authorization'] = `Bearer ${token}`;
+        response = await fetch('/prompt/stream', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+          signal,
+        });
+      }
+    } catch (refreshErr) {
+      console.warn('Auto token refresh on 401 failed:', refreshErr);
+    }
   }
 
   if (!response.ok) {
@@ -660,37 +704,43 @@ export function exportToMarkdown(title: string, content: string) {
  * Fetch User Settings from Backend
  */
 export async function fetchSettingsApi(): Promise<any> {
+  const token = getStoredToken();
+  if (!token) {
+    return {};
+  }
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
   };
-  const token = getStoredToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'GET',
+      headers,
+    });
+
+    if (!res.ok) {
+      return {};
+    }
+
+    return res.json();
+  } catch (e) {
+    return {};
   }
-
-  const res = await fetch('/api/settings', {
-    method: 'GET',
-    headers,
-  });
-
-  if (!res.ok) {
-    throw new Error('Failed to fetch settings');
-  }
-
-  return res.json();
 }
 
 /**
  * Update User Settings in Backend
  */
 export async function updateSettingsApi(settings: Record<string, any>): Promise<any> {
+  const token = getStoredToken();
+  if (!token) {
+    throw new Error('Not authenticated. Settings saved locally only.');
+  }
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
   };
-  const token = getStoredToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
 
   const res = await fetch('/api/settings', {
     method: 'PUT',
@@ -699,7 +749,8 @@ export async function updateSettingsApi(settings: Record<string, any>): Promise<
   });
 
   if (!res.ok) {
-    throw new Error('Failed to update settings');
+    const errorBody = await res.text().catch(() => 'Unknown error');
+    throw new Error(`Failed to save settings (${res.status}): ${errorBody}`);
   }
 
   return res.json();

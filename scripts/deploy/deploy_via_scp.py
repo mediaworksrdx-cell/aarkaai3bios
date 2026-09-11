@@ -1,4 +1,4 @@
-"""
+﻿"""
 AARKAAI – SSH/SCP Direct Deployer
 Deploys all updated/new files directly to /home/ubuntu/aarkaai3b via SSH/SCP
 using C:\\Users\\daarv\\Downloads\\aarkaai7b.pem
@@ -7,7 +7,7 @@ import os
 import subprocess
 
 KEY_PATH = r"C:\Users\daarv\Downloads\aarkaai7b.pem"
-REMOTE_HOST = "ubuntu@16.170.206.243"
+REMOTE_HOST = "ubuntu@35.225.45.190"
 REMOTE_DIR = "/home/ubuntu/aarkaai3b"
 
 # Root-level files to deploy

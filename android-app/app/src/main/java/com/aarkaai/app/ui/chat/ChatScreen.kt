@@ -1381,8 +1381,8 @@ fun AiMessageRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = when {
-                        message.modelUsed.contains("Gemini") || message.modelUsed == "gemini-3.7" -> "Gemini 3.7"
-                        message.modelUsed.contains("Claude") || message.modelUsed.contains("sonnet") -> "Claude Sonnet 5"
+                        message.modelUsed?.contains("Gemini", ignoreCase = true) == true || message.modelUsed == "gemini-3.7" -> "Gemini 3.7"
+                        message.modelUsed?.contains("Claude", ignoreCase = true) == true || message.modelUsed?.contains("sonnet", ignoreCase = true) == true -> "Claude Sonnet 5"
                         else -> "Aarka AI"
                     },
                     fontWeight = FontWeight.Bold,
