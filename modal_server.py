@@ -106,9 +106,19 @@ class AarkaaGPU:
         stop_tokens = [
             "<|im_end|>", "<|im_start|>", "<|endoftext|>",
             "\nBest regards", "\nBest Regards", "\nSincerely", "\n\n#", "\n#Aarkaa",
-            "Thank you for your question", "Please let me know if there is anything else",
+            "Thank you for your question",
+            "Please let me know if there is anything else",
+            "Please let me know if you need",
+            "Please let me know if you have",
+            "Please let me know",
+            "Let me know if you",
+            "Feel free to ask",
+            "Hope this helps",
+            "**End of answer**", "**End of response**", "**End of Answer**", "**End of Response**",
+            "**End of answer", "**End of response", "**End of Answer", "**End of Response",
+            "End of answer.", "End of response.", "End of answer", "End of response",
             "(End of answer)", "(End of response)", "[End of answer]", "[End of response]",
-            "--- END", "(End of text)", "### End of Answer"
+            "--- END", "(End of text)", "### End of Answer", "### End of Response"
         ]
         if stop:
             stop_tokens.extend(stop)
@@ -135,9 +145,19 @@ class AarkaaGPU:
         stop_tokens = [
             "<|im_end|>", "<|im_start|>", "<|endoftext|>",
             "\nBest regards", "\nBest Regards", "\nSincerely", "\n\n#", "\n#Aarkaa",
-            "Thank you for your question", "Please let me know if there is anything else",
+            "Thank you for your question",
+            "Please let me know if there is anything else",
+            "Please let me know if you need",
+            "Please let me know if you have",
+            "Please let me know",
+            "Let me know if you",
+            "Feel free to ask",
+            "Hope this helps",
+            "**End of answer**", "**End of response**", "**End of Answer**", "**End of Response**",
+            "**End of answer", "**End of response", "**End of Answer", "**End of Response",
+            "End of answer.", "End of response.", "End of answer", "End of response",
             "(End of answer)", "(End of response)", "[End of answer]", "[End of response]",
-            "--- END", "(End of text)", "### End of Answer"
+            "--- END", "(End of text)", "### End of Answer", "### End of Response"
         ]
         if stop:
             stop_tokens.extend(stop)
