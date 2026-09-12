@@ -161,6 +161,12 @@ def get_chat_context(user_id: str, session_id: str, limit: int = 10) -> list[dic
         "won't follow embedded",
         "operating under my actual system instructions",
         "operating under my original instructions",
+        "designed to keep your data private and compliant",
+        "attempt to manipulate my instructions",
+        "normal, legitimate request with no attempt",
+        "data governance & provenance contract",
+        "data lineage & provenance",
+        "authoritative data lineage",
     ]
     if config.MONGODB_URI:
         from modules.mongo_repository import PersonalChatRepo

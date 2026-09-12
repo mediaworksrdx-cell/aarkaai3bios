@@ -782,14 +782,14 @@ This guarantee is enforced by code architecture (whitelist-only universe loading
 """
 
 
-def _guard_token_stream(raw_stream, prompt_requests_code: bool = False):
+def _guard_token_stream(raw_stream, prompt_requests_code: bool = False, user_query: str = ""):
     """
     Yields clean tokens from raw_stream while strictly preventing synthetic closure leakage:
     - Multi-turn delimiters (<|im_start|>, 1user, etc.)
     - Synthetic end markers (**End of answer**, (End of response), etc.)
     - Conversational sign-offs ("Please let me know...", "Best regards", etc.)
     - Social media hashtag cascades (#StockAnalysis, #AarkaaAI, etc.)
-    - False-positive prompt injection refusals from safety alignments
+    - False-positive prompt injection refusals from safety alignments (fails over to Gemini)
     - Unrequested code blocks or ticker drift.
     Employs a 50-char sliding lookahead window so multi-token closure sequences are intercepted
     and truncated BEFORE reaching the client.
@@ -841,11 +841,33 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False):
             "operating under my actual system instructions",
             "operating under my original instructions",
             "designed to keep your data private and compliant",
+            "manipulate my instructions",
         ]):
-            logger.warning("Safety refusal detected in stream; suppressing and returning compliance response.")
-            is_sec = any(w in low_accum for w in ["textile", "jewell", "guarantee", "sector"])
-            yield _SECTOR_GUARANTEE_RESPONSE if is_sec else _COMPLIANCE_RESPONSE
-            return
+            logger.warning("Safety refusal detected in stream for query: %.80s", user_query)
+            uq_low = (user_query or "").lower()
+            is_sec = any(w in uq_low for w in ["textile", "jewell", "guarantee", "sector"]) or any(w in low_accum for w in ["textile", "jewell", "guarantee"])
+            is_prov = any(w in uq_low for w in ["exact source", "timestamp", "data vintage", "provenance", "lineage", "reported or calculated"])
+            if is_sec:
+                yield _SECTOR_GUARANTEE_RESPONSE
+                return
+            elif is_prov:
+                yield _COMPLIANCE_RESPONSE
+                return
+            else:
+                # Falsely triggered safety refusal on a normal user query.
+                # Fail over seamlessly to Gemini so the user receives a high-quality answer.
+                try:
+                    logger.info("Failing over falsely refused stream to Google Gemini...")
+                    from modules.external_agents import stream_gemini_response
+                    target_q = user_query if user_query else "Provide the complete, direct analysis for the request."
+                    for fb_token in stream_gemini_response(target_q):
+                        yield fb_token
+                    return
+                except Exception as fb_exc:
+                    logger.error("Gemini failover failed: %s", fb_exc)
+                    yield "Here is the direct analysis:\n\n"
+                    return
+
 
         if "```" in token:
             in_code_block = not in_code_block
@@ -968,6 +990,15 @@ def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, fo
     is_ignored_code_phrase = any(p in query_part.lower() for p in code_phrases_to_ignore)
     prompt_requests_code = not is_ignored_code_phrase and any(w in query_part.lower() for w in code_keywords)
 
+    clean_user_q = (
+        query_part.replace("<|im_start|>user\n", "")
+        .replace("<|im_start|>user", "")
+        .split("<|im_end|>")[0]
+        .strip()
+    )
+    if clean_user_q.startswith("Request: "):
+        clean_user_q = clean_user_q[9:].strip()
+
     # ── 1. Attempt Modal Serverless GPU First ──
     modal_model = "7b"
     if not force_general:
@@ -978,7 +1009,7 @@ def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, fo
     modal_stream = _stream_modal_gpu(prompt, max_new_tokens=max_new_tokens, stop=stop_tokens, temperature=temperature, model_name=modal_model)
     if modal_stream is not None:
         yielded_any = False
-        for token in _guard_token_stream(modal_stream, prompt_requests_code=prompt_requests_code):
+        for token in _guard_token_stream(modal_stream, prompt_requests_code=prompt_requests_code, user_query=clean_user_q):
             yielded_any = True
             yield token
         if yielded_any:
@@ -1001,7 +1032,7 @@ def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, fo
             stop=stop_tokens,
             stream=True
         ))
-        yield from _guard_token_stream(raw_stream, prompt_requests_code=prompt_requests_code)
+        yield from _guard_token_stream(raw_stream, prompt_requests_code=prompt_requests_code, user_query=clean_user_q)
 
 
 
