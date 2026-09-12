@@ -164,48 +164,44 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
         sessionActiveId = sessionStorage.getItem(SESSION_ACTIVE_KEY);
       } catch {}
 
-      if (sanitized.length > 0) {
-        // Prioritize session active conversation, or the first conversation with messages, or first conversation
-        const targetConv = (sessionActiveId ? sanitized.find(c => c.id === sessionActiveId) : null)
-          || sanitized.find(c => Array.isArray(c.messages) && c.messages.length > 0)
-          || sanitized[0];
+      // Preserve active conversation ONLY on explicit page reload within the same browser tab
+      const sessionConv = (isReload && sessionActiveId) ? sanitized.find(c => c.id === sessionActiveId) : null;
 
+      if (sessionConv) {
         setConversations(sanitized);
-        setActiveConversationId(targetConv.id);
-        try {
-          sessionStorage.setItem(SESSION_ACTIVE_KEY, targetConv.id);
-        } catch {}
+        setActiveConversationId(sessionConv.id);
         return;
       }
 
-      // Otherwise create a fresh new conversation for initial session
-      const initialId = generateId();
-      const initialConv: Conversation = {
-        id: initialId,
+      // Fresh visit / new tab / new window:
+      // Always start on a clean "New Chat" (WelcomeScreen), while preserving all past conversations in the sidebar
+      const freshId = generateId();
+      const freshConv: Conversation = {
+        id: freshId,
         title: 'New Chat',
         messages: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        model: 'aarka-2.0',
-        effort: 'high',
+        model: selectedModel || 'aarka-2.0',
+        effort: reasoningEffort || 'high',
       };
 
-      setConversations([initialConv]);
-      setActiveConversationId(initialId);
+      setConversations([freshConv, ...sanitized]);
+      setActiveConversationId(freshId);
       try {
-        sessionStorage.setItem(SESSION_ACTIVE_KEY, initialId);
-        localStorage.setItem(currentStorageKey, JSON.stringify([initialConv]));
+        sessionStorage.setItem(SESSION_ACTIVE_KEY, freshId);
       } catch {}
     } catch (e) {
       console.warn('Failed to load user conversations', e);
     }
   }, [currentStorageKey, user]);
 
-  // Save conversations to currentStorageKey on change
+  // Save conversations to currentStorageKey on change (only persist conversations that have messages)
   useEffect(() => {
-    if (isMounted && conversations.length > 0) {
+    if (isMounted) {
       try {
-        localStorage.setItem(currentStorageKey, JSON.stringify(conversations));
+        const toPersist = conversations.filter(c => Array.isArray(c.messages) && c.messages.length > 0);
+        localStorage.setItem(currentStorageKey, JSON.stringify(toPersist));
       } catch (e) {
         console.warn('Failed to persist user conversations', e);
       }
@@ -237,6 +233,12 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
   const messages = (activeConversation && Array.isArray(activeConversation.messages)) ? activeConversation.messages : [];
 
   const createConversation = useCallback((model: string = 'aarka-2.0', effort: EffortLevel = 'high'): string => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsStreaming(false);
+
     const newId = generateId();
     const newConv: Conversation = {
       id: newId,
@@ -247,8 +249,11 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
       model,
       effort,
     };
-    setConversations(prev => [newConv, ...prev]);
+    setConversations(prev => [newConv, ...prev.filter(c => Array.isArray(c.messages) && c.messages.length > 0)]);
     setActiveConversationId(newId);
+    try {
+      sessionStorage.setItem(SESSION_ACTIVE_KEY, newId);
+    } catch {}
     setError(null);
     return newId;
   }, []);
@@ -257,8 +262,12 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
     setConversations(prev => {
       const remaining = prev.filter(c => c.id !== id);
       if (activeConversationId === id) {
-        if (remaining.length > 0) {
-          setActiveConversationId(remaining[0].id);
+        const nextActive = remaining.find(c => Array.isArray(c.messages) && c.messages.length > 0);
+        if (nextActive) {
+          setActiveConversationId(nextActive.id);
+          try {
+            sessionStorage.setItem(SESSION_ACTIVE_KEY, nextActive.id);
+          } catch {}
         } else {
           const newId = generateId();
           const fallback: Conversation = {
@@ -271,6 +280,9 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
             effort: reasoningEffort,
           };
           setActiveConversationId(newId);
+          try {
+            sessionStorage.setItem(SESSION_ACTIVE_KEY, newId);
+          } catch {}
           return [fallback];
         }
       }

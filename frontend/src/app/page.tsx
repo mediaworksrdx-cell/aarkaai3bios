@@ -141,7 +141,25 @@ function MainChatLayout({
 }
 
 export default function HomePage() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const rawUser = localStorage.getItem('aarka-user') || localStorage.getItem('aarkaa-user');
+      if (rawUser && rawUser !== 'undefined' && rawUser !== 'null') {
+        const parsedUser = JSON.parse(rawUser);
+        if (parsedUser && typeof parsedUser === 'object') return parsedUser;
+      }
+      const savedAnonymous = localStorage.getItem('aarka-anonymous') || localStorage.getItem('aarkaa-anonymous');
+      if (savedAnonymous === 'true') {
+        return {
+          id: 'guest-init',
+          name: 'Guest User',
+          email: 'guest@aarka-ai.com',
+        };
+      }
+    } catch {}
+    return null;
+  });
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
