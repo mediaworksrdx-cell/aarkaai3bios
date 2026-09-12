@@ -39,6 +39,7 @@ class DataSource(Enum):
     VISION = "vision"                 # Image/chart analysis
     CODER = "coder"                   # Code generation service
     MODEL_ONLY = "model_only"         # Pure LLM reasoning, no retrieval needed
+    STOCK_SCREENER = "stock_screener" # Multi-factor institutional screening
 
 @dataclass
 class SubQuery:
@@ -84,7 +85,7 @@ _MARKET_KEYWORDS = ["stock", "price", "shares", "market cap", "volume", "ohlc", 
 _MARKET_EXCLUDE_CORPORATE = ["revenue", "ceo", "founded", "employees", "history"]
 _MARKET_YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
 
-_NEWS_KEYWORDS = ["current", "latest", "today", "news", "recent", "update", "now", "2024", "2025", "2026", "happening", "trending", "breaking", "live", "war", "election", "ताज़ा", "समाचार", "आज", "खबर"]
+_NEWS_KEYWORDS = ["current", "latest", "today", "news", "recent", "update", "now", "2024", "2025", "2026", "happening", "trending", "breaking", "live", "war", "election"]
 
 _DB_KEYWORDS = ["my portfolio", "my holdings", "my watchlist", "my account", "my history", "my settings", "my alerts"]
 

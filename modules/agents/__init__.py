@@ -30,6 +30,28 @@ AGENTS: Dict[str, BaseAgent] = {
     "customer_support": CustomerSupportAgent()
 }
 
+# Register ScreenerAgent as a lightweight wrapper for hybrid routing
+try:
+    _screener_agent_instance = BaseAgent(
+        name="Screener",
+        description="Institutional-grade multi-factor stock screener with 20 strategies",
+        persona="You are a senior equity research analyst and quant screener.",
+        rules=[
+            "Use only verified market data from the screener engine.",
+            "Present results in clean markdown tables with score breakdowns.",
+            "Include mandatory disclaimer about educational/informational purposes.",
+        ],
+        allowed_tools=[
+            "MarketDataTool", "TechnicalAnalysisTool", "FinancialDataTool",
+            "FnOAnalyticsTool", "FinancialCalculatorTool",
+        ],
+        default_temp=0.2,
+    )
+    AGENTS["screener"] = _screener_agent_instance
+    logger.info("ScreenerAgent registered in AGENTS dict")
+except Exception as _sa_err:
+    logger.debug("ScreenerAgent registration skipped: %s", _sa_err)
+
 
 def compile_hybrid_agent(selected: List[Tuple[str, float]]) -> BaseAgent:
     """Dynamically builds a hybrid BaseAgent from multiple selected agents."""

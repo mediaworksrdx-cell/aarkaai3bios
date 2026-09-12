@@ -943,9 +943,17 @@ _US_STOCK_UNIVERSE = {
 
 
 def is_stock_screener_query(query: str) -> bool:
-    """Detect queries asking for stock screening, category discovery, or equity ideas."""
+    """Detect queries asking for stock screening, category discovery, or equity ideas.
+    Excludes meta-questions asking about guarantees, architecture, or validation.
+    """
     import re
     q_low = query.lower()
+
+    meta_patterns = [
+        r"\b(can you guarantee|guarantee that|how do you guarantee|how does (it|the screener)|is (it|this|that) hardcoded|are (these|they) hardcoded|explain how|demonstrate with|demonstrate how|why did you (return|select|give)|verify that)\b",
+    ]
+    if any(re.search(pat, q_low) for pat in meta_patterns):
+        return False
     patterns = [
         r"\bsmall\s*cap[s]?\b",
         r"\bsmallcap[s]?\b",

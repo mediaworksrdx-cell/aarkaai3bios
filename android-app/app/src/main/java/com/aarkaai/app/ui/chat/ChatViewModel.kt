@@ -491,12 +491,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 var tokenHeader = if (bearerToken.startsWith("Bearer ")) bearerToken else "Bearer $bearerToken"
+                val currentConvId = _uiState.value.activeConversationId
                 try {
                     RetrofitClient.api.submitRlhf(
                         token = tokenHeader,
                         request = RlhfRequest(
                             user_id = "android_user",
-                            rating = rating
+                            rating = rating,
+                            conversation_id = currentConvId
                         )
                     )
                 } catch (e: retrofit2.HttpException) {
@@ -508,7 +510,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 token = tokenHeader,
                                 request = RlhfRequest(
                                     user_id = "android_user",
-                                    rating = rating
+                                    rating = rating,
+                                    conversation_id = currentConvId
                                 )
                             )
                         }

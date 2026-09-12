@@ -172,24 +172,58 @@ export async function submitFeedbackApi(
   modelName: string = 'aarkaa-2.0'
 ): Promise<{ status: string; rlhf_id?: string }> {
   try {
+    let token = getStoredToken();
+    if (!token) {
+      try {
+        const visitor = await fetchVisitorToken();
+        if (visitor?.access_token) {
+          token = visitor.access_token;
+          storeToken(token);
+        }
+      } catch (e) {
+        console.warn('Fallback visitor token fetch failed for feedback:', e);
+      }
+    }
+
     const payload = {
       rating,
       conversation_id: conversationId || null,
-      correction: correction || '',
+      correction: correction && correction.trim() ? correction.trim() : null,
       query: query || '',
       response: response || '',
       model_name: modelName,
       timestamp: Date.now(),
     };
 
-    const res = await fetch('/api/rlhf', {
+    let res = await fetch('/api/rlhf', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(),
+        ...(token ? { Authorization: `Bearer ${token}` } : getAuthHeaders()),
       },
       body: JSON.stringify(payload),
     });
+
+    if (res.status === 401) {
+      clearToken();
+      try {
+        const visitor = await fetchVisitorToken();
+        if (visitor?.access_token) {
+          token = visitor.access_token;
+          storeToken(token);
+          res = await fetch('/api/rlhf', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(payload),
+          });
+        }
+      } catch (retryErr) {
+        console.warn('Visitor token refresh retry failed:', retryErr);
+      }
+    }
 
     if (!res.ok) {
       throw new Error(`Feedback failed with HTTP ${res.status}`);

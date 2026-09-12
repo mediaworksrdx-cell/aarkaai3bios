@@ -101,6 +101,16 @@ class ConversationRepo:
         cursor = coll.find({"user_id": user_id, "session_id": session_id}).sort("timestamp", DESCENDING).limit(limit)
         return list(cursor)
 
+    @classmethod
+    def get_latest_by_session(cls, session_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        coll = cls.get_collection()
+        if coll is None:
+            return None
+        query: Dict[str, Any] = {"session_id": session_id}
+        if user_id:
+            query["user_id"] = user_id
+        return coll.find_one(query, sort=[("timestamp", DESCENDING)])
+
 
 # ─── Personal Chat Repository ─────────────────────────────────────────────────
 class PersonalChatRepo:
@@ -262,3 +272,57 @@ class UserSettingsRepo:
                 return_document=ReturnDocument.AFTER,
             )
         return updates
+
+
+# ─── RLHF Feedback Repository ────────────────────────────────────────────────
+class RLHFRepo:
+    @staticmethod
+    def get_collection():
+        db = get_mongo_db()
+        return db.rlhf_feedback if db is not None else None
+
+    @classmethod
+    def add_entry(
+        cls,
+        user_id: str,
+        rating: int,
+        conversation_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        correction: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        coll = cls.get_collection()
+        doc = {
+            "user_id": user_id,
+            "rating": rating,
+            "conversation_id": conversation_id,
+            "session_id": session_id,
+            "correction": correction,
+            "timestamp": _utcnow(),
+        }
+        if coll is not None:
+            res = coll.insert_one(doc)
+            doc["_id"] = res.inserted_id
+        return doc
+
+    @classmethod
+    def get_feedback_by_user(cls, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        coll = cls.get_collection()
+        if coll is None:
+            return []
+        cursor = coll.find({"user_id": user_id}).sort("timestamp", DESCENDING).limit(limit)
+        return list(cursor)
+
+    @classmethod
+    def get_positive_or_corrected(cls, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        coll = cls.get_collection()
+        if coll is None:
+            return []
+        filter_query = {
+            "user_id": user_id,
+            "$or": [
+                {"rating": {"$gte": 1}},
+                {"correction": {"$nin": [None, ""]}},
+            ],
+        }
+        cursor = coll.find(filter_query).sort("timestamp", ASCENDING).limit(limit)
+        return list(cursor)

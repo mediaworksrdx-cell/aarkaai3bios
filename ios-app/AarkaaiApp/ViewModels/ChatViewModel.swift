@@ -136,7 +136,12 @@ class ChatViewModel: ObservableObject {
         updateMessageRating(id: messageId, rating: rating)
         
         do {
-            let req = RLHFRequest(user_id: appSession.currentUserId ?? "ios_user", rating: rating)
+            let convIdString = activeConversationId.uuidString
+            let req = RLHFRequest(
+                user_id: appSession.currentUserId ?? "ios_user",
+                rating: rating,
+                conversation_id: convIdString
+            )
             do {
                 _ = try await AarkaaiAPI.shared.submitRLHF(token: appSession.currentUserToken ?? "", request: req)
             } catch let apiErr as APIError {

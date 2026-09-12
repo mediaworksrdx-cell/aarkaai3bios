@@ -37,7 +37,7 @@ struct PromptResponse: Codable {
 struct RLHFRequest: Codable {
     let user_id: String
     let rating: Int
-    var conversation_id: Int? = nil
+    var conversation_id: String? = nil
     var correction: String? = nil
 }
 

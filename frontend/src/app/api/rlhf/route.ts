@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.AARKAAI_BACKEND_URL || 'http://127.0.0.1:5000';
+const BACKEND_URL = process.env.AARKAAI_BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://127.0.0.1:5000';
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
       user_id: body.user_id || 'web_user',
       rating: body.rating ?? 1,
       conversation_id: body.conversation_id ? String(body.conversation_id) : null,
-      correction: body.correction || '',
+      correction: body.correction ? String(body.correction).trim() : null,
     };
 
     const res = await fetch(`${BACKEND_URL}/rlhf`, {

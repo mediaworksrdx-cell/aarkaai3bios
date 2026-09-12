@@ -1378,26 +1378,46 @@ def submit_rlhf_feedback(
     current_user=fastapi.Depends(modules.auth.get_current_user),
 ):
     """Submit RLHF feedback. Requires JWT auth. user_id is derived from token, not body."""
+    import config
     from modules import memory
     from database import SessionLocal, ConversationHistory
 
-    db_conv_id = None
+    resolved_conv_id = None
+    session_id = None
     if req.conversation_id is not None:
-        try:
-            db_conv_id = int(req.conversation_id)
-        except ValueError:
+        raw_conv_id = str(req.conversation_id).strip()
+        session_id = raw_conv_id
+
+        # 1. If numeric string, store integer ID
+        if raw_conv_id.isdigit():
+            resolved_conv_id = int(raw_conv_id)
+
+        # 2. Check MongoDB if enabled
+        if config.MONGODB_URI:
+            try:
+                from modules.mongo_repository import ConversationRepo
+                mongo_conv = ConversationRepo.get_latest_by_session(session_id=raw_conv_id, user_id=current_user.id)
+                if not mongo_conv:
+                    mongo_conv = ConversationRepo.get_latest_by_session(session_id=raw_conv_id)
+                if mongo_conv and "_id" in mongo_conv:
+                    resolved_conv_id = str(mongo_conv["_id"])
+            except Exception as e:
+                logger.error("Failed to lookup conversation by session_id in MongoDB: %s", e)
+
+        # 3. Check SQLite if not found in Mongo or in SQLite mode
+        if resolved_conv_id is None or isinstance(resolved_conv_id, int):
             session = SessionLocal()
             try:
                 latest_conv = (
                     session.query(ConversationHistory)
-                    .filter(ConversationHistory.session_id == req.conversation_id)
+                    .filter(ConversationHistory.session_id == raw_conv_id)
                     .order_by(ConversationHistory.timestamp.desc())
                     .first()
                 )
                 if latest_conv:
-                    db_conv_id = latest_conv.id
+                    resolved_conv_id = latest_conv.id
             except Exception as e:
-                logger.error("Failed to lookup conversation by session_id: %s", e)
+                logger.error("Failed to lookup conversation by session_id in SQLite: %s", e)
             finally:
                 session.close()
 
@@ -1406,8 +1426,9 @@ def submit_rlhf_feedback(
         memory.store_rlhf_feedback(
             user_id=current_user.id,
             rating=req.rating,
-            conversation_id=db_conv_id,
+            conversation_id=resolved_conv_id if resolved_conv_id is not None else req.conversation_id,
             correction=req.correction,
+            session_id=session_id,
         )
         return {"status": "success", "message": "Feedback recorded"}
     except Exception as exc:
@@ -1577,6 +1598,68 @@ def admin_get_stats(current_user=fastapi.Depends(modules.auth.require_admin)):
         }
     finally:
         session.close()
+
+
+# ─── Screener API Endpoints ──────────────────────────────────────────────────
+
+try:
+    from modules.screener.agent import ScreenerAgent as _ScreenerAgentClass
+    from modules.screener.schemas import ScreenerAPIRequest
+
+    _screener_api_agent = _ScreenerAgentClass()
+    _screener_endpoints_available = True
+except Exception as _scrn_err:
+    _screener_api_agent = None
+    _screener_endpoints_available = False
+    logger.warning("Screener API endpoints unavailable: %s", _scrn_err)
+
+
+@app.post("/screener", tags=["screener"])
+async def screener_endpoint(body: dict):
+    """Full institutional-grade multi-factor stock screening."""
+    if not _screener_endpoints_available or not _screener_api_agent:
+        raise HTTPException(status_code=503, detail="Screener agent not available")
+    try:
+        request_obj = ScreenerAPIRequest(**body).to_screen_request()
+        response = _screener_api_agent.screen(request_obj)
+        return response.model_dump()
+    except Exception as exc:
+        logger.error("Screener endpoint error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/screener/strategies", tags=["screener"])
+async def list_strategies():
+    """List all 20 pre-built screening strategies with metadata."""
+    if not _screener_endpoints_available or not _screener_api_agent:
+        raise HTTPException(status_code=503, detail="Screener agent not available")
+    return _screener_api_agent.strategies.list_strategies_info()
+
+
+@app.get("/screener/regime", tags=["screener"])
+async def get_market_regime():
+    """Get current market regime classification."""
+    return {
+        "regime": "range_bound",
+        "note": "Dynamic regime detection will be available in Phase 2.",
+    }
+
+
+@app.get("/screener/sectors", tags=["screener"])
+async def get_sector_rankings():
+    """Get all available sectors and their stock counts."""
+    if not _screener_endpoints_available or not _screener_api_agent:
+        raise HTTPException(status_code=503, detail="Screener agent not available")
+    sectors = _screener_api_agent.universe.get_all_sectors()
+    result = []
+    for sector in sectors:
+        universe = _screener_api_agent.universe.get_universe(sector=sector)
+        result.append({
+            "sector": sector,
+            "display_name": sector.replace("_", " ").title(),
+            "stock_count": len(universe),
+        })
+    return result
 
 
 # ─── CLI entry point ─────────────────────────────────────────────────────────

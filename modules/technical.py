@@ -310,16 +310,13 @@ def _sma(series: pd.Series, period: int) -> pd.Series:
     return series.rolling(window=period).mean()
 
 def _adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
-    """Average Directional Index — trend strength indicator."""
+    """Average Directional Index — trend strength indicator strictly bounded [0, 100]."""
     plus_dm = high.diff()
-    minus_dm = low.diff()
-    plus_dm[plus_dm < 0] = 0
-    minus_dm[minus_dm > 0] = 0
-    minus_dm = minus_dm.abs()
+    minus_dm = -low.diff()
     
-    # Directional Movement
-    plus_dm = plus_dm.where(plus_dm > minus_dm, 0.0)
-    minus_dm = minus_dm.where(minus_dm > plus_dm, 0.0)
+    # Directional Movement filtering
+    plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
+    minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
     
     # True Range
     tr = pd.concat([
@@ -328,8 +325,8 @@ def _adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) ->
         (low - close.shift(1)).abs()
     ], axis=1).max(axis=1)
     
-    # Wilder's smoothing
-    def wilder_smooth(s, n):
+    # Wilder's smoothing for running smoothed sum of DM and TR
+    def wilder_sum(s: pd.Series, n: int) -> pd.Series:
         res = pd.Series(index=s.index, dtype=float)
         if len(s) < n:
             return res
@@ -338,13 +335,24 @@ def _adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) ->
             res.iloc[i] = res.iloc[i-1] - (res.iloc[i-1]/n) + s.iloc[i]
         return res
         
-    atr = wilder_smooth(tr, period)
-    plus_di = 100 * (wilder_smooth(plus_dm, period) / atr)
-    minus_di = 100 * (wilder_smooth(minus_dm, period) / atr)
+    atr_smooth = wilder_sum(tr, period)
+    plus_di = 100 * (wilder_sum(plus_dm, period) / atr_smooth.replace(0, np.nan)).fillna(0.0)
+    minus_di = 100 * (wilder_sum(minus_dm, period) / atr_smooth.replace(0, np.nan)).fillna(0.0)
     
-    dx = (plus_di - minus_di).abs() / (plus_di + minus_di) * 100
-    adx = wilder_smooth(dx, period)
-    return adx
+    di_sum = plus_di + minus_di
+    dx = ((plus_di - minus_di).abs() / di_sum.replace(0, np.nan) * 100).fillna(0.0)
+    
+    # ADX is the running average of DX (Wilder's moving average of DX)
+    adx = pd.Series(index=dx.index, dtype=float)
+    if len(dx) >= 2 * period - 1:
+        start_idx = 2 * period - 2
+        adx.iloc[start_idx] = dx.iloc[period-1 : start_idx + 1].mean()
+        for i in range(start_idx + 1, len(dx)):
+            adx.iloc[i] = (adx.iloc[i-1] * (period - 1) + dx.iloc[i]) / period
+    else:
+        adx = dx.ewm(alpha=1.0/period, adjust=False).mean()
+        
+    return adx.clip(0.0, 100.0)
 
 def _supertrend(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 10, multiplier: float = 3.0) -> tuple[pd.Series, pd.Series]:
     """Supertrend indicator. Returns (supertrend_line, direction).

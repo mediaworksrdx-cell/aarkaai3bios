@@ -46,7 +46,7 @@ data class HealthResponse(
 data class RlhfRequest(
     val user_id: String,
     val rating: Int,              // 1 = positive, -1 = negative
-    val conversation_id: Int? = null,
+    val conversation_id: String? = null,
     val correction: String? = null
 )
 
