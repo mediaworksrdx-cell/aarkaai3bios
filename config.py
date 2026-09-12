@@ -212,7 +212,7 @@ ALLOWED_UPLOAD_EXTENSIONS = {
 # Feature flag: when False, the existing pipeline.py waterfall is used unchanged.
 # When True, queries are routed through the new HybridQueryRouter with parallel
 # data source execution.  Default is False for safe, gradual rollout.
-HQR_ENABLED = os.getenv("AARKAAI_HQR_ENABLED", "false").lower() == "true"
+HQR_ENABLED = os.getenv("AARKAAI_HQR_ENABLED", "true").lower() == "true"
 HQR_MAX_WORKERS = int(os.getenv("AARKAAI_HQR_MAX_WORKERS", "6"))
 HQR_MARKET_TIMEOUT = float(os.getenv("AARKAAI_HQR_MARKET_TIMEOUT", "5.0"))
 HQR_WEB_TIMEOUT = float(os.getenv("AARKAAI_HQR_WEB_TIMEOUT", "8.0"))

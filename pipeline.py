@@ -2091,7 +2091,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     # ── 1c. Cognitive Subagent Orchestrator (Stream) ──────────────────────
     # For deep reasoning mode, delegate to the subagent orchestrator
     # to yield agent status updates and stream the final verified response.
-    if not is_greeting and not is_reasoning and mode == "deep_reasoning":
+    if not is_greeting and not is_reasoning and mode != "benchmark":
         try:
             from modules.subagents.orchestrator import get_orchestrator
             orch = get_orchestrator()

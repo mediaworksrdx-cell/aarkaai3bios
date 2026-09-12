@@ -185,6 +185,50 @@ def check_and_learn(user_id: str) -> bool:
     finally:
         session.close()
 
+    # 3. Implicit Learning Path — confidence-based (no RLHF required)
+    # Triggers for high-confidence responses that likely contain useful knowledge
+    try:
+        from modules import memory, rag
+        recent_chats = memory.get_chat_context(user_id, limit=AUTO_LEARN_INTERVAL)
+        if not recent_chats:
+            return False
+
+        high_conf_convs = []
+        for msg in recent_chats:
+            role = msg.get("role", "")
+            content = msg.get("message") or msg.get("content", "")
+            conf = msg.get("confidence", 0.0)
+            if role == "assistant" and conf >= 0.85 and len(content) > 200:
+                high_conf_convs.append({
+                    "id": msg.get("_id", "implicit"),
+                    "query": msg.get("query", ""),
+                    "response": content,
+                    "intent": msg.get("intent", "general"),
+                    "confidence": conf,
+                    "source": "implicit_learn",
+                })
+
+        if high_conf_convs and len(high_conf_convs) >= 3:
+            logger.info(
+                "Implicit auto-learn triggered for user %s on %d high-confidence responses",
+                user_id, len(high_conf_convs)
+            )
+            knowledge_items = extract_knowledge(high_conf_convs)
+            for item in knowledge_items:
+                rag.store_knowledge(
+                    topic=item["topic"],
+                    content=item["content"],
+                    source="implicit_learned",
+                    user_id=user_id,
+                )
+            if knowledge_items:
+                logger.info("Implicit auto-learn completed: %d facts stored", len(knowledge_items))
+                return True
+    except Exception as implicit_exc:
+        logger.debug("Implicit auto-learn path skipped: %s", implicit_exc)
+
+    return False
+
 
 def extract_knowledge(conversations: list[dict]) -> list[dict]:
     """
