@@ -71,32 +71,18 @@ def _get_genai_client():
     )
 
 
-_COMPLIANCE_RESPONSE = """### 1. Authoritative Data Lineage & Provenance Adoption
+# ─── Dynamic Provenance Compliance ──────────────────────────────────────────
+try:
+    from modules.screener.provenance import _GOVERNANCE_SPEC
+    _COMPLIANCE_RESPONSE = _GOVERNANCE_SPEC
+except ImportError:
+    _COMPLIANCE_RESPONSE = (
+        "### Aarka AI — Data Governance\n\n"
+        "Aarka enforces field-level provenance for every displayed metric. "
+        "Each value carries source, retrieval timestamp, classification, and quality status. "
+        "Full provenance audit available via `/screener/provenance` endpoint."
+    )
 
-Aarka AI fully adopts and enforces the Authoritative Data Lineage and Provenance Standard across all equity screenings, financial analyses, and quantitative models:
-
-$$\\text{Data Point } \\mathcal{D} := \\langle \\text{Value } v, \\text{Source } \\mathcal{S}, \\text{Timestamp } \\mathcal{T}, \\text{Vintage } \\mathcal{V}, \\text{Type } \\tau \\rangle$$
-
----
-
-### 2. Master Field-Level Provenance & Lineage Audit Table
-
-| Field Metric Category | Authoritative Source Provider & Feed Identifier | Measurement Timestamp | Data Vintage & Reporting Period | Classification Type | Verification & Extraction Methodology |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Last Traded Price (LTP)** | NSE Equities Real-Time Feed (TwelveData / Yahoo Finance API) | `2026-09-12 20:30:40 IST` | Live Session Last Tick / Exchange Close | **Reported** | Synchronous REST/WebSocket stream poll (`.NS` tickers) |
-| **Day Trading Volume** | NSE Trading Engine Order Execution Stream | `2026-09-12 20:30:40 IST` | Current Session Cumulative Turnover | **Reported** | Real-time exchange volume accumulation |
-| **Market Capitalization** | NSE Corporate Filings / Vendor Fundamental Feed | `2026-09-12 20:30:40 IST` | Q3 FY25 Regulatory Filings Base | **Calculated** | Total Equity Shares Outstanding × Current LTP |
-| **Trailing 12M EPS** | Audited Regulatory Disclosures (NSE/BSE Corporate Filings) | `2026-09-12 20:30:40 IST` | Trailing 12-Month Audited Filings (Q3 FY25) | **Reported** | Audited Net Profit After Tax ÷ Diluted Weighted Shares |
-| **Trailing P/E Ratio** | In-Memory Deterministic Valuation Engine | `2026-09-12 20:30:40 IST` | Q3 FY25 TTM Filings + Live Market Price | **Calculated** | Formula: $\\text{P/E} = \\frac{\\text{LTP}}{\\text{TTM Diluted EPS}}$ |
-| **Price-to-Book (P/B)** | In-Memory Balance Sheet Valuation Engine | `2026-09-12 20:30:40 IST` | Q3 FY25 Audited Balance Sheet | **Calculated** | Formula: $\\text{P/B} = \\frac{\\text{LTP}}{\\text{Book Value per Share}}$ |
-| **RSI (14-Period)** | Aarka Technical Indicator Engine | `2026-09-12 20:30:40 IST` | 252-Day Daily OHLCV Time-Series | **Calculated** | Standard Wilder 14-Period Smoothed RSI Formula |
-| **Exponential Moving Averages** | Aarka Technical Indicator Engine | `2026-09-12 20:30:40 IST` | 252-Day Daily Close Series | **Calculated** | Formula: $\\text{EMA}_t = P_t \\times \\alpha + \\text{EMA}_{t-1} \\times (1 - \\alpha)$ |
-| **12-Factor Composite Score** | Aarka Multi-Factor Decision Engine | `2026-09-12 20:30:40 IST` | Dynamic Macro Regime Weight Allocation | **Calculated** | Linear Combination: $\\sum_{i=1}^{10} w_i^* S_i$ under active market regime |
-| **Delivery Flow Anomaly Proxy** | Aarka Volume Anomaly Engine | `2026-09-12 20:30:40 IST` | 30-Day Rolling SMA Volume Baseline | **Heuristic Proxy** | Daily volume turnover anomaly vs 30d baseline (Non-Depository) |
-| **SMC Market Structure Proxy** | Aarka Smart Money Concepts Engine | `2026-09-12 20:30:40 IST` | Daily Swing High/Low Structure | **Heuristic Proxy** | Algorithmic BOS & CHOCH Pattern Recognition |
-| **30-Day Volatility Envelope** | Aarka Volatility Scenario Engine | `2026-09-12 20:30:40 IST` | 90-Day Historical Volatility Bounds | **Non-Predictive Channel** | Statistical $1\\sigma$ Volatility Envelope ($P_0 \\pm 1.96 \\times \\text{ATR}_{14} \\times \\sqrt{21/14}$) |
-| **F&O Derivatives Sentiment** | NSE Derivatives Option Chain (PCR / Max Pain) | `2026-09-12 20:30:40 IST` | Current Month Expiry Contract | **Data Gap** | Unconfirmed in real-time streaming feed; 5.0% weight redistributed |
-"""
 
 def _sanitize_history_and_query(query: str, history: list | None):
     """

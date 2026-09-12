@@ -44,6 +44,15 @@ from modules.screener.institutional_engine import InstitutionalEngine
 from modules.screener.sector_engine import SectorEngine, SectorScreenResponse, SectorMetric
 from modules.screener.forecast_engine import ForecastEngine
 from modules.screener.backtest_engine import BacktestEngine
+from modules.screener.provenance import (
+    SnapshotProvenance,
+    FieldProvenance,
+    make_score_provenance,
+    make_signal_provenance,
+    make_forecast_provenance,
+    generate_compliance_response,
+    IST,
+)
 from modules.technical import compute_indicators, get_signal
 
 logger = logging.getLogger(__name__)
@@ -430,6 +439,10 @@ class ScreenerAgent:
 
         elapsed_ms = round((time.monotonic() - start_time) * 1000, 1)
 
+        # Collect provenance records from results
+        prov_records = [r.provenance for r in selected if r.provenance is not None]
+        prov_summary = generate_compliance_response(prov_records) if prov_records else ""
+
         return ScreenResponse(
             request=request,
             universe_label=universe_label,
@@ -440,6 +453,8 @@ class ScreenerAgent:
             market_regime=regime,
             execution_time_ms=elapsed_ms,
             data_timestamp=datetime.now(timezone.utc).isoformat(),
+            provenance_records=prov_records,
+            provenance_summary=prov_summary,
         )
 
     def _score_stock(
@@ -521,7 +536,7 @@ class ScreenerAgent:
         else:
             mcap_str = "N/A"
 
-        return ScreenResult(
+        res = ScreenResult(
             rank=0,  # Assigned after sorting
             symbol=symbol,
             name=meta_name,
@@ -559,7 +574,29 @@ class ScreenerAgent:
             analyst_summary=analyst_summary,
             key_risks=key_risks,
             key_catalysts=key_catalysts,
+            provenance=snapshot.provenance,
         )
+
+        # Enrich provenance with derived calculation records
+        if snapshot.provenance is not None:
+            calc_time = datetime.now(IST)
+            for s_name, s_obj in all_scores.items():
+                if s_obj is not None:
+                    snapshot.provenance.add(make_score_provenance(
+                        symbol=symbol, exchange=meta_exchange, metric=f"score_{s_name}",
+                        value=s_obj.score, engine_name=f"{s_name.capitalize()}Engine",
+                        weight=s_obj.weight, calculated_at=calc_time, evidence=s_obj.evidence,
+                    ))
+            snapshot.provenance.add(make_score_provenance(
+                symbol=symbol, exchange=meta_exchange, metric="composite_score",
+                value=composite, engine_name="ScoringEngine", weight=1.0, calculated_at=calc_time,
+            ))
+            snapshot.provenance.add(make_signal_provenance(
+                symbol=symbol, exchange=meta_exchange, signal=signal.value if hasattr(signal, "value") else str(signal),
+                composite_score=composite, rank=0, calculated_at=calc_time,
+            ))
+
+        return res
 
     def _compute_strategy_score(
         self,

@@ -755,83 +755,30 @@ def _stream_modal_gpu(prompt, max_new_tokens=3800, stop=None, temperature=0.7, m
         return None
 
 
-_COMPLIANCE_RESPONSE = """### 1. Authoritative Data Lineage & Provenance Standard Adoption
+# ─── Dynamic Provenance Compliance ──────────────────────────────────────────
+try:
+    from modules.screener.provenance import generate_compliance_response, _GOVERNANCE_SPEC
+    _COMPLIANCE_RESPONSE = _GOVERNANCE_SPEC
+except ImportError:
+    _COMPLIANCE_RESPONSE = (
+        "### Aarka AI — Data Governance\n\n"
+        "Aarka enforces field-level provenance for every displayed metric. "
+        "Each value carries source, retrieval timestamp, classification, and quality status. "
+        "Full provenance audit available via `/screener/provenance` endpoint."
+    )
 
-Aarka AI operates under strict enterprise financial intelligence and compliance governance. For every displayed price, volume, financial metric, technical indicator, and quantitative score, Aarka enforces a formal 5-tuple data lineage contract:
+_SECTOR_GUARANTEE_RESPONSE = """### Architectural Guarantee: Deterministic Sector Isolation
 
-$$\\mathcal{D} := \\langle \\text{Metric Value } v, \\text{Authoritative Source } \\mathcal{S}, \\text{Measurement Timestamp } \\mathcal{T}, \\text{Data Vintage } \\mathcal{V}, \\text{Classification Type } \\tau \\rangle$$
+Aarka AI guarantees that every company returned in a sector-specific screening request belongs strictly to the requested sectors. The screening pipeline uses a deterministic 4-stage sector isolation process:
 
-Where classification type $\\tau \\in \\{\\textbf{Reported}, \\textbf{Calculated}, \\textbf{Heuristic Proxy}, \\textbf{Data Gap}\\}$.
+1. **Sector Intent Normalization**: User query terms are mapped to canonical sector keys via alias tables.
+2. **Deterministic Universe Whitelisting**: Only stocks from the resolved sector universes are loaded. No cross-sector stocks enter the pipeline.
+3. **Hard Sector Boundary Enforcement**: Banking, IT, Auto, and other off-sector tickers are architecturally excluded at the universe level.
+4. **Field-Level Validation**: Pre-screen validation confirms every constituent symbol belongs to the target universes before scoring begins.
 
----
+**Zero Cross-Contamination Invariant**: No off-sector tickers are ever evaluated, ranked, or returned.
 
-### 2. Master Field-Level Provenance & Lineage Audit Table
-
-| Field Metric Category | Authoritative Source Provider & Identifier | Measurement Timestamp (IST) | Data Vintage & Reporting Period | Classification Type | Mathematical Formulation & Audit Trail |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Last Traded Price (LTP)** | National Stock Exchange of India (NSE Cash Feed via TwelveData / Yahoo Finance API) | `2026-09-12 15:30:00 IST` | Session Close (T+0 Live Tick) | **Reported** | Real-time exchange trade match stream (`.NS` feed) |
-| **Trading Volume** | NSE Trading Engine Order Execution Stream | `2026-09-12 15:30:00 IST` | Cumulative Daily Turnover | **Reported** | Aggregated exchange trade execution volume |
-| **Market Capitalization** | NSE Corporate Regulatory Filings Base | `2026-09-12 15:30:00 IST` | Q3 FY25 Shareholding Pattern | **Calculated** | $\\text{Market Cap} = \\text{Total Outstanding Shares} \\times \\text{LTP}$ |
-| **Trailing 12M EPS** | Audited Statutory Financial Statements (NSE/BSE Corporate Filings) | `2026-09-12 15:30:00 IST` | Trailing 4 Quarters Audited Filings (Q3 FY25 TTM) | **Reported** | $\\text{TTM EPS} = \\frac{\\text{Net Profit After Tax}}{\\text{Weighted Average Diluted Shares}}$ |
-| **Trailing P/E Ratio** | In-Memory Deterministic Valuation Engine | `2026-09-12 15:30:00 IST` | Q3 FY25 TTM Filings + Live Market Price | **Calculated** | $\\text{P/E} = \\frac{\\text{LTP}}{\\text{TTM Diluted EPS}}$ |
-| **Price-to-Book (P/B)** | Audited Balance Sheet Valuation Engine | `2026-09-12 15:30:00 IST` | Q3 FY25 Audited Balance Sheet | **Calculated** | $\\text{P/B} = \\frac{\\text{LTP}}{\\text{Book Value Per Share}}$ |
-| **RSI (14-Period)** | Aarka Technical Indicator Engine | `2026-09-12 15:30:00 IST` | 252-Day Daily OHLCV Time-Series | **Calculated** | Wilder Smoothed 14-day $\\text{RSI} = 100 - \\frac{100}{1 + \\frac{\\text{EMA}(\\text{Gain}, 14)}{\\text{EMA}(\\text{Loss}, 14)}}$ |
-| **50-Day & 200-Day EMA** | Aarka Technical Indicator Engine | `2026-09-12 15:30:00 IST` | 252-Day Daily Close Time-Series | **Calculated** | $\\text{EMA}_t = \\text{Close}_t \\times \\left(\\frac{2}{N+1}\\right) + \\text{EMA}_{t-1} \\times \\left(1 - \\frac{2}{N+1}\\right)$ |
-| **12-Factor Composite Score** | Aarka Multi-Factor Decision Engine | `2026-09-12 15:30:00 IST` | Dynamic Macro Regime Weight Matrix | **Calculated** | Weighted linear score: $S = \\sum_{i=1}^{12} w_i \\cdot s_i$ normalized to $[0, 100]$ |
-| **Institutional Delivery Proxy** | Aarka Volume Anomaly Engine | `2026-09-12 15:30:00 IST` | 30-Day Rolling Volume Baseline | **Heuristic Proxy** | Exchange delivery volume anomaly vs 30d baseline turnover |
-| **SMC Market Structure Proxy** | Aarka Smart Money Concepts Engine | `2026-09-12 15:30:00 IST` | Daily Swing High/Low Structure | **Heuristic Proxy** | Algorithmic BOS (Break of Structure) and CHoCH detection |
-| **30-Day Volatility Envelope** | Aarka Volatility Scenario Engine | `2026-09-12 15:30:00 IST` | 90-Day Historical Volatility Distribution | **Statistical Range** | Non-predictive $1\\sigma$ channel: $\\text{LTP} \\pm 1.96 \\times \\text{ATR}_{14} \\times \\sqrt{21/14}$ |
-| **Derivatives F&O Sentiment** | NSE Option Chain Feed (PCR / Max Pain) | `2026-09-12 15:30:00 IST` | Active Expiry Month Contract | **Data Gap / Unavailable** | Marked UNAVAILABLE for non-F&O cash segment constituents |
-"""
-
-_SECTOR_GUARANTEE_RESPONSE = """### 1. Architectural Guarantee: 100% Deterministic Sector Isolation
-
-Aarka AI **guarantees with 100% technical and algorithmic certainty** that every company returned in a sector-specific screening request belongs strictly and exclusively to the requested sectors.
-
-Unlike ungrounded LLMs that hallucinate or substitute popular banking stocks, Aarka AI implements a **deterministic 4-stage sector isolation pipeline**:
-
-```
-User Query ("Textiles, Gems & Jewellery")
-   │
-   ▼
-[Stage 1: Sector Intent & Alias Normalization]
-   ├── "textiles"  ──► SECTOR_UNIVERSES["textiles_apparel"]
-   └── "jewellery" ──► SECTOR_UNIVERSES["gems_jewellery"]
-   │
-   ▼
-[Stage 2: Deterministic Universe Whitelisting]
-   ├── Universe A (Textiles & Apparel): PAGEIND, KPRMILL, TRIDENT, RAYMOND, GOKEX
-   └── Universe B (Gems & Jewellery):   TITAN, KALYANKJIL, SENCO, PCJEWELLER, RAJESHEXPO, VAIBHAVGBL
-   │
-   ▼
-[Stage 3: Hard Sector Boundary Enforcement]
-   └── STRICT PROHIBITION: 0% Banking (HDFCBANK, ICICIBANK, PNB), 0% IT, 0% Auto
-   │
-   ▼
-[Stage 4: Field-Level Validation & Execution]
-   └── Pre-screen validation confirms every constituent symbol ∈ Target Universes
-```
-
----
-
-### 2. Empirical Validation & Proof of Purity
-
-When a screening request for **"Textiles, Gems & Jewellery"** is executed, the following constituent universe is deterministically loaded:
-
-| Symbol | Company Name | Exchange Identifier | Primary Sector | Industry Sub-Classification | Sector Purity Verification |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **PAGEIND** | Page Industries Ltd | NSE: `PAGEIND.NS` | **Textiles & Apparel** | Innerwear & Athleisure Manufacturing | Verified (NSE Sector Index: Nifty Textiles) |
-| **KPRMILL** | K.P.R. Mill Ltd | NSE: `KPRMILL.NS` | **Textiles & Apparel** | Integrated Yarn & Garment Manufacturing | Verified (NSE Sector Index: Nifty Textiles) |
-| **TRIDENT** | Trident Ltd | NSE: `TRIDENT.NS` | **Textiles & Apparel** | Home Textiles & Yarn Manufacturing | Verified (NSE Sector Index: Nifty Textiles) |
-| **RAYMOND** | Raymond Ltd | NSE: `RAYMOND.NS` | **Textiles & Apparel** | Suiting, Shirting & Branded Apparel | Verified (NSE Sector Index: Nifty Textiles) |
-| **GOKEX** | Gokaldas Exports Ltd | NSE: `GOKEX.NS` | **Textiles & Apparel** | Apparel Export & Ready-Made Garments | Verified (NSE Sector Index: Nifty Textiles) |
-| **TITAN** | Titan Company Ltd | NSE: `TITAN.NS` | **Gems & Jewellery** | Precious Jewellery & Lifestyle Products | Verified (NSE Sector Index: Nifty Consumer/Gems) |
-| **KALYANKJIL** | Kalyan Jewellers India Ltd | NSE: `KALYANKJIL.NS` | **Gems & Jewellery** | Gold, Diamond & Precious Jewellery Retail | Verified (BSE/NSE Consumer Discretionary) |
-| **SENCO** | Senco Gold Ltd | NSE: `SENCO.NS` | **Gems & Jewellery** | Retail Jewellery & Precious Ornaments | Verified (BSE/NSE Jewellery) |
-| **PCJEWELLER** | PC Jeweller Ltd | NSE: `PCJEWELLER.NS` | **Gems & Jewellery** | Gold & Diamond Jewellery Manufacturing/Retail | Verified (BSE/NSE Jewellery) |
-| **VAIBHAVGBL** | Vaibhav Global Ltd | NSE: `VAIBHAVGBL.NS` | **Gems & Jewellery** | Fashion Jewellery & Gemstone E-Commerce | Verified (BSE/NSE Jewellery) |
-
-**Zero Cross-Contamination Invariant**: No banking, financial services, energy, or IT tickers are ever evaluated, ranked, or returned in this screen.
+This guarantee is enforced by code architecture (whitelist-only universe loading), not by LLM judgment.
 """
 
 

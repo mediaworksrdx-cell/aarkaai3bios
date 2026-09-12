@@ -5,11 +5,12 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import yfinance as yf
 
 from modules.screener.schemas import DataQuality
+from modules.screener.provenance import (SnapshotProvenance, make_price_provenance, make_fundamental_provenance, make_indicator_provenance, make_unavailable_provenance, IST)
 from modules.technical import compute_indicators, get_signal, compute_extended_indicators, detect_candlestick_patterns
 from modules.finance import _fetch_twelve_data, _fetch_ticker_data, get_options_chain, get_open_interest_summary
 
@@ -49,6 +50,7 @@ class StockSnapshot:
     fetched_at: datetime | None = None
     exchange: str = "NSE"
     currency: str = "INR"
+    provenance: SnapshotProvenance | None = None
 
 class DataFetcher:
     def __init__(self, max_workers: int = 12, cache_ttl: int = 60):
@@ -103,6 +105,13 @@ class DataFetcher:
                 fetched_at=datetime.now()
             )
 
+            now_ist = datetime.now(IST)
+            provenance = SnapshotProvenance(symbol=symbol, exchange_qualified=f"{exchange}:{symbol.replace('.NS','').replace('.BO','')}", snapshot_retrieved_at=now_ist)
+            provenance.add(make_price_provenance(
+                symbol=symbol, exchange=exchange, value=price, currency=currency,
+                source='yfinance', retrieved_at=now_ist,
+            ))
+
             missing_fundamentals = False
             missing_technicals = False
 
@@ -126,6 +135,26 @@ class DataFetcher:
                     snapshot.beta = info.get('beta')
                     snapshot.high_52w = info.get('fiftyTwoWeekHigh')
                     snapshot.low_52w = info.get('fiftyTwoWeekLow')
+                    mrq = info.get('mostRecentQuarter')
+                    lfye = info.get('lastFiscalYearEnd')
+                    fund_retrieved = datetime.now(IST)
+                    for metric_name, field_name, unit in [
+                        ('trailing_eps', 'trailingEps', 'INR'),
+                        ('pe_ratio', 'trailingPE', 'ratio'),
+                        ('pb_ratio', 'priceToBook', 'ratio'),
+                        ('ps_ratio', 'priceToSalesTrailing12Months', 'ratio'),
+                        ('ev_ebitda', 'enterpriseToEbitda', 'ratio'),
+                        ('roe', 'returnOnEquity', 'ratio'),
+                        ('roa', 'returnOnAssets', 'ratio'),
+                        ('debt_equity', 'debtToEquity', 'ratio'),
+                        ('market_cap', 'marketCap', currency),
+                    ]:
+                        val = info.get(field_name)
+                        provenance.add(make_fundamental_provenance(
+                            symbol=symbol, exchange=exchange, metric=metric_name,
+                            value=val, unit=unit, retrieved_at=fund_retrieved,
+                            most_recent_quarter=mrq, last_fiscal_year_end=lfye,
+                        ))
                 else:
                     missing_fundamentals = True
             except Exception as e:
@@ -139,6 +168,17 @@ class DataFetcher:
                     snapshot.indicators = indicators
                     if "patterns" in indicators and indicators["patterns"]:
                         snapshot.candlestick_patterns = indicators["patterns"]
+                    ind_time = datetime.now(IST)
+                    for ind_key, formula_ver in [
+                        ('rsi', 'wilder_rsi_v1'), ('ema_50', 'ema_standard_v1'),
+                        ('ema_200', 'ema_standard_v1'), ('macd', 'macd_12_26_9_v1'),
+                    ]:
+                        ind_val = indicators.get(ind_key)
+                        provenance.add(make_indicator_provenance(
+                            symbol=symbol, exchange=exchange, metric=ind_key,
+                            value=ind_val if isinstance(ind_val, (int, float)) else None,
+                            formula_version=formula_ver, calculated_at=ind_time,
+                        ))
                 else:
                     missing_technicals = True
             except Exception as e:
@@ -176,6 +216,19 @@ class DataFetcher:
                 snapshot.data_quality = DataQuality.PARTIAL
             else:
                 snapshot.data_quality = DataQuality.FULL
+
+            if missing_fundamentals:
+                provenance.add(make_unavailable_provenance(
+                    symbol=symbol, exchange=exchange, metric='fundamentals',
+                    retrieved_at=datetime.now(IST), reason='yfinance Ticker.info returned empty or errored',
+                ))
+            if missing_technicals:
+                provenance.add(make_unavailable_provenance(
+                    symbol=symbol, exchange=exchange, metric='technicals',
+                    retrieved_at=datetime.now(IST), reason='compute_extended_indicators returned empty or errored',
+                ))
+
+            snapshot.provenance = provenance
 
             with self._cache_lock:
                 self._cache[symbol] = (snapshot, time.time())

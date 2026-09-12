@@ -14,6 +14,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from modules.screener.provenance import FieldProvenance, SnapshotProvenance
+
 logger = logging.getLogger(__name__)
 
 
@@ -179,6 +181,9 @@ class ScreenResult(BaseModel):
     key_risks: list[str] = Field(default_factory=list)
     key_catalysts: list[str] = Field(default_factory=list)
 
+    # ─── Provenance ───────────────────────────────
+    provenance: SnapshotProvenance | None = None
+
 
 # ─── Request / Response ──────────────────────────────────────────────────────
 
@@ -211,6 +216,8 @@ class ScreenResponse(BaseModel):
     market_regime: MarketRegime = MarketRegime.RANGE_BOUND
     execution_time_ms: float = 0.0
     data_timestamp: str = ""
+    provenance_records: list[SnapshotProvenance] = Field(default_factory=list)
+    provenance_summary: str = ""
     disclaimer: str = (
         "This screening output is for educational and informational purposes only. "
         "It is not SEBI-registered investment advice. Past performance does not guarantee "
