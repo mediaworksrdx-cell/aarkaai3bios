@@ -693,8 +693,9 @@ def _get_temperature(query: str, intent: str, context: str = "") -> float:
     if any(w in q_low for w in creative_words):
         return 0.9
 
-    # 5. General Chat (temp: 0.7 in range 0.6 - 0.7)
-    return 0.7
+    # 5. General / Knowledge queries (temp: 0.45 — lowered from 0.7 to reduce
+    #    hallucination rate on factual queries with the 7B model)
+    return 0.45
 
 
 def _generate(prompt, max_new_tokens=150, stop=None, temperature=0.7, force_general=False):
@@ -1467,32 +1468,101 @@ def primary_check(query, lang="en"):
 
 
 def self_check_response(query: str, response: str, intent: str) -> bool:
-    """Audit the generated response against user intent using the local model."""
+    """Audit the generated response against user intent using Gemini (primary) or local model (fallback).
+
+    Extended to cover all major intents, not just rhetorical ones.
+    Trivial intents (greeting, identity, chit_chat) are auto-passed.
+    """
+    # Auto-pass trivial intents
+    if intent in ("greeting", "identity", "chit_chat", ""):
+        return True
+
+    # Auto-pass very short responses (likely direct data returns)
+    if len(response.strip()) < 50:
+        return True
+
+    # Build intent-specific audit criteria
+    criteria = ""
+    if intent == "persuasion":
+        criteria = "Did the response focus on persuasion/argument, or did it write a how-to guide instead?"
+    elif intent == "debate":
+        criteria = "Did the response debate the position, or did it write instructions instead?"
+    elif intent == "comparison":
+        criteria = "Did the response compare the concepts, or did it write a how-to guide instead?"
+    elif intent in ("finance_general", "price_check", "finance_screener", "finance_news", "market_data"):
+        criteria = (
+            "Did the response provide accurate financial data/analysis relevant to the query? "
+            "Check: (1) Are any stock tickers or company names mentioned that were NOT asked about? "
+            "(2) Does the response contradict itself (e.g., saying a stock is both bullish and bearish)? "
+            "(3) Are financial figures plausible (no obviously wrong market caps, prices, or ratios)?"
+        )
+    elif intent in ("coding_help", "tech_info"):
+        criteria = (
+            "Did the response provide correct, relevant code or technical explanation? "
+            "Check: (1) Does the code have obvious syntax errors? "
+            "(2) Is the explanation logically consistent? "
+            "(3) Does it actually address what the user asked?"
+        )
+    elif intent in ("science_query", "health_query", "history_query"):
+        criteria = (
+            "Did the response provide factually accurate information? "
+            "Check: (1) Are there obvious factual errors (wrong dates, wrong scientific facts)? "
+            "(2) Does the response actually answer the question asked? "
+            "(3) Is the response internally consistent?"
+        )
+    else:
+        criteria = (
+            "Did the response accurately address the user's query? "
+            "Check: (1) Is it relevant to what was asked? "
+            "(2) Is it internally consistent? "
+            "(3) Does it contain obvious factual errors?"
+        )
+
+    audit_query = (
+        f"User Request: {query[:500]}\n"
+        f"Generated Response (first 800 chars): {response[:800]}\n\n"
+        f"Auditing Criteria: {criteria}\n"
+        "Does the response pass all checks (PASS) or fail any (FAIL)?"
+    )
+
+    # Strategy 1: Try Gemini verification (different model = better verification)
+    try:
+        from modules.external_agents import _get_genai_client
+        from google.genai import types
+
+        client = _get_genai_client()
+        audit_system = (
+            "You are a strict response quality auditor. "
+            "Determine if a generated AI response correctly addresses the user's query. "
+            "Respond with exactly 'PASS' or 'FAIL'. No other words."
+        )
+        gen_config = types.GenerateContentConfig(
+            system_instruction=audit_system,
+            temperature=0.0,
+            max_output_tokens=5,
+        )
+        result = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=audit_query,
+            config=gen_config,
+        )
+        decision = result.text.strip().upper() if result.text else "PASS"
+        logger.info("Self-Check (Gemini) decision: %s for intent: %s", decision, intent)
+        return "FAIL" not in decision
+    except Exception as gemini_exc:
+        logger.debug("Gemini self-check unavailable (%s), falling back to local model", gemini_exc)
+
+    # Strategy 2: Fall back to local 7B model verification
     model_instance = _get_model(force_gpu=True)
     if _is_stub or model_instance is None:
         return True
 
-    if intent not in ["persuasion", "debate", "comparison"]:
-        return True
-
-    criteria = ""
-    if intent == "persuasion":
-        criteria = "The user requested persuasion (convince them). Did the response focus on persuasion/argument, or did it write a how-to guide/instructions/steps?"
-    elif intent == "debate":
-        criteria = "The user requested a debate argument. Did the response debate the position, or did it write a how-to guide/instructions/steps?"
-    elif intent == "comparison":
-        criteria = "The user requested a comparison. Did the response compare the concepts, or did it write a how-to guide/instructions/steps?"
-
     audit_prompt = (
         "<|im_start|>system\n"
         "You are Aarkaa AI, a strict response quality auditor. "
-        "Your task is to determine if a generated response matches the user's intent or mistakenly outputs a how-to/instructional guide instead.\n"
-        "Respond with exactly 'PASS' or 'FAIL'. Do NOT write any other words or explanations.<|im_end|>\n"
-        f"<|im_start|>user\n"
-        f"User Request: {query}\n"
-        f"Generated Response: {response}\n\n"
-        f"Auditing Criteria: {criteria}\n"
-        "Does the response match the intent (PASS) or is it a how-to/step guide (FAIL)?<|im_end|>\n"
+        "Determine if a generated response matches the user's intent and is factually consistent. "
+        "Respond with exactly 'PASS' or 'FAIL'. Do NOT write any other words.<|im_end|>\n"
+        f"<|im_start|>user\n{audit_query}<|im_end|>\n"
         "<|im_start|>assistant\n"
     )
 
@@ -1504,7 +1574,7 @@ def self_check_response(query: str, response: str, intent: str) -> bool:
             stop=["<|im_end|>", "<|im_start|>"]
         )
         decision = output["choices"][0]["text"].strip().upper()
-        logger.info("Self-Check Auditor decision: %s for intent: %s", decision, intent)
+        logger.info("Self-Check (local) decision: %s for intent: %s", decision, intent)
         return "FAIL" not in decision
     except Exception as exc:
         logger.warning("Self-check failed to evaluate: %s", exc)
@@ -2199,6 +2269,14 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "- Strictly prohibit conversational closings, sign-offs, offers for follow-up, or polite remarks.\n"
                     "- Strictly prohibit social media hashtags, marketing tags, or promotional keyword lists.\n"
                     "- Strictly prohibit disclaimers, data source attributions, or meta-closure markers.\n\n"
+                    "Reasoning Strategy (CRITICAL):\n"
+                    "- For ANY question that requires analysis, comparison, evaluation, or multi-step logic:\n"
+                    "  1. FIRST, silently identify the key factors/dimensions relevant to the question.\n"
+                    "  2. THEN, reason through each factor step by step.\n"
+                    "  3. FINALLY, synthesize your reasoning into a clear, structured answer.\n"
+                    "- For factual questions, state the fact directly without unnecessary elaboration.\n"
+                    "- For complex questions involving trade-offs, weigh pros and cons explicitly before concluding.\n"
+                    "- Never skip reasoning steps or jump to conclusions on multi-part questions.\n\n"
                     "Primary Objective:\n"
                     "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
                 )

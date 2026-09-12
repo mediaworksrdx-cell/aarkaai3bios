@@ -341,16 +341,15 @@ def classify(query: str) -> dict:
             logger.warning("TF scoring failed: %s", exc)
 
     # 4. Fuse scores (weighted combination)
+    # NOTE: TF classifier excluded — it was never trained on labeled data
+    # and produces random outputs that degrade classification accuracy.
+    # Fusion uses only prototype embeddings + keyword heuristics.
     for domain in DOMAIN_LABELS:
         kw = kw_scores.get(domain, 0.0)
         proto = proto_scores.get(domain, 0.0)
-        tf = tf_scores.get(domain, 0.0)
 
-        # Weight: prototype > TF > keyword (prototype is most reliable pre-training)
-        if proto_scores and tf_scores:
-            scores[domain] = 0.45 * proto + 0.35 * tf + 0.20 * kw
-        elif proto_scores:
-            scores[domain] = 0.65 * proto + 0.35 * kw
+        if proto_scores:
+            scores[domain] = 0.70 * proto + 0.30 * kw
         else:
             scores[domain] = kw
 
