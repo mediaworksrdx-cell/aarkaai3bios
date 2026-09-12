@@ -37,13 +37,21 @@ export function Sidebar({
 
   const [searchQuery, setSearchQuery] = useState('');
 
-  const filteredConversations = useMemo(() => {
+  const visibleConversations = useMemo(() => {
     if (!Array.isArray(conversations)) return [];
-    if (!searchQuery.trim()) return conversations.filter(c => c && typeof c === 'object');
-    return conversations
-      .filter(c => c && typeof c === 'object')
+    return conversations.filter(c => 
+      c && typeof c === 'object' && (
+        c.id === activeConversationId || 
+        (Array.isArray(c.messages) && c.messages.length > 0)
+      )
+    );
+  }, [conversations, activeConversationId]);
+
+  const filteredConversations = useMemo(() => {
+    if (!searchQuery.trim()) return visibleConversations;
+    return visibleConversations
       .filter(c => (c.title || '').toLowerCase().includes(searchQuery.toLowerCase()));
-  }, [conversations, searchQuery]);
+  }, [visibleConversations, searchQuery]);
 
   const grouped = useMemo(() => {
     const today = new Date();
@@ -75,6 +83,9 @@ export function Sidebar({
 
   const handleNewChat = () => {
     createConversation(selectedModel, reasoningEffort);
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      onToggle();
+    }
   };
 
   return (
@@ -141,7 +152,7 @@ export function Sidebar({
 
       {/* Conversation List */}
       <div className="flex-1 overflow-y-auto px-2 py-1 space-y-4">
-        {conversations.length === 0 ? (
+        {visibleConversations.length === 0 ? (
           <div className="text-center py-8 px-4 text-xs text-[var(--text-tertiary)]">
             No conversations yet. Start a new chat above.
           </div>
@@ -163,7 +174,12 @@ export function Sidebar({
                       key={conv.id}
                       conversation={conv}
                       isActive={conv.id === activeConversationId}
-                      onSelect={() => setActiveConversationId(conv.id)}
+                      onSelect={() => {
+                        setActiveConversationId(conv.id);
+                        if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                          onToggle();
+                        }
+                      }}
                       onDelete={() => deleteConversation(conv.id)}
                       onRename={(title) => renameConversation(conv.id, title)}
                     />
