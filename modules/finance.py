@@ -149,6 +149,20 @@ _INDIA_TICKERS: dict[str, str] = {
     "ashok leyland": "ASHOKLEY.NS", "coforge": "COFORGE.NS", "mphasis": "MPHASIS.NS",
     "tata comm": "TATACOMM.NS", "tata communications": "TATACOMM.NS", "voltas": "VOLTAS.NS",
     "astral": "ASTRAL.NS", "oberoi realty": "OBEROIRLTY.NS", "phoenix mills": "PHOENIXLTD.NS",
+    # Gems & Jewellery
+    "titan": "TITAN.NS", "titan company": "TITAN.NS",
+    "kalyan": "KALYANKJIL.NS", "kalyan jewellers": "KALYANKJIL.NS", "kalyan jewelers": "KALYANKJIL.NS",
+    "senco": "SENCO.NS", "senco gold": "SENCO.NS",
+    "vaibhav global": "VAIBHAVGBL.NS", "vaibhav": "VAIBHAVGBL.NS",
+    "thangamayil": "THANGAMAYL.NS", "thangamayil jewellery": "THANGAMAYL.NS",
+    "pc jeweller": "PCJEWELLER.NS", "pcj": "PCJEWELLER.NS",
+    # Textiles & Apparel
+    "trident": "TRIDENT.NS", "trident limited": "TRIDENT.NS",
+    "kpr mill": "KPRMILL.NS", "kprmill": "KPRMILL.NS",
+    "welspun": "WELSPUNLIV.NS", "welspun living": "WELSPUNLIV.NS",
+    "raymond": "RAYMOND.NS",
+    "gokaldas": "GOKEX.NS", "gokaldas exports": "GOKEX.NS",
+    "page industries": "PAGEIND.NS", "page": "PAGEIND.NS",
 }
 
 _INDEX_TICKERS: dict[str, str] = {
@@ -774,6 +788,14 @@ _NSE_SMALLCAP_UNIVERSE: dict[str, dict] = {
     "PPLPHARMA.NS": {"name": "Piramal Pharma Ltd", "sector": "CDMO & Healthcare Solutions", "symbol": "PPLPHARMA", "catalyst": "High-margin sterile injectables & antibody-drug conjugate (ADC) contracts"},
     "APARINDS.NS": {"name": "Apar Industries Ltd", "sector": "Conductors, Cables & Specialty Oils", "symbol": "APARINDS", "catalyst": "Global grid transformation, US export surge in premium conductors"},
     "CAMS.NS": {"name": "Computer Age Management Services Ltd", "sector": "Mutual Fund Services / Financial Tech", "symbol": "CAMS", "catalyst": "70%+ domestic mutual fund RTA market share and non-MF business diversification"},
+    # Gems & Jewellery
+    "VAIBHAVGBL.NS": {"name": "Vaibhav Global Ltd", "sector": "Gems, Jewellery & Lifestyle E-commerce", "symbol": "VAIBHAVGBL", "catalyst": "Omnichannel TV home shopping & digital live shopping network across US, UK, and Germany"},
+    "THANGAMAYL.NS": {"name": "Thangamayil Jewellery Ltd", "sector": "Gems & Jewellery Retail", "symbol": "THANGAMAYL", "catalyst": "High density retail branch expansion in Tier-2/3 South Indian cities"},
+    "PCJEWELLER.NS": {"name": "PC Jeweller Ltd", "sector": "Gems & Jewellery Manufacturing", "symbol": "PCJEWELLER", "catalyst": "Debt restructuring settlement with banking consortium and operational re-ramp"},
+    # Textiles & Apparel
+    "TRIDENT.NS": {"name": "Trident Ltd", "sector": "Textiles & Home Furnishings", "symbol": "TRIDENT", "catalyst": "Global home textiles recovery, yarn debottlenecking, and captive solar energy integration"},
+    "WELSPUNLIV.NS": {"name": "Welspun Living Ltd", "sector": "Textiles & Advanced Materials", "symbol": "WELSPUNLIV", "catalyst": "Big-box US retail shelf-space expansion, hospitality sector demand, and flooring exports"},
+    "GOKEX.NS": {"name": "Gokaldas Exports Ltd", "sector": "Textiles & Apparel Exports", "symbol": "GOKEX", "catalyst": "Free Trade Agreement (FTA) tailwinds, global apparel brand sourcing diversification"},
 }
 
 _NSE_MIDCAP_UNIVERSE: dict[str, dict] = {
@@ -792,6 +814,13 @@ _NSE_MIDCAP_UNIVERSE: dict[str, dict] = {
     "ASTRAL.NS": {"name": "Astral Ltd", "sector": "Building Materials & Piping Systems", "symbol": "ASTRAL", "catalyst": "Real estate plumbing demand and expansion into bathware and adhesives"},
     "OBEROIRLTY.NS": {"name": "Oberoi Realty Ltd", "sector": "Premium Real Estate", "symbol": "OBEROIRLTY", "catalyst": "High luxury residential pre-sales in Mumbai"},
     "PHOENIXLTD.NS": {"name": "The Phoenix Mills Ltd", "sector": "Retail Destination & Commercial Real Estate", "symbol": "PHOENIXLTD", "catalyst": "Rising retail mall consumption and new mall operationalization"},
+    # Gems & Jewellery
+    "KALYANKJIL.NS": {"name": "Kalyan Jewellers India Ltd", "sector": "Gems & Jewellery Retail", "symbol": "KALYANKJIL", "catalyst": "Rapid franchise-model showroom expansion across India & Middle East, plus online Candere momentum"},
+    "SENCO.NS": {"name": "Senco Gold Ltd", "sector": "Gems & Jewellery Retail", "symbol": "SENCO", "catalyst": "Strong eastern India market dominance, lightweight diamond jewellery growth, and digital gold initiatives"},
+    # Textiles & Apparel
+    "KPRMILL.NS": {"name": "K.P.R. Mill Ltd", "sector": "Textiles & Apparel Manufacturing", "symbol": "KPRMILL", "catalyst": "Vertically integrated yarn-to-garment manufacturing, ethanol capacity additions, and global retail export contracts"},
+    "RAYMOND.NS": {"name": "Raymond Ltd", "sector": "Textiles, Suiting & Lifestyle", "symbol": "RAYMOND", "catalyst": "Corporate restructuring unlocking value in lifestyle and real estate divisions"},
+    "PAGEIND.NS": {"name": "Page Industries Ltd", "sector": "Textiles & Innerwear Apparel (Jockey)", "symbol": "PAGEIND", "catalyst": "Premium athleisure brand dominance and expanding women's innerwear distribution footprint"},
 }
 
 _NSE_LARGECAP_UNIVERSE: dict[str, dict] = {
@@ -808,6 +837,7 @@ _NSE_LARGECAP_UNIVERSE: dict[str, dict] = {
     "BAJFINANCE.NS": {"name": "Bajaj Finance Ltd", "sector": "Non-Banking Financial Company (NBFC)", "symbol": "BAJFINANCE"},
     "MARUTI.NS": {"name": "Maruti Suzuki India Ltd", "sector": "Passenger Automobile Manufacturing", "symbol": "MARUTI"},
     "ADANIENT.NS": {"name": "Adani Enterprises Ltd", "sector": "Infrastructure & Commodities", "symbol": "ADANIENT"},
+    "TITAN.NS": {"name": "Titan Company Ltd (Tata Group)", "sector": "Gems & Jewellery (Tanishq, CaratLane, Mia)", "symbol": "TITAN", "catalyst": "Market leader in branded jewellery with 128+ retail store expansion and high margin wedding collections"},
 }
 
 _US_STOCK_UNIVERSE = {
@@ -925,6 +955,7 @@ def is_stock_screener_query(query: str) -> bool:
         r"\blargecap[s]?\b",
         r"\bpenny\s*stock[s]?\b",
         r"\b(bullish|bearish|momentum|breakout|multibagger|growth|dividend|value)\s*stocks?\b",
+        r"\bstocks?\s*(?:names?)?\s*(?:which|that)?\s*(?:are\s+)?(bullish|bearish|momentum|breakout|multibagger|growth|dividend|value)\b",
         r"\bstocks?\s+to\s+(buy|watch|invest|trade|hold|accumulate)\b",
         r"\bstocks?\s+(in|of|from)\s+(nse|bse|india|indian\s+market|us|usa|united\s+states|nyse|nasdaq|america)\b",
         r"\b(us|american|nyse|nasdaq)\s+stocks?\b",
@@ -937,13 +968,29 @@ def is_stock_screener_query(query: str) -> bool:
         r"\bshares?\s+in\s+(nse|bse|us|nyse|nasdaq)\b",
         r"\bnifty\s*(smallcap|midcap|50|100|next\s*50|500)\b",
         r"\b(s&p|sp500|nasdaq\s*100|dow\s*jones)\s*stocks?\b",
+        # Sector-specific stock queries
+        r"\b(jewell?er[y]?|gems?|ornaments?|gold)\s*(?:and\s*jewell?er[y]?)?\s*stocks?\b",
+        r"\b(textiles?|fabrics?|garments?|apparel)\s*stocks?\b",
+        r"\b(defence|defense|railway[s]?|renewable[s]?|solar|wind|infrastructure|infra|power|pharma|banking|bank|it|software|auto|automobile|chemical[s]?)\s*stocks?\b",
+        r"\b(stocks?|shares?)\s+(?:in|of|from|related\s+to|for)\s+(?:the\s+)?(jewell?er[y]?|gems?|textiles?|defence|defense|railway[s]?|solar|renewable|pharma|it|banking|auto|infra)\b",
+        r"\b(asked\s+for|looking\s+for|show\s+me|find\s+me|suggest|give\s+me|list)\s+.*stocks?\b",
+        r"\b.*jewell?er[y]?\s+stocks?\b",
+        r"\b(gems?\s*(?:and|&)\s*jewell?er[y]?)\b",
+        # Sector ranking, rotation, and performance discovery
+        r"\b(top|best|bullish|bearish|leading|lagging|strongest|weakest)\s+.*sectors?\b",
+        r"\bsectors?\s+(in|of|on|across)\s+(nse|bse|india|indian\s+market|us|nyse|nasdaq)\b",
+        r"\b(which|what)\s+.*sectors?\b",
+        r"\bsectors?\s+.*(performing|bullish|bearish|outperforming|gainers?|losers?|leaders?)\b",
+        r"\bsector\s*(screener|ranking|performance|rotation|analysis|leaders?)\b",
+        r"\bsectoral\s*(performance|indices|trends?|breakdown)\b",
+        r"\btop\s*\d*\s*(bullish|bearish|performing)\s*sectors?\b",
     ]
     return any(re.search(pat, q_low) for pat in patterns)
 
 
 def screen_stocks(query: str, top_k: int = 5) -> dict:
     """
-    Screen real stocks from verified universes (US Equities, NSE Small-Cap, Mid-Cap, Large-Cap)
+    Screen real stocks from verified universes (US Equities, NSE Small-Cap, Mid-Cap, Large-Cap, Sectors)
     using live Twelve Data / yfinance market prices, real trailing EPS, P/E ratios, market caps,
     and technical momentum indicators.
     """
@@ -954,6 +1001,8 @@ def screen_stocks(query: str, top_k: int = 5) -> dict:
     q_low = query.lower()
 
     # 1. Identify Target Market & Universe
+    is_jewellery = any(w in q_low for w in ["jewel", "jewell", "gem", "gems", "ornament", "gold stock", "gold jewellery"])
+    is_textile = any(w in q_low for w in ["textil", "fabric", "garment", "apparel", "cotton", "yarn"])
     is_us = any(k in q_low for k in ["us", "usa", "america", "american", "nyse", "nasdaq", "sp500", "s&p", "wall street", "united states"])
     is_low_eps = any(k in q_low for k in ["low eps", "negative eps", "low earnings per share", "declining eps", "lowest eps"])
     is_high_eps = any(k in q_low for k in ["high eps", "strong eps", "highest eps", "strong earnings"])
@@ -961,7 +1010,46 @@ def screen_stocks(query: str, top_k: int = 5) -> dict:
     is_dividend = any(k in q_low for k in ["dividend", "high yield", "dividend yield"])
     is_bullish_requested = any(w in q_low for w in ["bullish", "uptrend", "breakout", "momentum", "buy", "growth", "high return", "multibagger"])
 
-    if is_us:
+    if is_jewellery and is_textile:
+        target_category = "gems_jewellery_textiles"
+        category_label = "Indian Textiles, Gems & Jewellery Sectors"
+        universe = {
+            "TITAN.NS": _NSE_LARGECAP_UNIVERSE["TITAN.NS"],
+            "KALYANKJIL.NS": _NSE_MIDCAP_UNIVERSE["KALYANKJIL.NS"],
+            "SENCO.NS": _NSE_MIDCAP_UNIVERSE["SENCO.NS"],
+            "VAIBHAVGBL.NS": _NSE_SMALLCAP_UNIVERSE["VAIBHAVGBL.NS"],
+            "THANGAMAYL.NS": _NSE_SMALLCAP_UNIVERSE["THANGAMAYL.NS"],
+            "PCJEWELLER.NS": _NSE_SMALLCAP_UNIVERSE["PCJEWELLER.NS"],
+            "PAGEIND.NS": _NSE_MIDCAP_UNIVERSE["PAGEIND.NS"],
+            "KPRMILL.NS": _NSE_MIDCAP_UNIVERSE["KPRMILL.NS"],
+            "RAYMOND.NS": _NSE_MIDCAP_UNIVERSE["RAYMOND.NS"],
+            "TRIDENT.NS": _NSE_SMALLCAP_UNIVERSE["TRIDENT.NS"],
+            "WELSPUNLIV.NS": _NSE_SMALLCAP_UNIVERSE["WELSPUNLIV.NS"],
+            "GOKEX.NS": _NSE_SMALLCAP_UNIVERSE["GOKEX.NS"],
+        }
+    elif is_jewellery:
+        target_category = "gems_jewellery"
+        category_label = "Indian Gems & Jewellery Sector"
+        universe = {
+            "TITAN.NS": _NSE_LARGECAP_UNIVERSE["TITAN.NS"],
+            "KALYANKJIL.NS": _NSE_MIDCAP_UNIVERSE["KALYANKJIL.NS"],
+            "SENCO.NS": _NSE_MIDCAP_UNIVERSE["SENCO.NS"],
+            "VAIBHAVGBL.NS": _NSE_SMALLCAP_UNIVERSE["VAIBHAVGBL.NS"],
+            "THANGAMAYL.NS": _NSE_SMALLCAP_UNIVERSE["THANGAMAYL.NS"],
+            "PCJEWELLER.NS": _NSE_SMALLCAP_UNIVERSE["PCJEWELLER.NS"],
+        }
+    elif is_textile:
+        target_category = "textiles"
+        category_label = "Indian Textiles & Apparel Sector"
+        universe = {
+            "PAGEIND.NS": _NSE_MIDCAP_UNIVERSE["PAGEIND.NS"],
+            "KPRMILL.NS": _NSE_MIDCAP_UNIVERSE["KPRMILL.NS"],
+            "RAYMOND.NS": _NSE_MIDCAP_UNIVERSE["RAYMOND.NS"],
+            "TRIDENT.NS": _NSE_SMALLCAP_UNIVERSE["TRIDENT.NS"],
+            "WELSPUNLIV.NS": _NSE_SMALLCAP_UNIVERSE["WELSPUNLIV.NS"],
+            "GOKEX.NS": _NSE_SMALLCAP_UNIVERSE["GOKEX.NS"],
+        }
+    elif is_us:
         target_category = "us_equity"
         category_label = "US Equities (NYSE & NASDAQ)"
         universe = _US_STOCK_UNIVERSE
