@@ -1662,7 +1662,21 @@ async def get_sector_rankings():
     return result
 
 
-# ─── CLI entry point ─────────────────────────────────────────────────────────
+@app.get("/screener/provenance", tags=["screener"])
+async def get_screener_provenance():
+    """Returns the formal data governance and provenance specification,
+    or real-time provenance audit trail for enterprise compliance."""
+    try:
+        from modules.screener.provenance import _GOVERNANCE_SPEC
+        return {
+            "status": "active",
+            "framework": "Aarka Field-Level Provenance & Lineage Engine",
+            "contract": "SEBI LODR Reg 33 / Companies Act 2013 / Multi-Tier Source Taxonomy",
+            "governance_specification": _GOVERNANCE_SPEC,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
 
 if __name__ == "__main__":
     import uvicorn
