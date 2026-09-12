@@ -142,6 +142,13 @@ class ScreenResult(BaseModel):
     currency: str
     change_pct: float
     market_cap_str: str = "N/A"
+    eps: float | None = None
+    pe: float | None = None
+    pb: float | None = None
+    rsi: float | None = None
+    ema_50: float | None = None
+    ema_200: float | None = None
+    volume: float | None = None
 
     # ─── 12-Score Profile ─────────────────────────
     strategy_score: ScoreBreakdown
