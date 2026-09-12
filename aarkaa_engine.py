@@ -482,9 +482,11 @@ def _find_repetition_pos(text: str) -> int | None:
     Returns the character position where a repetition loop begins, or None if no loop.
     Checks:
     1. Duplicate numbered bold headers (e.g. **1. Revenue Growth...**)
-    2. Duplicate markdown hash headers (e.g. ### 1. ...)
-    3. 10-word phrase duplication across the generation
-    4. Multi-scale consecutive windows (up to 800 words)
+    2. Duplicate numbered plain headers (e.g. 1. Titan: appearing again)
+    3. Duplicate markdown hash headers (e.g. ### 1. ...)
+    4. Multi-scale consecutive windows (repeating the same 8+ words immediately)
+    5. Non-consecutive large phrase repetition (25+ words, detects whole paragraph restarts
+       without false-positives on structured lists/screeners with repeated metric terms)
     """
     if not text or len(text) < 50:
         return None
@@ -501,6 +503,16 @@ def _find_repetition_pos(text: str) -> int | None:
                 return m.start()
             seen[k] = m.start()
 
+    # Duplicate numbered plain headers (e.g. 1. Titan: appearing again)
+    plain_header_matches = list(re.finditer(r'(?i)(?:^|[\n\r]|\b)(\d+\.\s+[A-Za-z][A-Za-z0-9\s]{1,40}:)', text))
+    if len(plain_header_matches) >= 2:
+        seen_p = {}
+        for m in plain_header_matches:
+            k = m.group(1).lower().strip()
+            if k in seen_p:
+                return m.start()
+            seen_p[k] = m.start()
+
     # Duplicate markdown hash headers
     hash_matches = list(re.finditer(r'(?i)(?:^|\n)\s*#{1,4}\s*(\d+\.?\s+[^\n]{3,80})', text))
     if len(hash_matches) >= 2:
@@ -511,20 +523,23 @@ def _find_repetition_pos(text: str) -> int | None:
                 return m.start()
             seen_h[k] = m.start()
 
-    # 2. 10-word phrase repetition (detects cyclical paragraph loops)
+    # Word-based checks
     words_matches = list(re.finditer(r'\b\w+\b', text))
     if len(words_matches) >= 24:
         words = [m.group(0).lower() for m in words_matches]
         n = len(words)
-        tail_10 = tuple(words[-10:])
-        for i in range(n - 20):
-            if tuple(words[i:i+10]) == tail_10:
-                return words_matches[n - 10].start()
 
-        # 3. Multi-scale consecutive repetition windows (from 8 to 800 words)
+        # 2. Multi-scale consecutive repetition windows (repeating same sentence or block immediately)
         for w in range(8, min(800, n // 2 + 1)):
             if words[-w:] == words[-2*w:-w]:
                 return words_matches[n - w].start()
+
+        # 3. Non-consecutive large phrase repetition (25+ words, detects whole paragraph cyclical restarts)
+        if n >= 50:
+            tail_25 = tuple(words[-25:])
+            for i in range(n - 50):
+                if tuple(words[i:i+25]) == tail_25:
+                    return words_matches[n - 25].start()
 
     return None
 
@@ -532,6 +547,33 @@ def _find_repetition_pos(text: str) -> int | None:
 def _has_repetition(text: str) -> bool:
     """Returns True if text exhibits an autoregressive repetition loop."""
     return _find_repetition_pos(text) is not None
+
+
+def _clean_repetition_boundary(text: str, rep_pos: int) -> int:
+    """
+    Given a repetition start position, rolls back to the last complete sentence,
+    paragraph, or line boundary to avoid leaving trailing half-sentences or
+    dangling transitional clauses (e.g. 'It is important to note that the').
+    """
+    pre = text[:rep_pos].rstrip()
+    if not pre:
+        return 0
+
+    if re.search(r'[\.!\?]\s*$', pre):
+        return len(pre)
+
+    last_term = -1
+    for m in re.finditer(r'[\.!\?](?:\s+|\n)|(?:\n\s*\n)', pre):
+        last_term = m.end()
+
+    if last_term != -1 and last_term >= len(pre) * 0.4:
+        return last_term
+
+    last_nl = pre.rfind('\n')
+    if last_nl != -1 and last_nl >= len(pre) * 0.5:
+        return last_nl
+
+    return len(pre)
 
 
 def _build_chatml(system: str, user: str) -> str:
@@ -613,7 +655,7 @@ def _get_temperature(query: str, intent: str, context: str = "") -> float:
     if is_code:
         return 0.2
 
-    # 3. Finance (temp: 0.15 in range 0.1 - 0.2)
+    # 3. Finance (temp: 0.15 for exact figures, 0.45 for stock lists/ideas)
     is_finance = (
         intent.startswith("finance") 
         or intent in ["price_check", "comparison"] 
@@ -623,6 +665,13 @@ def _get_temperature(query: str, intent: str, context: str = "") -> float:
         or any(w in q_low for w in ["stock", "price", "market", "share", "crypto", "bitcoin", "dividend", "revenue", "ebitda", "fcf", "ticker"])
     )
     if is_finance:
+        is_listing_query = any(w in q_low for w in [
+            "recommend", "list", "names", "bullish", "bearish", "screener", "stocks to",
+            "ideas", "options", "gems", "jewellery", "textile", "which stocks", "what stocks",
+            "top stocks", "best stocks", "portfolio", "sector", "shares in"
+        ])
+        if is_listing_query:
+            return 0.45
         return 0.15
 
     # 4. Creative Writing (temp: 0.9 in range 0.8 - 1.0)
@@ -650,7 +699,7 @@ def _generate(prompt, max_new_tokens=150, stop=None, temperature=0.7, force_gene
     return _clean_response(text)
 
 
-def _stream_modal_gpu(prompt, max_new_tokens=150, stop=None, temperature=0.7, model_name="7b"):
+def _stream_modal_gpu(prompt, max_new_tokens=3800, stop=None, temperature=0.7, model_name="7b"):
     """Stream tokens directly from the serverless Modal GPU endpoint with automatic fallback."""
     import json
     import urllib.request
@@ -665,7 +714,6 @@ def _stream_modal_gpu(prompt, max_new_tokens=150, stop=None, temperature=0.7, mo
         "temperature": temperature,
         "top_p": 0.9,
         "repeat_penalty": 1.18,
-        "repeat_last_n": 1024,
         "stop": stop or [],
         "model": model_name,
         "stream": True
@@ -709,7 +757,7 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False):
     Employs a 50-char sliding lookahead window so multi-token closure sequences are intercepted
     and truncated BEFORE reaching the client.
     """
-    BUFFER_SIZE = 50
+    BUFFER_SIZE = 80
     buf = ""
     accumulated_text = ""
     stripped_header = False
@@ -764,8 +812,10 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False):
 
         rep_pos = _find_repetition_pos(accumulated_text)
         if rep_pos is not None:
-            logger.warning("Repetition loop detected at pos %d; truncating and terminating stream.", rep_pos)
-            offset = rep_pos - (len(accumulated_text) - len(buf))
+            clean_pos = _clean_repetition_boundary(accumulated_text, rep_pos)
+            logger.warning("Repetition loop detected at pos %d (rolled back to pos %d); truncating and terminating stream.", rep_pos, clean_pos)
+            already_yielded = len(accumulated_text) - len(buf)
+            offset = clean_pos - already_yielded
             if offset > 0:
                 valid_tail = buf[:offset].rstrip()
                 valid_tail = re.sub(r'[\s\U00010000-\U0010ffff\*\s`]+$', '', valid_tail)
@@ -824,14 +874,14 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False):
             yield clean_buf
 
 
-def _generate_stream(prompt, max_new_tokens=150, stop=None, temperature=0.7, force_general=False):
+def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, force_general=False):
     """Run generation via Modal GPU (primary) or local llama.cpp (fallback), yielding tokens with repetition guard."""
     stop_tokens = [
         "<|im_end|>", "<|im_start|>", "<|endoftext|>", "\n\n---",
         "<|im_start|>user", "<|im_start|>system", "<|im_start|>assistant",
         "\nuser\n", "\nUser:", "\nQuestion:", "\n1user", "\n1assistant",
         " 1user", " 1assistant", "\nUser\n", "\nHuman:", "\nAssistant:",
-        "\nBest regards", "\nBest Regards", "\nSincerely", "\n\n#", "\n#Aarkaa",
+        "\nBest regards", "\nBest Regards", "\nSincerely", "\n#Aarkaa",
         "Thank you for your question",
         "Please let me know if there is anything else",
         "Please let me know if you need",
@@ -1024,7 +1074,8 @@ def _clean_response(text):
     # Strip autoregressive repetition loops (e.g. repeated section headers or cyclical paragraphs)
     rep_pos = _find_repetition_pos(text)
     if rep_pos is not None:
-        text = text[:rep_pos].rstrip()
+        clean_pos = _clean_repetition_boundary(text, rep_pos)
+        text = text[:clean_pos].rstrip()
 
     # Strip synthetic end-of-answer/response markers (e.g. **End of answer**, (End of answer), End of answer., --- END OF ANSWER ---)
     end_marker_patterns = [
@@ -1130,6 +1181,9 @@ def _clean_response(text):
         return text[:best_pos + 1]
             
     return text + "."
+
+
+clean_response = _clean_response
 
 
 
@@ -1872,23 +1926,20 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 "your security", "are you safe", "how are you built",
                 "aarka ai capabilit", "aarkaa capabilit", "explain aarka",
                 "who are you", "what is aarka", "what is aarkaai",
-                "your name", "what is your name", "who is aarka"
+                "your name", "what is your name", "who is aarka", "aarka", "aarkaa", "aarkaai"
             ]
-            is_self_question = any(kw in query.lower() for kw in _self_keywords)
+            is_self_question = any(kw in query.lower() for kw in _self_keywords) or query.lower().strip() in ["aarka", "aarkaa", "aarkaai", "who are you", "who is aarka"]
             
-            # Simple identity check (e.g. "what is your name", "who are you")
-            is_simple_identity = any(kw in query.lower() for kw in ["your name", "who are you", "who is aarka", "what is your name", "what is aarka", "what is aarkaai"])
+            # Simple identity check (e.g. "what is your name", "who are you", "aarka")
+            is_simple_identity = any(kw in query.lower() for kw in ["your name", "who are you", "who is aarka", "what is your name", "what is aarka", "what is aarkaai", "aarka", "aarkaa", "aarkaai"])
 
             if is_self_question and is_simple_identity:
                 system_prompt = (
-                    "You are AARKAA (Autonomous Adaptive Reasoning Kernel for Augmented AI), "
-                    "a friendly and precise AI assistant built by Synthetix Analytics.\n"
-                    "State clearly: 'My name is Aarkaa. I am an AI assistant built by Synthetix Analytics.' "
-                    "Then offer to help the user."
+                    "You are Aarka, a professional agentic AI coding, design, research, and market intelligence assistant.\n"
+                    "State clearly: 'I am Aarka, a professional agentic AI coding, design, and research assistant.' "
+                    "Then concisely state how you can assist the user across software engineering, quantitative finance, systems architecture, and market intelligence. Respond strictly in English."
                 )
-                user_prompt = f"Respond to the user naturally: {query}\n\n"
-                if lang != "en":
-                    user_prompt += f"You MUST respond ONLY in the following language: {lang_name}."
+                user_prompt = f"Respond to the user naturally in English: {query}\n\n"
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
                 tokens = 250
             elif is_self_question:
@@ -1980,10 +2031,21 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
                 )
                 is_general = intent in ["general_query", "web_lookup", "news_search", "science_query", "tech_info", "finance_general", "health_query", "history_query", ""] or not intent
-                tokens = MAX_TOKENS
-                is_tutor_or_concise = any(w in query.lower() for w in ["tutor", "concise", "brief", "2 paragraph", "in two", "short", "quick", "explain in", "context: lesson", "lesson", "user question:"])
+                is_screener_query = (
+                    (intent in ["finance_screener", "finance_screening"])
+                    or ("[Verified Stock Screener Data" in context)
+                    or ("[Aarka AI Institutional Screener" in context)
+                    or any(w in query.lower() for w in [
+                        "screener", "top 10", "top 5", "bullish banking", "banking stocks",
+                        "stock screener", "screen stocks", "top stocks", "best stocks",
+                        "bullish stocks", "bearish stocks"
+                    ])
+                )
+                is_tutor_or_concise = (not is_screener_query) and any(w in query.lower() for w in ["tutor", "concise", "brief", "2 paragraph", "in two", "short", "quick", "explain in", "context: lesson", "lesson", "user question:"])
                 if is_tutor_or_concise:
                     tokens = min(tokens, 600)
+                elif is_screener_query:
+                    tokens = max(tokens, 3800)
                 is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
                 is_design_query = any(w in query.lower() for w in ["design a", "design an", "system design", "architecture", "explain:"]) or (
                     all(w in query.lower() for w in ["gpu", "schedul", "queu", "cost", "isolation"])
@@ -1992,7 +2054,6 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "rate hike", "repo rate", "interest rate hike", "tightening",
                     "monetary policy hike", "stagflation", "bond duration", "mclr", "eblr", "nim dynamics"
                 ])
-                is_screener_query = (intent == "finance_screener") or ("[Verified Stock Screener Data" in context)
                 if is_general:
                     if is_design_query:
                         system_prompt = (
@@ -2022,28 +2083,31 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                         system_prompt = (
                             "You are Aarkaa AI, a Principal Quantitative Financial Analyst and Equity Research Strategist built by Synthetix Analytics.\n"
                             "Your objective is to provide institutional-grade, rigorous stock screening and market analysis.\n\n"
-                            "STRICT MARKET CAPITALIZATION BOUNDARIES (SEBI & GLOBAL STANDARDS):\n"
-                            "1. SMALL-CAP DEFINITION: Companies ranked 251st or lower on NSE/BSE by full market cap (typically under Rs 25,000 Cr).\n"
-                            "   - VERIFIED EXAMPLES: Tejas Networks, CDSL, Angel One, Inox Wind, Zen Technologies, Titagarh Rail Systems, Kaynes Technology, Gravita India, RailTel, Sonata Software.\n"
-                            "   - ABSOLUTE PROHIBITION: You MUST NEVER classify Nifty 50 or Large-Cap companies (such as Adani Enterprises, HDFC Bank, Infosys, Reliance, TCS, Maruti Suzuki, ICICI Bank, State Bank of India, Larsen & Toubro) as small-cap or mid-cap stocks. Doing so is factually false and strictly forbidden.\n"
-                            "2. MID-CAP DEFINITION: Companies ranked 101st to 250th on NSE (market cap Rs 15,000 Cr to Rs 50,000 Cr).\n"
-                            "3. LARGE-CAP DEFINITION: Top 100 companies on NSE (market cap > Rs 50,000 Cr).\n\n"
-                            "CRITICAL GROUNDING DIRECTIVE:\n"
-                            "- Recommend ONLY the verified stocks provided in the [Verified Stock Screener Data] context below.\n"
-                            "- Quote the EXACT current market price, day change %, market cap (in Rs Cr), and technical indicators (50-day EMA, RSI, Consensus Signal) from the context.\n"
-                            "- Never invent ticker symbols (e.g., do NOT invent 'ADANIE' or 'HDBCL'; use official NSE tickers like TEJASNET, CDSL, ANGELONE, INOXWIND, ZENTEC, TITAGARH).\n"
-                            "- Present your answer in a clean, professional, structured format detailing for each stock: Company Name & NSE Ticker, Sector, Market Cap, Live Price, Technical Trend Setup, and Fundamental Growth Catalyst."
+                            "CRITICAL REPORTING ARCHITECTURE:\n"
+                            "1. Live Timestamp & Data Sources: Always display the screening timestamp, market session status, and data feeds (NSE, Yahoo Finance, TwelveData) at the top.\n"
+                            "2. Master Ranking Table: Present ALL ranked stocks (Rank 1 through the final rank) with columns: Rank, Company, Ticker, Live Price, 24h Change, Composite Score, Signal, Conviction, and Key Strengths.\n"
+                            "3. Complete 12-Score Dimension Matrix: Present a dedicated table displaying ALL 12 score dimensions for each stock (Strategy 15%, Fundamental 15%, Technical 12%, Momentum 12%, Valuation 10%, Risk 10%, Institutional 8%, F&O 5%, SMC 5%, Regime 4%, Forecast 4%, Backtest 4%).\n"
+                            "4. Confirmed Data vs Proxy Models: Clearly distinguish confirmed exchange metrics (CMP, Change %, Market Cap, P/E, P/B, EPS, EMAs, RSI, MACD) from algorithmic proxies (Institutional delivery proxy, SMC order flow proxy, Options Max Pain/PCR proxy, 30-day forecast scenario, backtest expectancy). Label unsupported F&O/SMC values as UNAVAILABLE.\n"
+                            "5. Comparative Valuation Drivers: Explain why the top-ranked stock scores higher than lower-ranked peers using the weighted score breakdown (valuation discount, margin of safety, and momentum acceleration vs premium multiples or stretched valuations).\n"
+                            "6. HOLD Signal Rationale: Explicitly explain that HOLD signals in a bullish screener represent lower-conviction bullish candidates (favorable macro regime and franchise strength, but consolidating momentum or stretched valuations).\n"
+                            "7. Stock-by-Stock Analysis: Provide a rigorous 2-3 sentence institutional analysis for every ranked stock without truncating or halting early.\n"
+                            "8. Regulatory Notice: Conclude with the standard SEBI disclosure: 'This quantitative analysis is generated by Aarka for informational and educational screening purposes only. Not SEBI-registered investment advice.'"
                         )
                     # Otherwise, retain the full comprehensive system_prompt defined above
                 user_prompt = f"Question: {query}\n\n"
                 if context:
                     has_finance = "[Finance Data]" in context
-                    has_screener = "[Verified Stock Screener Data" in context
+                    has_screener = ("[Verified Stock Screener Data" in context) or ("[Aarka AI Institutional Screener" in context)
                     if has_screener:
                         user_prompt += (
-                            "CRITICAL FINANCIAL SCREENER DIRECTIVE: You MUST answer the user's question using ONLY the verified stocks from the [Verified Stock Screener Data] below. "
-                            "Under NO circumstances should you mention Adani Enterprises, HDFC Bank, Infosys, Reliance, TCS, or Maruti Suzuki when answering small-cap queries. "
-                            "State the exact company names, NSE tickers, live prices, market caps in Rs Cr, and technical indicators provided in the context.\n\n"
+                            "CRITICAL FINANCIAL SCREENER DIRECTIVE:\n"
+                            "1. State the exact Screening Timestamp and Data Source labels from the context at the beginning.\n"
+                            "2. Present the Master Ranking Table for ALL ranked stocks.\n"
+                            "3. Present the Complete 12-Score Dimension Matrix Table for all stocks, clearly labeling Confirmed Data vs Proxies and marking unsupported metrics as 'UNAVAILABLE'.\n"
+                            "4. Include a dedicated section explaining why the top-ranked stock scores higher than lower-ranked peers based on the complete weighted scores (valuation discount vs premium multiples).\n"
+                            "5. Include a dedicated section explaining that HOLD signals represent lower-conviction bullish candidates.\n"
+                            "6. Provide individual analyses for all stocks from Rank 1 to the final rank without stopping early.\n"
+                            "7. End with the SEBI regulatory notice.\n\n"
                         )
                     elif has_finance:
                         user_prompt += (

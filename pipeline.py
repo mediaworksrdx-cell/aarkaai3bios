@@ -32,6 +32,17 @@ from modules.semantic_filter import _is_coding_syntax
 
 logger = logging.getLogger(__name__)
 
+# ─── Screener Agent Singleton ────────────────────────────────────────────────
+try:
+    from modules.screener.agent import ScreenerAgent as _ScreenerAgentClass
+    _screener_agent = _ScreenerAgentClass()
+    _SCREENER_AVAILABLE = True
+    logger.info("ScreenerAgent loaded successfully")
+except Exception as _screener_err:
+    _screener_agent = None
+    _SCREENER_AVAILABLE = False
+    logger.warning("ScreenerAgent unavailable: %s", _screener_err)
+
 
 # ─── Circuit Breaker ─────────────────────────────────────────────────────────
 
@@ -145,63 +156,15 @@ _LANGUAGE_KEYWORDS = {name.lower(): code for code, name in _LANG_NAMES.items()}
 
 
 
-def _detect_requested_language(query: str, current_detected: str) -> str:
-    q_low = query.lower()
-    
-    # Specific model/dataset alignments
-    if any(k in q_low for k in ["hindi alpaca", "hindi-alpaca", "samanantar"]):
-        return "hi"
-    if any(k in q_low for k in ["tamil alpaca", "tamil-alpaca"]):
-        return "ta"
-    if "aya" in q_low:
-        if "tamil" in q_low:
-            return "ta"
-        return "hi"
-
-    # If the user is questioning the language choice, do not override
-    if any(q_word in q_low for q_word in ["why", "how come", "reason", "explain why"]):
-        if any(act in q_low for act in ["responding", "answering", "speaking", "writing", "replying"]):
-            return current_detected
-
-    trigger_words = [
-        "speak in", "speak to me in", "answer in", "respond in", 
-        "write in", "reply in", "talk in", "explain in", 
-        "translate to", "translate in", "output in", "generate in",
-        "provide in"
-    ]
-    
-    is_triggered = any(w in q_low for w in trigger_words) or q_low.startswith("in ")
-    
-    if is_triggered:
-        for lang_keyword, lang_code in _LANGUAGE_KEYWORDS.items():
-            if lang_keyword in q_low:
-                return lang_code
-    return current_detected
+def _detect_requested_language(query: str, current_detected: str = "en") -> str:
+    """Always enforce English as the system language."""
+    return "en"
 
 
 
 def _detect_language(text: str) -> str:
-    """Detect the language of the input text. Returns ISO 639-1 code."""
-    try:
-        words = text.strip().lower().split()
-        if all(ord(c) < 128 for c in text):
-            if len(words) < 4 or len(text) < 20:
-                return "en"
-            # Prioritize English if common stop words, pronouns, or common query terms are present in ASCII text
-            common_english = {
-                "the", "and", "of", "to", "in", "is", "that", "it", "for", "on", "are", "as", "with", 
-                "have", "from", "at", "an", "this", "by", "what", "how", "who", "where", "why", "which",
-                "give", "me", "about", "create", "show", "tell", "write", "please", "information", 
-                "ai", "technology", "agent", "pdf", "docx", "xlsx", "pptx", "report", "file", "make"
-            }
-            cleaned_words = {re.sub(r"[^\w]", "", w) for w in words}
-            if cleaned_words & common_english:
-                return "en"
-        import langid
-        lang, _ = langid.classify(text)
-        return lang
-    except Exception:
-        return "en"
+    """Always enforce English as the system language."""
+    return "en"
 
 
 def _sanitize_query(query: str) -> str:
@@ -673,6 +636,10 @@ def _has_live_finance_intent(query: str, domain: str, intent: str) -> bool:
         "address", "phone number", "subsidiaries", "products", "services"
     ]
     if any(kw in q_low for kw in exclude_keywords):
+        return False
+
+    # Exclude language identification or translation queries
+    if re.search(r"\b(?:what(?:['’]s|\s+is)?|which|identify|detect|name)\s+(?:the\s+)?language\b|\bwhat\s*is\s*the\s*language\b|\bwhat\s*language\b|\btranslate\b", q_low):
         return False
 
     # Exclude queries referencing specific years (e.g. "in 2040", "in 2010") to avoid live price mismatches
@@ -1479,14 +1446,44 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # Domain-specific routing
     is_fin_intent = _has_live_finance_intent(query, domain, intent)
     is_screener = finance.is_stock_screener_query(query)
+    screener_direct_report = None
     if is_screener and mode != "benchmark":
         try:
-            screener_data = finance.screen_stocks(query, top_k=5)
-            if screener_data.get("summary"):
-                context_parts.append(screener_data["summary"])
-                sources.append("finance_screener")
+            # Tier 1: Check if ScreenerAgent handles this query (strategy-level or sector-level)
+            if _SCREENER_AVAILABLE and _screener_agent and _screener_agent.is_screener_query(query):
+                if _screener_agent.is_sector_query(query):
+                    sector_response = _screener_agent.screen_sectors(query)
+                    if sector_response.results:
+                        screener_direct_report = _screener_agent.generate_authoritative_sector_report(sector_response)
+                        context_parts.append(screener_direct_report)
+                        sources.append("finance_screener")
+                        logger.info("ScreenerAgent (sector) returned %d sectors in %.0fms",
+                                    len(sector_response.results), sector_response.execution_time_ms)
+                else:
+                    screen_request = _screener_agent.detect_intent(query)
+                    screen_response = _screener_agent.screen(screen_request)
+                    if screen_response.results or screen_request.sector:
+                        screener_direct_report = _screener_agent.generate_authoritative_report(screen_response)
+                        context_parts.append(screener_direct_report)
+                        sources.append("finance_screener")
+                        logger.info("ScreenerAgent returned %d results in %.0fms",
+                                    len(screen_response.results), screen_response.execution_time_ms)
+            else:
+                # Tier 2: Fallback to existing finance.screen_stocks() for simple queries
+                screener_data = finance.screen_stocks(query, top_k=5)
+                if screener_data.get("summary"):
+                    context_parts.append(screener_data["summary"])
+                    sources.append("finance_screener")
         except Exception as exc:
             logger.error("Stock screener error: %s", exc)
+            # Fallback to legacy screener on ScreenerAgent failure
+            try:
+                screener_data = finance.screen_stocks(query, top_k=5)
+                if screener_data.get("summary"):
+                    context_parts.append(screener_data["summary"])
+                    sources.append("finance_screener")
+            except Exception as fallback_exc:
+                logger.error("Legacy screener fallback also failed: %s", fallback_exc)
 
     fin_tickers = []
     if is_fin_intent and not is_reasoning and mode != "benchmark":
@@ -1740,6 +1737,8 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         # The agent has its own WebSearchTool if it needs information. Only pass chat history + live finance context.
         agent_ctx = _build_agent_ctx(chat_ctx, context_parts, sources)
         final_answer = coordinator.process_task(query, agent_ctx)
+    elif screener_direct_report:
+        final_answer = screener_direct_report
     elif fused_context or is_reasoning or chat_ctx:
         final_answer = aarkaa_engine.final_response(query, fused_context, intent=intent, lang=detected_lang, mode=mode, history=chat_ctx, user_facts=user_facts, force_general=is_knowledge)
     else:
@@ -1761,7 +1760,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     combined_confidence = (filter_confidence + primary_confidence) / 2
 
     # ── 7. In-depth Verification Pass ─────────────────────────────────────
-    if not _is_image_generation_query(query):
+    if not _is_image_generation_query(query) and not screener_direct_report:
         # Architecture-specific verification (runs first for arch queries)
         if _is_arch_query and _arch_context:
             try:
@@ -2170,15 +2169,46 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     # Domain-specific routing
     is_fin_intent = _has_live_finance_intent(query, domain, intent)
     is_screener = finance.is_stock_screener_query(query)
+    screener_direct_report = None
     if is_screener and mode != "benchmark":
         try:
-            yield {"type": "status", "status": "Screening live equity markets & computing valuation metrics..."}
-            screener_data = finance.screen_stocks(query, top_k=5)
-            if screener_data.get("summary"):
-                context_parts.append(screener_data["summary"])
-                sources.append("finance_screener")
+            # Tier 1: ScreenerAgent for strategy-level or sector-level queries
+            if _SCREENER_AVAILABLE and _screener_agent and _screener_agent.is_screener_query(query):
+                if _screener_agent.is_sector_query(query):
+                    yield {"type": "status", "status": "Screening benchmark sector indices & calculating market breadth..."}
+                    sector_response = _screener_agent.screen_sectors(query)
+                    if sector_response.results:
+                        screener_direct_report = _screener_agent.generate_authoritative_sector_report(sector_response)
+                        context_parts.append(screener_direct_report)
+                        sources.append("finance_screener")
+                        logger.info("ScreenerAgent (sector stream) returned %d sectors in %.0fms",
+                                    len(sector_response.results), sector_response.execution_time_ms)
+                else:
+                    yield {"type": "status", "status": "Running institutional-grade multi-factor screening..."}
+                    screen_request = _screener_agent.detect_intent(query)
+                    screen_response = _screener_agent.screen(screen_request)
+                    if screen_response.results or screen_request.sector:
+                        screener_direct_report = _screener_agent.generate_authoritative_report(screen_response)
+                        context_parts.append(screener_direct_report)
+                        sources.append("finance_screener")
+                        logger.info("ScreenerAgent (stream) returned %d results in %.0fms",
+                                    len(screen_response.results), screen_response.execution_time_ms)
+            else:
+                # Tier 2: Legacy screener for simple cap/sector queries
+                yield {"type": "status", "status": "Screening live equity markets & computing valuation metrics..."}
+                screener_data = finance.screen_stocks(query, top_k=5)
+                if screener_data.get("summary"):
+                    context_parts.append(screener_data["summary"])
+                    sources.append("finance_screener")
         except Exception as exc:
             logger.error("Stock screener error (stream): %s", exc)
+            try:
+                screener_data = finance.screen_stocks(query, top_k=5)
+                if screener_data.get("summary"):
+                    context_parts.append(screener_data["summary"])
+                    sources.append("finance_screener")
+            except Exception as fallback_exc:
+                logger.error("Legacy screener fallback (stream) also failed: %s", fallback_exc)
 
     fin_tickers = []
     if is_fin_intent and not is_reasoning and mode != "benchmark":
@@ -2456,6 +2486,14 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             full_response += token
             yield {"type": "content", "token": token}
             await asyncio.sleep(0.01)
+    elif screener_direct_report:
+        import asyncio
+        chunk_size = 16
+        for i in range(0, len(screener_direct_report), chunk_size):
+            token = screener_direct_report[i:i+chunk_size]
+            full_response += token
+            yield {"type": "content", "token": token}
+            await asyncio.sleep(0.005)
     elif needs_agent:
         from modules import coordinator
         import asyncio
