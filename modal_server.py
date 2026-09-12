@@ -41,7 +41,7 @@ class GenerateRequest(BaseModel):
 # ─── Inference Class ────────────────────────────────────────────────────────
 @app.cls(
     image=image,
-    gpu="T4",
+    gpu="A10G",
     volumes={"/models": models_volume},
     timeout=600,
     scaledown_window=30,  # Scale down after 30 seconds of inactivity to minimize idle GPU credit usage
@@ -53,7 +53,7 @@ class AarkaaGPU:
         from llama_cpp import Llama
         
         self.models = {}
-        print("Initializing Aarkaa GPU container with CUDA 12.4 on Tesla T4...")
+        print("Initializing Aarkaa GPU container with CUDA 12.4 on NVIDIA A10G (24GB VRAM)...")
         print("Mounted volume contents:", os.listdir("/models"))
         
         # Pre-load 7B model directly into VRAM (priority 1)
@@ -105,7 +105,7 @@ class AarkaaGPU:
         
         stop_tokens = [
             "<|im_end|>", "<|im_start|>", "<|endoftext|>",
-            "\nBest regards", "\nBest Regards", "\nSincerely", "\n\n#", "\n#Aarkaa",
+            "\nBest regards", "\nBest Regards", "\nSincerely", "\n#Aarkaa",
             "Thank you for your question",
             "Please let me know if there is anything else",
             "Please let me know if you need",
@@ -129,7 +129,6 @@ class AarkaaGPU:
             temperature=temperature,
             top_p=top_p,
             repeat_penalty=repeat_penalty,
-            repeat_last_n=1024,
             stop=stop_tokens
         )
         return output["choices"][0]["text"].strip()
@@ -145,7 +144,7 @@ class AarkaaGPU:
 
         stop_tokens = [
             "<|im_end|>", "<|im_start|>", "<|endoftext|>",
-            "\nBest regards", "\nBest Regards", "\nSincerely", "\n\n#", "\n#Aarkaa",
+            "\nBest regards", "\nBest Regards", "\nSincerely", "\n#Aarkaa",
             "Thank you for your question",
             "Please let me know if there is anything else",
             "Please let me know if you need",
@@ -169,7 +168,6 @@ class AarkaaGPU:
             temperature=temperature,
             top_p=top_p,
             repeat_penalty=repeat_penalty,
-            repeat_last_n=1024,
             stop=stop_tokens,
             stream=True
         )

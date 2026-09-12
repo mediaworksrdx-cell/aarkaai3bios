@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
 
 from sqlalchemy.orm import Session
 
@@ -318,45 +318,78 @@ class RLHFCorrectionSchema(BaseModel):
 def store_rlhf_feedback(
     user_id: str,
     rating: int,
-    conversation_id: Optional[int] = None,
+    conversation_id: Optional[Union[int, str]] = None,
     correction: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> None:
     """Store RLHF feedback and optionally auto-learn from explicit text corrections."""
-    if correction:
+    clean_correction = correction.strip() if (correction and correction.strip()) else None
+    if clean_correction:
         # Validate correction via Pydantic schema
-        RLHFCorrectionSchema(correction=correction)
+        RLHFCorrectionSchema(correction=clean_correction)
+
+    import config
+    # 1. Store in MongoDB if enabled
+    if config.MONGODB_URI:
+        try:
+            from modules.mongo_repository import RLHFRepo
+            RLHFRepo.add_entry(
+                user_id=user_id,
+                rating=rating,
+                conversation_id=str(conversation_id) if conversation_id is not None else None,
+                session_id=session_id or (str(conversation_id) if conversation_id is not None else None),
+                correction=clean_correction,
+            )
+            logger.info("Stored RLHF feedback in MongoDB for user %s (rating=%d)", user_id, rating)
+        except Exception as mongo_exc:
+            logger.error("MongoDB store_rlhf_feedback failed: %s", mongo_exc)
+
+    # 2. Store in SQLite for local persistence or dual-mode
+    int_conv_id = None
+    if conversation_id is not None:
+        try:
+            int_conv_id = int(conversation_id)
+        except (ValueError, TypeError):
+            int_conv_id = None
 
     session: Session = SessionLocal()
     try:
         feedback = RLHFFeedback(
             user_id=user_id,
-            conversation_id=conversation_id,
+            conversation_id=int_conv_id,
             rating=rating,
-            correction=correction,
+            correction=clean_correction,
         )
         session.add(feedback)
         session.commit()
-        logger.info("Stored RLHF feedback for user %s (rating=%d)", user_id, rating)
-
-        # Auto-learn from explicit negative corrections
-        if rating < 0 and correction:
-            from modules import rag
-            topic = "Global System Correction (RLHF)"
-            if conversation_id:
-                topic += f" (Conv {conversation_id})"
-            rag.store_knowledge(
-                topic=topic,
-                content=correction,
-                source="rlhf",
-            )
-            logger.info("Auto-learned RLHF correction: %s", topic)
-
+        logger.info("Stored RLHF feedback in SQLite for user %s (rating=%d)", user_id, rating)
     except Exception as exc:
         session.rollback()
         logger.error("store_rlhf_feedback failed: %s", exc)
-        raise exc
+        if not config.MONGODB_URI:
+            raise exc
     finally:
         session.close()
+
+    # 3. Auto-learn from explicit negative corrections
+    if rating < 0 and clean_correction:
+        from modules import rag
+        topic = "Global System Correction (RLHF)"
+        if conversation_id:
+            topic += f" (Conv {conversation_id})"
+        elif session_id:
+            topic += f" (Session {session_id})"
+        try:
+            rag.store_knowledge(
+                topic=topic,
+                content=clean_correction,
+                source="rlhf",
+                user_id=user_id,
+            )
+            logger.info("Auto-learned RLHF correction: %s", topic)
+        except Exception as rag_exc:
+            logger.warning("Failed to auto-store RLHF correction in RAG: %s", rag_exc)
+
 
 
 # ─── User Fact Extraction ────────────────────────────────────────────────────

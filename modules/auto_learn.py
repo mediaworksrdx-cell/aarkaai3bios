@@ -34,10 +34,78 @@ def check_and_learn(user_id: str) -> bool:
     Check if auto-learning should trigger and execute if so.
     Only runs on conversations that have positive RLHF feedback or corrections.
     """
+    import config
     from modules import memory, rag
+
+    # 1. MongoDB Execution Path
+    if config.MONGODB_URI:
+        try:
+            from modules.mongo_repository import RLHFRepo, ConversationRepo
+            last_learned_ts = 0.0
+            try:
+                memories = memory.get_user_memories(user_id, category="auto_learn_meta")
+                for m in memories:
+                    if m["key"] == "last_learned_mongo_ts":
+                        last_learned_ts = float(m["value"])
+                        break
+            except Exception as e:
+                logger.debug("No last_learned_mongo_ts: %s", e)
+
+            feedbacks = RLHFRepo.get_positive_or_corrected(user_id=user_id, limit=50)
+            valid_convs = []
+            max_ts = last_learned_ts
+
+            for fb in feedbacks:
+                fb_ts = fb.get("timestamp")
+                fb_epoch = fb_ts.timestamp() if fb_ts and hasattr(fb_ts, "timestamp") else 0.0
+                if fb_epoch <= last_learned_ts:
+                    continue
+                if fb_epoch > max_ts:
+                    max_ts = fb_epoch
+
+                sess_id = fb.get("session_id") or fb.get("conversation_id")
+                if sess_id:
+                    conv_doc = ConversationRepo.get_latest_by_session(session_id=str(sess_id), user_id=user_id)
+                    if not conv_doc:
+                        conv_doc = ConversationRepo.get_latest_by_session(session_id=str(sess_id))
+                    if conv_doc and conv_doc.get("query") and conv_doc.get("response"):
+                        valid_convs.append({
+                            "id": str(conv_doc.get("_id", sess_id)),
+                            "query": conv_doc.get("query", ""),
+                            "response": conv_doc.get("response", ""),
+                            "intent": conv_doc.get("intent", "general"),
+                            "confidence": conv_doc.get("confidence", 0.9),
+                            "source": conv_doc.get("source", "aarkaa-3b"),
+                        })
+
+            if valid_convs:
+                logger.info(
+                    "Auto-learn (Mongo) triggered for user %s on %d feedback conversations",
+                    user_id, len(valid_convs)
+                )
+                knowledge_items = extract_knowledge(valid_convs)
+                for item in knowledge_items:
+                    rag.store_knowledge(
+                        topic=item["topic"],
+                        content=item["content"],
+                        source="learned_fact",
+                        user_id=user_id,
+                    )
+                update_profile_from_history(user_id, valid_convs)
+                memory.update_user_memory(
+                    user_id=user_id,
+                    key="last_learned_mongo_ts",
+                    value=str(max_ts),
+                    category="auto_learn_meta",
+                )
+                logger.info("Auto-learn (Mongo) completed: %d facts stored", len(knowledge_items))
+                return True
+        except Exception as mongo_err:
+            logger.error("Auto-learn Mongo execution failed: %s", mongo_err)
+
+    # 2. SQLite Execution Path
     from database import SessionLocal, ConversationHistory, RLHFFeedback
 
-    # 1. Get last learned conversation ID from user memory
     last_id = 0
     try:
         memories = memory.get_user_memories(user_id, category="auto_learn_meta")
@@ -48,7 +116,6 @@ def check_and_learn(user_id: str) -> bool:
     except Exception as exc:
         logger.error("Failed to read last_learned_conv_id: %s", exc)
 
-    # 2. Fetch new conversations with positive feedback or corrections
     session = SessionLocal()
     try:
         rows = (
@@ -57,7 +124,7 @@ def check_and_learn(user_id: str) -> bool:
             .filter(
                 ConversationHistory.user_id == user_id,
                 ConversationHistory.id > last_id,
-                (RLHFFeedback.rating >= 1) | (RLHFFeedback.correction.isnot(None))
+                (RLHFFeedback.rating >= 1) | ((RLHFFeedback.correction.isnot(None)) & (RLHFFeedback.correction != ""))
             )
             .order_by(ConversationHistory.id.asc())
             .all()

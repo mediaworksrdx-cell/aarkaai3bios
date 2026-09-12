@@ -128,6 +128,9 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(message.feedback || null);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showCorrectionBox, setShowCorrectionBox] = useState(false);
+  const [correctionText, setCorrectionText] = useState('');
+  const [correctionSubmitted, setCorrectionSubmitted] = useState(false);
 
   const isUser = message.role === 'user';
   const isError = !!message.error;
@@ -154,9 +157,28 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
   };
 
   const handleFeedback = (rating: 1 | -1) => {
-    const newFeedback = rating === 1 ? 'up' : 'down';
-    setFeedback(newFeedback);
-    submitFeedback(message.id, rating);
+    if (rating === 1) {
+      setFeedback('up');
+      setShowCorrectionBox(false);
+      submitFeedback(message.id, 1);
+    } else {
+      setFeedback('down');
+      setShowCorrectionBox(true);
+      submitFeedback(message.id, -1);
+    }
+  };
+
+  const handleSendCorrection = () => {
+    if (correctionText.trim()) {
+      submitFeedback(message.id, -1, correctionText.trim());
+      setCorrectionSubmitted(true);
+      setTimeout(() => {
+        setShowCorrectionBox(false);
+        setCorrectionSubmitted(false);
+      }, 2000);
+    } else {
+      setShowCorrectionBox(false);
+    }
   };
 
   const handleRegenerate = () => {
@@ -426,6 +448,57 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
                   <span>{modelInfo.label}</span>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Optional RLHF Correction Note Box */}
+          {!isUser && showCorrectionBox && (
+            <div className="w-full mt-2 p-2.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] shadow-sm text-xs space-y-2">
+              <div className="flex items-center justify-between text-[var(--text-secondary)] font-medium">
+                <span>What was wrong or could be improved? (Optional RLHF Note)</span>
+                <button
+                  type="button"
+                  onClick={() => setShowCorrectionBox(false)}
+                  className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+              <input
+                type="text"
+                value={correctionText}
+                onChange={(e) => setCorrectionText(e.target.value)}
+                placeholder="E.g., Please answer in concise bullet points with verified data..."
+                className="w-full px-2.5 py-1.5 rounded-md bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:ring-1 focus:ring-rose-500 text-xs"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSendCorrection();
+                  }
+                }}
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-[var(--text-tertiary)]">
+                  {correctionSubmitted ? '✓ Correction submitted to learning memory' : 'Feedback auto-tunes model responses'}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowCorrectionBox(false)}
+                    className="px-2 py-1 rounded text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] cursor-pointer"
+                  >
+                    Skip
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSendCorrection}
+                    disabled={!correctionText.trim()}
+                    className="px-2.5 py-1 rounded text-[11px] font-medium bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white transition-colors cursor-pointer"
+                  >
+                    Submit Correction
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

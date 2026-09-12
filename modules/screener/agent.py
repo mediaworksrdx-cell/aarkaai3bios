@@ -283,11 +283,19 @@ class ScreenerAgent:
 
         Returns True if the query contains strategy-specific patterns,
         category-specific screening language, sector screening, or explicit screener references.
+        Excludes meta-questions asking about guarantees, architecture, or validation.
         """
+        q_low = query.lower()
+
+        # Exclude meta/explanatory queries asking ABOUT the screener
+        meta_patterns = [
+            r"\b(can you guarantee|guarantee that|how do you guarantee|how does (it|the screener)|is (it|this|that) hardcoded|are (these|they) hardcoded|explain how|demonstrate with|demonstrate how|why did you (return|select|give)|verify that)\b",
+        ]
+        if any(re.search(pat, q_low) for pat in meta_patterns):
+            return False
+
         if self.is_sector_query(query):
             return True
-
-        q_low = query.lower()
 
         # Strategy-level patterns
         for patterns in _STRATEGY_PATTERNS.values():
