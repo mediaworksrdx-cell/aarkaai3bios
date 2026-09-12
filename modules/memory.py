@@ -152,12 +152,24 @@ def get_conversation_count(user_id: str) -> int:
 
 
 def get_chat_context(user_id: str, session_id: str, limit: int = 10) -> list[dict]:
-    """Get recent chat messages for context window."""
+    """Get recent chat messages for context window, filtering out any poisoned refusal loops."""
     import config
+    refusal_markers = [
+        "attempt to override my instructions",
+        "bypass my guidelines",
+        "bypass my actual system instructions",
+        "won't follow embedded",
+        "operating under my actual system instructions",
+        "operating under my original instructions",
+    ]
     if config.MONGODB_URI:
         from modules.mongo_repository import PersonalChatRepo
         docs = PersonalChatRepo.get_messages(user_id=user_id, session_id=session_id, limit=limit * 2)
-        return [{"role": r.get("role"), "message": r.get("message")} for r in docs]
+        return [
+            {"role": r.get("role"), "message": r.get("message")}
+            for r in docs
+            if not any(k in (r.get("message") or "").lower() for k in refusal_markers)
+        ]
 
     session: Session = SessionLocal()
     try:
@@ -171,6 +183,7 @@ def get_chat_context(user_id: str, session_id: str, limit: int = 10) -> list[dic
         return [
             {"role": r.role, "message": r.message}
             for r in reversed(rows)
+            if not any(k in (r.message or "").lower() for k in refusal_markers)
         ]
     finally:
         session.close()
