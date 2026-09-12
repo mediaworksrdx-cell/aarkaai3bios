@@ -160,12 +160,16 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
       }
 
       let sessionActiveId: string | null = null;
+      let isTabInitialized = false;
       try {
         sessionActiveId = sessionStorage.getItem(SESSION_ACTIVE_KEY);
+        isTabInitialized = sessionStorage.getItem('aarka_tab_initialized') === 'true';
       } catch {}
 
-      // Preserve active conversation ONLY on explicit page reload within the same browser tab
-      const sessionConv = (isReload && sessionActiveId) ? sanitized.find(c => c.id === sessionActiveId) : null;
+      // Preserve active conversation ONLY on an in-tab reload within an already-initialized tab
+      const sessionConv = (isReload && isTabInitialized && sessionActiveId)
+        ? sanitized.find(c => c.id === sessionActiveId)
+        : null;
 
       if (sessionConv) {
         setConversations(sanitized);
@@ -190,6 +194,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
       setActiveConversationId(freshId);
       try {
         sessionStorage.setItem(SESSION_ACTIVE_KEY, freshId);
+        sessionStorage.setItem('aarka_tab_initialized', 'true');
       } catch {}
     } catch (e) {
       console.warn('Failed to load user conversations', e);
