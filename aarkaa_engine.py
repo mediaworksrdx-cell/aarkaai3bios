@@ -846,8 +846,26 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False, user_que
         ]):
             logger.warning("Safety refusal detected in stream for query: %.80s", user_query)
             uq_low = (user_query or "").lower()
-            is_sec = any(w in uq_low for w in ["textile", "jewell", "guarantee", "sector"]) or any(w in low_accum for w in ["textile", "jewell", "guarantee"])
-            is_prov = any(w in uq_low for w in ["exact source", "timestamp", "data vintage", "provenance", "lineage", "reported or calculated"])
+            is_sec = any(
+                p in uq_low
+                for p in [
+                    "guarantee that every returned company belongs",
+                    "belongs to the requested sectors",
+                    "belongs to the requested sector",
+                    "strict sector validation",
+                    "sector isolation guarantee",
+                ]
+            )
+            is_prov = any(
+                p in uq_low
+                for p in [
+                    "provide the exact source, timestamp",
+                    "field-level provenance",
+                    "data lineage",
+                    "lineage registry",
+                    "whether it is reported or calculated",
+                ]
+            )
             if is_sec:
                 yield _SECTOR_GUARANTEE_RESPONSE
                 return

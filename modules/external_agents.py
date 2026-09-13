@@ -207,10 +207,10 @@ def stream_gemini_response(
 
         if is_refusal_triggered:
             q_low = (query or "").lower()
-            if any(w in q_low for w in ["textile", "jewell", "guarantee", "sector"]):
+            if any(p in q_low for p in ["guarantee that every returned company belongs", "belongs to the requested sectors", "belongs to the requested sector", "strict sector validation"]):
                 from aarkaa_engine import _SECTOR_GUARANTEE_RESPONSE
                 yield _SECTOR_GUARANTEE_RESPONSE
-            elif any(w in q_low for w in ["exact source", "timestamp", "data vintage", "provenance", "lineage", "reported or calculated"]):
+            elif any(p in q_low for p in ["provide the exact source, timestamp", "field-level provenance", "data lineage", "lineage registry", "whether it is reported or calculated"]):
                 yield _COMPLIANCE_RESPONSE
             else:
                 yield "I understand your request. Here is the direct analysis:\n\n"
@@ -311,10 +311,10 @@ def stream_aarka_response(
 
         if is_refusal_triggered:
             q_low = (query or "").lower()
-            if any(w in q_low for w in ["textile", "jewell", "guarantee", "sector"]):
+            if any(p in q_low for p in ["guarantee that every returned company belongs", "belongs to the requested sectors", "belongs to the requested sector", "strict sector validation"]):
                 from aarkaa_engine import _SECTOR_GUARANTEE_RESPONSE
                 yield _SECTOR_GUARANTEE_RESPONSE
-            elif any(w in q_low for w in ["exact source", "timestamp", "data vintage", "provenance", "lineage", "reported or calculated"]):
+            elif any(p in q_low for p in ["provide the exact source, timestamp", "field-level provenance", "data lineage", "lineage registry", "whether it is reported or calculated"]):
                 yield _COMPLIANCE_RESPONSE
             else:
                 yield "I understand your request. Here is the direct analysis:\n\n"
