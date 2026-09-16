@@ -19,7 +19,31 @@ known-first-party = ["modules", "config", "database", "schemas", "middleware"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --cov=. --cov-config=pyproject.toml --cov-report=term-missing --cov-report=html:htmlcov --cov-fail-under=40"
+
+[tool.coverage.run]
+source = ["modules", "config.py", "database.py", "schemas.py", "middleware.py", "pipeline.py", "aarkaa_engine.py", "main.py"]
+branch = true
+omit = [
+    "tests/*",
+    "scripts/*",
+    "scratch/*",
+    "archive/*",
+    "*.html",
+    "setup.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if __name__ == .__main__.",
+    "raise NotImplementedError",
+    "pass",
+    "except ImportError",
+]
 
 [tool.bandit]
 exclude_dirs = ["tests", "scripts", "scratch"]

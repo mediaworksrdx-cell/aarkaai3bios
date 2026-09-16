@@ -28,6 +28,7 @@ PYTHON_BIN = f"{REMOTE_BACKEND}/venv/bin/python"
 SYNC_PATHS = [
     "main.py",
     "pipeline.py",
+    "aarkaa_engine.py",
     "config.py",
     "database.py",
     "middleware.py",

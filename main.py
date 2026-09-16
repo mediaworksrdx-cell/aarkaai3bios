@@ -1638,10 +1638,30 @@ async def list_strategies():
 
 @app.get("/screener/regime", tags=["screener"])
 async def get_market_regime():
-    """Get current market regime classification."""
+    """Get current market regime classification using dynamic indicators."""
+    if _screener_endpoints_available and _screener_api_agent:
+        try:
+            from modules.technical import compute_indicators
+            # Attempt to fetch broad benchmark index indicators (NIFTY 50 / SPY)
+            indicators = compute_indicators("^NSEI") or compute_indicators("SPY") or compute_indicators("RELIANCE.NS")
+            regime = _screener_api_agent.regime.detect_regime(indicators)
+            regime_value = regime.value if hasattr(regime, "value") else str(regime)
+            return {
+                "regime": regime_value,
+                "benchmark": "^NSEI" if indicators else "default",
+                "indicators": {
+                    "price": indicators.get("price") if indicators else None,
+                    "rsi": indicators.get("rsi") if indicators else None,
+                    "ema50": indicators.get("ema50") if indicators else None,
+                    "ema200": indicators.get("ema200") if indicators else None,
+                } if indicators else {},
+                "note": "Dynamic multi-factor regime evaluated via RegimeEngine.",
+            }
+        except Exception as exc:
+            logger.warning("Dynamic regime detection error, using fallback: %s", exc)
     return {
         "regime": "range_bound",
-        "note": "Dynamic regime detection will be available in Phase 2.",
+        "note": "Default baseline market regime classification.",
     }
 
 

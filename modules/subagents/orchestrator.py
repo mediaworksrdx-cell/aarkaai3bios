@@ -275,9 +275,9 @@ class CognitiveOrchestrator:
         total_ms = (time.perf_counter() - start) * 1000
         self._logger.info("Orchestration completed in %.0fms", total_ms)
 
-        # Return the last valid result
+        # Return the last valid result with substantive content
         for result in reversed(accumulated_results):
-            if result.is_valid and result.output:
+            if result.is_valid and result.output and len(result.output.strip()) > 80:
                 return result.output
 
         return None
@@ -379,17 +379,34 @@ class CognitiveOrchestrator:
                 yield {"type": "status", "status": f"Critical error in {agent_name} agent. Aborting pipeline."}
                 return
 
-        # Stream final response live token-by-token
+        # Stream final verified response
         yield {"type": "status", "status": "Streaming verified response..."}
-        from modules.external_agents import stream_aarka_response
-        agent_context_str = "\n\n".join([f"[{r.agent_name} Insights]:\n{r.output}" for r in accumulated_results if r.output])
-        full_ans = ""
-        for token in stream_aarka_response(query, context=agent_context_str, history=ctx.get("history")):
-            full_ans += token
-            yield {"type": "content", "token": token}
-            await asyncio.sleep(0.001)
         
-        ctx["final_answer"] = full_ans
+        # Check if writer or critic already synthesized a complete response
+        final_synthesized = None
+        for r in reversed(accumulated_results):
+            if r.agent_name in ("writer", "critic") and r.output and len(r.output.strip()) > 80:
+                final_synthesized = r.output.strip()
+                break
+
+        if final_synthesized:
+            import re
+            tokens_to_stream = re.findall(r'\S+\s*|\s+', final_synthesized)
+            full_ans = ""
+            for tok in tokens_to_stream:
+                full_ans += tok
+                yield {"type": "content", "token": tok}
+                await asyncio.sleep(0.008)
+            ctx["final_answer"] = full_ans
+        else:
+            from modules.external_agents import stream_aarka_response
+            agent_context_str = "\n\n".join([f"[{r.agent_name} Insights]:\n{r.output}" for r in accumulated_results if r.output])
+            full_ans = ""
+            for token in stream_aarka_response(query, context=agent_context_str, history=ctx.get("history")):
+                full_ans += token
+                yield {"type": "content", "token": token}
+                await asyncio.sleep(0.001)
+            ctx["final_answer"] = full_ans
 
 
 

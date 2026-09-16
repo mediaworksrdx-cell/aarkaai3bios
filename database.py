@@ -3,6 +3,7 @@ AARKAAI Backend – Database Models & Engine (SQLAlchemy)
 
 Production-ready with connection pooling and stale connection detection.
 """
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import (
@@ -253,6 +254,10 @@ def init_db() -> None:
         pass
     Base.metadata.create_all(bind=engine)
     # Safe column migration for connected_apps and UI preference fields on existing databases
+    # NOTE: SQLAlchemy text() does not support parameterised DDL identifiers (column names,
+    # types). The values below are a hardcoded allowlist — never sourced from user input.
+    _SAFE_COL_NAME = re.compile(r"^[a-z_]+$")
+    _SAFE_COL_TYPE = re.compile(r"^[A-Z()0-9 ]+$")
     _migration_columns = [
         ("connected_apps", "TEXT", "'{}'"),
         ("density", "VARCHAR(16)", "'comfortable'"),
@@ -267,8 +272,14 @@ def init_db() -> None:
         from sqlalchemy import text
         with engine.connect() as conn:
             for col_name, col_type, col_default in _migration_columns:
+                # Validate against allowlist patterns before building DDL
+                if not _SAFE_COL_NAME.match(col_name):
+                    raise ValueError(f"Unsafe column name rejected: {col_name}")
+                if not _SAFE_COL_TYPE.match(col_type):
+                    raise ValueError(f"Unsafe column type rejected: {col_type}")
                 try:
-                    conn.execute(text(f"ALTER TABLE user_settings ADD COLUMN {col_name} {col_type} DEFAULT {col_default}"))
+                    stmt = f"ALTER TABLE user_settings ADD COLUMN {col_name} {col_type} DEFAULT {col_default}"
+                    conn.execute(text(stmt))
                 except Exception:
                     pass  # Column already exists
             conn.commit()

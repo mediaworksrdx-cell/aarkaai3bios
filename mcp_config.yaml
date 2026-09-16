@@ -1,0 +1,16 @@
+trust:
+  require_authentication: true
+  auto_approve: false
+  max_output_bytes: 65536
+  default_timeout_seconds: 10.0
+
+servers:
+  # All servers disabled by default — user must explicitly enable
+  # filesystem:
+  #   transport: stdio
+  #   command: "npx @modelcontextprotocol/server-filesystem /workspace"
+  #   enabled: false
+  #   trust_level: workspace_read
+  #   allowed_tools: ["read_file", "list_directory"]
+  #   rate_limit_rpm: 60
+  #   timeout_seconds: 5.0

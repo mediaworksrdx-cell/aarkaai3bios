@@ -26,6 +26,7 @@ import threading
 import time
 from typing import Optional
 
+import config
 from config import CONFIDENCE_THRESHOLD, MAX_QUERY_LENGTH
 from schemas import PromptResponse
 from modules.semantic_filter import _is_coding_syntax
@@ -128,6 +129,18 @@ _NO_WEB_SEARCH_KEYWORDS = [
     "constraint", "how would you solve", "how to solve", "solve this",
     "prove", "proof", "theorem", "complexity",
 ]
+
+# ─── Knowledge-First Bypass Rules ────────────────────────────────────────────
+# Domains/intents where distilled knowledge must NOT override live data
+_KNOWLEDGE_FIRST_BYPASS_DOMAINS = frozenset({"finance", "web_search", "news"})
+_KNOWLEDGE_FIRST_BYPASS_INTENTS = frozenset({
+    "stock_query", "market_data", "news_search", "web_lookup",
+    "price_query", "portfolio_query",
+})
+_FRESHNESS_KEYWORDS = frozenset({
+    "today", "now", "latest", "current", "live", "price", "quote",
+    "market", "news", "2026", "yesterday", "this week", "this month",
+})
 
 _FACTUAL_PREFIXES = [
     "who is", "who are", "who was", "who were", "who's",
@@ -793,11 +806,13 @@ def _execute_python_code(code: str) -> str:
         
         output = ""
         if result.stdout:
-            output += f"[stdout]\n{result.stdout}\n"
+            stdout_text = result.stdout[:3000] + ("\n... [stdout truncated]" if len(result.stdout) > 3000 else "")
+            output += f"[stdout]\n{stdout_text}\n"
         if result.stderr:
             # Filter out sensitive paths from error output
             stderr_clean = result.stderr.replace(str(Path.home()), "~")
-            output += f"[stderr]\n{stderr_clean}\n"
+            stderr_text = stderr_clean[:1000] + ("\n... [stderr truncated]" if len(stderr_clean) > 1000 else "")
+            output += f"[stderr]\n{stderr_text}\n"
         if not output:
             output = "Code executed successfully with no output."
         return output.strip()
@@ -811,6 +826,43 @@ def _execute_python_code(code: str) -> str:
                 temp_file.unlink()
         except Exception:
             pass
+
+
+def _fuse_context_budget(context_parts: list[str], max_budget: int = 8000) -> str:
+    """Join context parts and enforce a cumulative character budget to prevent 7B context overflow.
+    
+    Preserves earlier components and truncates gracefully if the cumulative
+    size exceeds max_budget.
+    """
+    if not context_parts:
+        return ""
+    
+    total = sum(len(p) for p in context_parts)
+    if total <= max_budget:
+        return "\n\n---\n\n".join(context_parts)
+    
+    logger.info("Context parts total %d chars exceeds budget %d chars — enforcing cumulative budget", total, max_budget)
+    budget_remaining = max_budget
+    budgeted_parts = []
+    
+    for part in context_parts:
+        if not part.strip():
+            continue
+        part_len = len(part)
+        if part_len <= budget_remaining:
+            budgeted_parts.append(part)
+            budget_remaining -= part_len
+        elif budget_remaining >= 400:
+            truncated = part[:budget_remaining - 50] + "\n... [context truncated to fit budget]"
+            budgeted_parts.append(truncated)
+            budget_remaining = 0
+            break
+        else:
+            break
+            
+    fused = "\n\n---\n\n".join(budgeted_parts)
+    logger.info("Fused context constrained to %d chars (from %d chars)", len(fused), total)
+    return fused
 
 
 def _has_keyword_match(query: str, keywords: list[str]) -> bool:
@@ -1322,9 +1374,17 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             logger.warning("Tool router error (falling back to standard path): %s", tool_exc)
 
     # ── 1c. Cognitive Subagent Orchestrator ────────────────────────────────
-    # For complex/compound queries that the tool router didn't handle,
-    # route through specialized subagent pipelines for deeper analysis.
-    if not is_greeting and not is_reasoning and mode != "benchmark":
+    # Only invoke the heavy multi-agent subagent pipeline for explicit deep research mode
+    # or queries explicitly requesting multi-agent investigation.
+    # Standard conversational, comparative, and financial queries use the high-speed neural engine.
+    q_low = query.lower()
+    is_explicit_deep = mode in ("deep", "orchestrator", "deep_research", "multi_agent") or any(
+        phrase in q_low for phrase in [
+            "deep research", "deep investigation", "multi-agent",
+            "run subagents", "investigate thoroughly", "full research report"
+        ]
+    )
+    if is_explicit_deep and not is_greeting and not is_reasoning and mode != "benchmark":
         try:
             from modules.subagents.orchestrator import get_orchestrator
 
@@ -1374,48 +1434,96 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     primary_confidence = filter_confidence
     sources.append("aarkaa-3b")
 
-    # Fetch chat history early for follow-up detection and context budget
+    # ── Knowledge-First Probe (Feature-Flagged Beta) ──────────────────────
+    _knowledge_hit = None
+    _kf_bypassed_reason = None
+    q_lower_kf = query.lower()
+
+    if (
+        config.KNOWLEDGE_FIRST_ENABLED
+        and not _should_skip_rag(query, intent, domain)
+        and mode != "benchmark"
+        and not is_greeting
+        and not _is_identity_query(query)
+        and domain not in _KNOWLEDGE_FIRST_BYPASS_DOMAINS
+        and intent not in _KNOWLEDGE_FIRST_BYPASS_INTENTS
+        and not any(kw in q_lower_kf for kw in _FRESHNESS_KEYWORDS)
+    ):
+        try:
+            _knowledge_hit = rag.probe_knowledge(query, user_id=user_id, query_domain=domain)
+            if _knowledge_hit:
+                context_parts.append(
+                    f"[Distilled Knowledge (High Confidence Match)]\n{_knowledge_hit['content']}"
+                )
+                sources.append("knowledge_first")
+                logger.info(
+                    "KNOWLEDGE_FIRST_HIT | query=%r | score=%.4f | topic=%s | source=%s | timestamp=%s",
+                    query[:80], _knowledge_hit["score"],
+                    _knowledge_hit.get("topic", "?"),
+                    _knowledge_hit.get("source", "?"),
+                    _knowledge_hit.get("timestamp", "?"),
+                )
+        except Exception as exc:
+            _kf_bypassed_reason = f"probe_error: {exc}"
+            logger.debug("Knowledge probe error: %s", exc)
+    elif config.KNOWLEDGE_FIRST_ENABLED:
+        _kf_bypassed_reason = f"domain={domain}, intent={intent}, greeting={is_greeting}"
+
+    if _kf_bypassed_reason:
+        logger.debug("KNOWLEDGE_FIRST_BYPASS | reason=%s | query=%r", _kf_bypassed_reason, query[:60])
+
+    # Fetch chat history — reduced window if knowledge-first matched
     chat_ctx = None
-    try:
-        chat_ctx = memory.get_chat_context(user_id, session_id, limit=15)
-        if chat_ctx:
-            last_user_msg = None
-            for msg in reversed(chat_ctx):
-                if msg["role"] == "user":
-                    last_user_msg = msg["message"]
-                    break
-            if last_user_msg and last_user_msg.strip().lower() == query.strip().lower() and len(query) > 15:
-                if not any(w in query.lower() for w in ["pdf", "document", "previous", "report"]):
-                    logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
-                    chat_ctx = None
-    except Exception as exc:
-        logger.error("Memory context error: %s", exc)
+    if _knowledge_hit:
+        try:
+            chat_ctx = memory.get_chat_context(
+                user_id, session_id,
+                limit=config.KNOWLEDGE_FIRST_HISTORY_KEEPALIVE
+            )
+        except Exception:
+            pass  # Non-fatal: knowledge context is sufficient
+    else:
+        try:
+            chat_ctx = memory.get_chat_context(user_id, session_id, limit=15)
+            if chat_ctx:
+                last_user_msg = None
+                for msg in reversed(chat_ctx):
+                    if msg["role"] == "user":
+                        last_user_msg = msg["message"]
+                        break
+                if last_user_msg and last_user_msg.strip().lower() == query.strip().lower() and len(query) > 15:
+                    logger.info("Detected retry of same query. Retaining multi-turn conversation context.")
+        except Exception as exc:
+            logger.error("Memory context error: %s", exc)
 
     # ── 4. Low confidence – route to external modules ─────────────────────
     # Note: context_parts preserves active skill directives if present
 
-    # RAG – check the knowledge base first
-    # Confidence-gated RAG skip: conversational follow-ups (≥0.4) skip RAG entirely
-    _fu_score = _follow_up_score(query, chat_ctx)
-    _is_followup_query = _fu_score >= 0.4
-    if not _should_skip_rag(query, intent, domain) and mode != "benchmark" and not _is_followup_query:
-        try:
-            from modules.aarkaa_engine import _classify_and_plan
-            plan = _classify_and_plan(query)
-            if _fu_score >= 0.5:
-                top_k = 1
-            elif plan["domain"] in ["system_design", "coding", "debugging"]:
-                top_k = 6
-            elif plan["type"] == "fact_lookup":
-                top_k = 2
-            else:
-                top_k = 3
-            rag_context = rag.get_context(query, top_k=top_k, user_id=user_id, query_domain=domain)
-            if rag_context:
-                context_parts.append(f"[Knowledge Base]\n{rag_context}")
-                sources.append("rag")
-        except Exception as exc:
-            logger.error("RAG module error: %s", exc)
+    # RAG – skip if knowledge-first already provided context
+    if not _knowledge_hit:
+        _fu_score = _follow_up_score(query, chat_ctx)
+        _is_followup_query = _fu_score >= 0.4
+        if not _should_skip_rag(query, intent, domain) and mode != "benchmark" and not _is_followup_query:
+            try:
+                from modules.aarkaa_engine import _classify_and_plan
+                plan = _classify_and_plan(query)
+                if _fu_score >= 0.5:
+                    top_k = 1
+                elif plan["domain"] in ["system_design", "coding", "debugging"]:
+                    top_k = 6
+                elif plan["type"] == "fact_lookup":
+                    top_k = 2
+                else:
+                    top_k = 3
+                rag_context = rag.get_context(query, top_k=top_k, user_id=user_id, query_domain=domain)
+                if rag_context:
+                    context_parts.append(f"[Knowledge Base]\n{rag_context}")
+                    sources.append("rag")
+            except Exception as exc:
+                logger.error("RAG module error: %s", exc)
+    else:
+        _fu_score = 0.0
+        _is_followup_query = False
 
     # Topic-shift detection: if the user switched to an unrelated topic,
     # trim history to prevent conversation drift from stale context.
@@ -1501,6 +1609,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
                 logger.error("Finance module error: %s", exc)
         else:
             logger.info("Finance circuit breaker is OPEN — skipping")
+            context_parts.append("[System Note: Live market data feed is temporarily in cooling down state due to transient upstream network failures. Synthesizing from internal valuation and fundamental knowledge.]")
 
     # Technical Analysis + Options Strategy (premium feature)
     q_lower = query.lower()
@@ -1632,7 +1741,6 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             or _has_keyword_match(query, _NEWS_KEYWORDS)
             or _has_keyword_match(query, _FACTUAL_KEYWORDS)
             or is_factual
-            or (domain in ("general", "science", "health", "history") and "rag" not in sources)
         )
     )
 
@@ -1651,11 +1759,12 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
                 logger.error("Web search error: %s", exc)
         else:
             logger.info("Web search circuit breaker is OPEN — skipping")
+            context_parts.append("[System Note: Live web search is temporarily in cooling down state due to transient upstream network failures. Synthesizing from internal verified knowledge base.]")
 
     # ── 5. Context fusion ─────────────────────────────────────────────────
     # (chat_ctx has already been retrieved early for RAG follow-up check)
 
-    fused_context = "\n\n---\n\n".join(context_parts)
+    fused_context = _fuse_context_budget(context_parts, max_budget=config.CONTEXT_BUDGET)
 
     # ── 6. AARKAA-3B final response ──────────────────────────────────────
     # Only trigger the slow autonomous agent (ReAct loop) if the user explicitly asks to run, execute, or manage files.
@@ -1783,7 +1892,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
         # Skip LLM verifier for pure knowledge/design queries — the 3B model
         # cannot reliably reproduce long architecture answers and will replace
         # correct text with hallucinated training-distribution fragments.
-        _skip_verifier = is_knowledge
+        _skip_verifier = is_knowledge or not config.VERIFIER_ENABLED
         if not _skip_verifier:
             try:
                 from modules.agents.verifier import verify_response
@@ -1792,7 +1901,7 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             except Exception as exc:
                 logger.error("Failed to run verifier agent on final answer: %s", exc)
         else:
-            logger.info("Verifier skipped for knowledge/design query (domain=%s).", intent)
+            logger.info("Verifier skipped (VERIFIER_ENABLED=%s, knowledge=%s).", config.VERIFIER_ENABLED, is_knowledge)
 
     # ── 8. Store + auto-learn (post-process) ──────────────────────────────
     final_answer = aarkaa_engine.clean_response(final_answer)
@@ -2089,9 +2198,17 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             logger.warning("HQR streaming error (falling back): %s", hqr_exc)
 
     # ── 1c. Cognitive Subagent Orchestrator (Stream) ──────────────────────
-    # For deep reasoning mode, delegate to the subagent orchestrator
-    # to yield agent status updates and stream the final verified response.
-    if not is_greeting and not is_reasoning and mode != "benchmark":
+    # Only invoke the heavy multi-agent subagent pipeline for explicit deep research mode
+    # or queries explicitly requesting multi-agent investigation.
+    # Standard conversational, comparative, and financial queries use the high-speed neural engine.
+    q_low = query.lower()
+    is_explicit_deep = mode in ("deep", "orchestrator", "deep_research", "multi_agent") or any(
+        phrase in q_low for phrase in [
+            "deep research", "deep investigation", "multi-agent",
+            "run subagents", "investigate thoroughly", "full research report"
+        ]
+    )
+    if is_explicit_deep and not is_greeting and not is_reasoning and mode != "benchmark":
         try:
             from modules.subagents.orchestrator import get_orchestrator
             orch = get_orchestrator()
@@ -2130,36 +2247,85 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
 
     sources.append("aarkaa-3b")
 
-    # Fetch chat history early for follow-up detection and context budget
+    # ── Knowledge-First Probe (Feature-Flagged Beta) ──────────────────────
+    _knowledge_hit_s = None
+    _kf_bypassed_reason_s = None
+    q_lower_kf_s = query.lower()
+
+    if (
+        config.KNOWLEDGE_FIRST_ENABLED
+        and not _should_skip_rag(query, intent, domain)
+        and mode != "benchmark"
+        and not is_greeting
+        and not _is_identity_query(query)
+        and domain not in _KNOWLEDGE_FIRST_BYPASS_DOMAINS
+        and intent not in _KNOWLEDGE_FIRST_BYPASS_INTENTS
+        and not any(kw in q_lower_kf_s for kw in _FRESHNESS_KEYWORDS)
+    ):
+        try:
+            _knowledge_hit_s = rag.probe_knowledge(query, user_id=user_id, query_domain=domain)
+            if _knowledge_hit_s:
+                context_parts.append(
+                    f"[Distilled Knowledge (High Confidence Match)]\n{_knowledge_hit_s['content']}"
+                )
+                sources.append("knowledge_first")
+                logger.info(
+                    "KNOWLEDGE_FIRST_HIT | query=%r | score=%.4f | topic=%s | source=%s | timestamp=%s",
+                    query[:80], _knowledge_hit_s["score"],
+                    _knowledge_hit_s.get("topic", "?"),
+                    _knowledge_hit_s.get("source", "?"),
+                    _knowledge_hit_s.get("timestamp", "?"),
+                )
+        except Exception as exc:
+            _kf_bypassed_reason_s = f"probe_error: {exc}"
+            logger.debug("Knowledge probe error (stream): %s", exc)
+    elif config.KNOWLEDGE_FIRST_ENABLED:
+        _kf_bypassed_reason_s = f"domain={domain}, intent={intent}, greeting={is_greeting}"
+
+    if _kf_bypassed_reason_s:
+        logger.debug("KNOWLEDGE_FIRST_BYPASS | reason=%s | query=%r", _kf_bypassed_reason_s, query[:60])
+
+    # Fetch chat history — reduced window if knowledge-first matched
     chat_ctx = None
-    try:
-        chat_ctx = memory.get_chat_context(user_id, session_id, limit=15)
-        if chat_ctx:
-            last_user_msg = None
-            for msg in reversed(chat_ctx):
-                if msg["role"] == "user":
-                    last_user_msg = msg["message"]
-                    break
-            if last_user_msg and last_user_msg.strip().lower() == query.strip().lower() and len(query) > 15:
-                if not any(w in query.lower() for w in ["pdf", "document", "previous", "report"]):
-                    logger.info("Detected retry of same query. Clearing history context to avoid truncation bias.")
-                    chat_ctx = None
-    except Exception: pass
+    if _knowledge_hit_s:
+        try:
+            chat_ctx = memory.get_chat_context(
+                user_id, session_id,
+                limit=config.KNOWLEDGE_FIRST_HISTORY_KEEPALIVE
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            chat_ctx = memory.get_chat_context(user_id, session_id, limit=15)
+            if chat_ctx:
+                last_user_msg = None
+                for msg in reversed(chat_ctx):
+                    if msg["role"] == "user":
+                        last_user_msg = msg["message"]
+                        break
+                if last_user_msg and last_user_msg.strip().lower() == query.strip().lower() and len(query) > 15:
+                    logger.info("Detected retry of same query (stream). Retaining multi-turn conversation context.")
+        except Exception: pass
 
     # ── 4. Gather Context ─────────────────────────────────────────────────
     # Note: context_parts preserves active skill directives if present
     
-    # RAG — confidence-gated skip for follow-ups
-    _fu_score_s = _follow_up_score(query, chat_ctx)
-    _is_followup_query_s = _fu_score_s >= 0.4
-    if not _should_skip_rag(query, intent, domain) and mode != "benchmark" and not _is_followup_query_s:
-        try:
-            top_k = 1 if _fu_score_s >= 0.5 else 3
-            rag_context = rag.get_context(query, top_k=top_k, user_id=user_id, query_domain=domain)
-            if rag_context:
-                context_parts.append(f"[Knowledge Base]\n{rag_context}")
-                sources.append("rag")
-        except Exception: pass
+    # RAG — skip if knowledge-first already provided context
+    if not _knowledge_hit_s:
+        _fu_score_s = _follow_up_score(query, chat_ctx)
+        _is_followup_query_s = _fu_score_s >= 0.4
+        if not _should_skip_rag(query, intent, domain) and mode != "benchmark" and not _is_followup_query_s:
+            try:
+                top_k = 1 if _fu_score_s >= 0.5 else 3
+                rag_context = rag.get_context(query, top_k=top_k, user_id=user_id, query_domain=domain)
+                if rag_context:
+                    context_parts.append(f"[Knowledge Base]\n{rag_context}")
+                    sources.append("rag")
+            except Exception: pass
+    else:
+        _fu_score_s = 0.0
+        _is_followup_query_s = False
 
     # Topic-shift detection: trim stale history on topic change
     if chat_ctx and _detect_topic_shift(query, chat_ctx):
@@ -2226,6 +2392,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
                 logger.error("Finance module error: %s", exc)
         else:
             logger.info("Finance circuit breaker is OPEN — skipping")
+            context_parts.append("[System Note: Live market data feed is temporarily in cooling down state due to transient upstream network failures. Synthesizing from internal valuation and fundamental knowledge.]")
 
     # Technical Analysis + Options Strategy (premium feature)
     q_lower = query.lower()
@@ -2356,7 +2523,6 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             or _has_keyword_match(query, _FACTUAL_KEYWORDS)
             or is_factual
             or any(w in query.lower() for w in ["search", "find", "latest", "news", "google", "today", "2026"])
-            or (domain in ("general", "science", "health", "history") and "rag" not in sources)
         )
     )
 
@@ -2376,11 +2542,12 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
                 logger.error("Web search error: %s", exc)
         else:
             logger.info("Web search circuit breaker is OPEN — skipping")
+            context_parts.append("[System Note: Live web search is temporarily in cooling down state due to transient upstream network failures. Synthesizing from internal verified knowledge base.]")
 
     # Memory
     # (chat_ctx has already been retrieved early for RAG follow-up check)
 
-    fused_context = "\n\n---\n\n".join(context_parts)
+    fused_context = _fuse_context_budget(context_parts, max_budget=config.CONTEXT_BUDGET)
 
     # ── 6. Streaming Response ─────────────────────────────────────────────
     full_response = ""

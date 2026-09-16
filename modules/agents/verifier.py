@@ -188,6 +188,17 @@ def _repair_system_diagram(query: str, response: str) -> str:
 
 def verify_response(query: str, response: str, evidence: str = None) -> str:
     """Audits and refines response to ensure high quality and domain safety compliance."""
+    # Strip reasoning traces before verification so the verifier audits only the final answer
+    from modules.reasoning_trace import ReasoningTraceStateMachine
+    trace_machine = ReasoningTraceStateMachine()
+    clean_output = trace_machine.feed(response)
+    remainder, traces = trace_machine.finish()
+    clean_output += remainder
+    if traces:
+        logger.info("Verifier: Stripped %d reasoning trace(s) before audit.", len(traces))
+    if clean_output.strip():
+        response = clean_output.strip()
+
     # First, run the visual check to intercept and repair corrupted diagrams
     if _is_corrupted_diagram(response):
         response = _repair_system_diagram(query, response)

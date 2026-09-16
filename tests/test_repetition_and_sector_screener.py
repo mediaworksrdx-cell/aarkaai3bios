@@ -108,3 +108,102 @@ def test_ten_stock_screener_no_repetition_false_positive():
 """
     assert _find_repetition_pos(sample_10_stocks) is None
 
+
+def test_comparative_query_no_repetition_false_positive():
+    text = (
+        "Fundamental analysis and technical analysis are two distinct approaches used by investors to evaluate financial instruments.\n\n"
+        "1. Definition:\n"
+        "   - Fundamental Analysis: This approach focuses on evaluating the intrinsic value of an asset based on its underlying fundamentals such as earnings, revenue growth, debt levels, industry position, management quality, and competitive advantages.\n"
+        "   - Technical Analysis: This method relies on analyzing price patterns, trends, trading volumes, moving averages, and other chart indicators to predict future price movements.\n\n"
+        "2. Pros and Cons:\n"
+        "   Fundamental analysis is beneficial for long-term investors who want a deeper understanding of the company's financial health, growth prospects, and competitive position in its industry.\n"
+        "   Technical analysis can be useful for short-term traders who want to identify timely entry and exit points based on market sentiment and momentum."
+    )
+    assert _find_repetition_pos(text) is None
+
+
+def test_clean_response_trailing_step_incomplete_clause():
+    from modules.aarkaa_engine import _clean_response
+
+    text = (
+        "1. Definition:\n"
+        "   - Fundamental Analysis: Focuses on evaluating the intrinsic value of an asset.\n"
+        "   - Technical Analysis: Relies on analyzing price patterns and indicators.\n\n"
+        "2. Pros:\n"
+        "   Fundamental analysis is beneficial for long-term investors who want a deeper understanding of financial health.\n"
+        "   Technical analysis can be useful for short-term traders while technical analysis is often used in s"
+    )
+    cleaned = _clean_response(text)
+    # Must NOT end with "in s."
+    assert not cleaned.endswith("in s.")
+    assert not cleaned.endswith("in s")
+    # Must end with the last complete sentence
+    assert cleaned.endswith("understanding of financial health.")
+
+
+def test_build_final_prompt_general_query_token_budget():
+    from modules.aarkaa_engine import _build_final_prompt
+    query = "What is the difference between fundamental analysis and technical analysis?"
+    prompt, tokens, temp = _build_final_prompt(query, "", intent="comparison")
+    assert tokens > 0, f"Expected tokens to be defined and > 0, got {tokens}"
+    assert isinstance(tokens, int)
+
+
+def test_guard_token_stream_trailing_list_marker_cleanup():
+    from modules.aarkaa_engine import _guard_token_stream
+    tokens = [
+        "Here are three sources:\n",
+        "1. [Source 1](https://a.com)\n",
+        "2. [Source 2](https://b.com)\n",
+        "3. [Source 3](https://c.com)\n",
+        "4."
+    ]
+    output = "".join(list(_guard_token_stream(iter(tokens))))
+    assert not output.strip().endswith("4.")
+    assert not output.strip().endswith("4")
+    assert output.strip().endswith("(https://c.com)")
+
+
+def test_guard_token_stream_closing_preamble_rollback():
+    from modules.aarkaa_engine import _guard_token_stream
+    tokens = [
+        "Fundamental analysis evaluates financial health. ",
+        "Technical analysis studies price action.\n\n",
+        "However, if there is anything else you need assistance with, ",
+        "please let me know!"
+    ]
+    output = "".join(list(_guard_token_stream(iter(tokens))))
+    # Must cleanly roll back to the end of the previous sentence
+    assert output.strip().endswith("studies price action.")
+    assert "if there is anything else" not in output
+    assert "please let me know" not in output
+
+
+def test_guard_token_stream_meta_disclaimer_interception():
+    from modules.aarkaa_engine import _guard_token_stream
+    tokens = [
+        "Fundamental analysis evaluates financial health. ",
+        "Technical analysis studies price action over time.\n\n",
+        "*Note: The reference information provided does not directly answer this question, ",
+        "so I am providing my own detailed explanation based on the primary objective stated above.** ***"
+    ]
+    output = "".join(list(_guard_token_stream(iter(tokens))))
+    assert output.strip().endswith("studies price action over time.")
+    assert "Note:" not in output
+    assert "reference information" not in output
+    assert not output.endswith("*")
+
+
+def test_clean_response_meta_disclaimer_cleanup():
+    from modules.aarkaa_engine import _clean_response
+    text = (
+        "Fundamental analysis evaluates financial health.\n"
+        "Technical analysis studies price patterns.\n\n"
+        "\\*Note: The reference information provided does not directly answer this question, "
+        "so I am providing my own detailed explanation based on the primary objective stated above.** ***"
+    )
+    cleaned = _clean_response(text)
+    assert cleaned.strip().endswith("studies price patterns.")
+    assert "Note:" not in cleaned
+    assert "reference information" not in cleaned
+    assert not cleaned.endswith("*")

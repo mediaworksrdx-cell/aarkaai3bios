@@ -1,4 +1,4 @@
-﻿"""
+"""
 AARKAAI – GCP Compute Engine Migration & Deployment Manager
 Automates project packaging, key discovery / connection, remote upload to GCP VM (35.225.45.190),
 automated environment provisioning, systemd service startup, and health checks.

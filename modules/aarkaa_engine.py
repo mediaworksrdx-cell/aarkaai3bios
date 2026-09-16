@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Optional, Tuple
 
-from config import MODEL_PATH, MAX_TOKENS
+from config import MODEL_PATH, MAX_TOKENS, MODEL_CONTEXT_WINDOW
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +298,7 @@ def _get_model(force_gpu=True, force_general=False):
                             try:
                                 _model_coder_gpu = Llama(
                                     model_path=str(_gguf_coder_path),
-                                    n_ctx=16384,
+                                    n_ctx=MODEL_CONTEXT_WINDOW,
                                     n_threads=_get_threads(),
                                     n_threads_batch=_get_batch_threads(),
                                     n_batch=1024,
@@ -322,7 +322,7 @@ def _get_model(force_gpu=True, force_general=False):
                     try:
                         _model_gpu = Llama(
                             model_path=str(_gguf_file_path),
-                            n_ctx=16384,
+                            n_ctx=MODEL_CONTEXT_WINDOW,
                             n_gpu_layers=_get_gpu_layers(),
                             n_threads=_get_threads(),
                             n_threads_batch=_get_batch_threads(),
@@ -384,7 +384,7 @@ def _idle_monitor_loop():
                             from llama_cpp import Llama
                             _model_gpu = Llama(
                                 model_path=str(_gguf_file_path),
-                                n_ctx=16384,
+                                n_ctx=MODEL_CONTEXT_WINDOW,
                                 n_gpu_layers=_get_gpu_layers(),
                                 n_threads=_get_threads(),
                                 n_threads_batch=_get_batch_threads(),
@@ -430,7 +430,7 @@ def init():
         logger.info("Initializing AARKAA-%s model from %s...", model_tier, gguf_file)
         _model_gpu = Llama(
             model_path=str(gguf_file),
-            n_ctx=16384,
+            n_ctx=MODEL_CONTEXT_WINDOW,
             n_gpu_layers=_get_gpu_layers(),
             n_threads=_get_threads(),
             n_threads_batch=_get_batch_threads(),
@@ -529,17 +529,25 @@ def _find_repetition_pos(text: str) -> int | None:
         words = [m.group(0).lower() for m in words_matches]
         n = len(words)
 
-        # 2. Multi-scale consecutive repetition windows (repeating same sentence or block immediately)
-        for w in range(8, min(800, n // 2 + 1)):
+        # 2. Multi-scale consecutive repetition windows
+        # For medium/long spans (w >= 16 words), require 2 consecutive repeats
+        for w in range(16, min(800, n // 2 + 1)):
             if words[-w:] == words[-2*w:-w]:
                 return words_matches[n - w].start()
 
-        # 3. Non-consecutive large phrase repetition (25+ words, detects whole paragraph cyclical restarts)
-        if n >= 50:
-            tail_25 = tuple(words[-25:])
-            for i in range(n - 50):
-                if tuple(words[i:i+25]) == tail_25:
-                    return words_matches[n - 25].start()
+        # For short spans (8 <= w < 16), require at least 3 consecutive repeats to prevent
+        # false positives on natural comparative phrasing and parallel sentence structures
+        for w in range(8, min(16, n // 3 + 1)):
+            if words[-w:] == words[-2*w:-w] == words[-3*w:-2*w]:
+                return words_matches[n - 2*w].start()
+
+        # 3. Non-consecutive multi-sentence paragraph repetition (45+ words, detects whole paragraph cyclical restarts
+        # without false-positives on single repeated definition sentences or source descriptions)
+        if n >= 90:
+            tail_45 = tuple(words[-45:])
+            for i in range(n - 90):
+                if tuple(words[i:i+45]) == tail_45:
+                    return words_matches[n - 45].start()
 
     return None
 
@@ -551,27 +559,29 @@ def _has_repetition(text: str) -> bool:
 
 def _clean_repetition_boundary(text: str, rep_pos: int) -> int:
     """
-    Given a repetition start position, rolls back to the last complete sentence,
-    paragraph, or line boundary to avoid leaving trailing half-sentences or
+    Given a repetition start position, rolls back strictly to the last complete sentence
+    or paragraph boundary to avoid leaving trailing half-sentences or
     dangling transitional clauses (e.g. 'It is important to note that the').
     """
     pre = text[:rep_pos].rstrip()
     if not pre:
         return 0
 
-    if re.search(r'[\.!\?]\s*$', pre):
+    # Strip any trailing list numbers or bullets from pre
+    pre = re.sub(r'\n+\s*(?:-|\*|\d+\.)\s*$', '', pre)
+
+    if re.search(r'[\.!\?]\s*$', pre) and not (pre.endswith('.') and len(pre) > 1 and pre[-2].isdigit()):
         return len(pre)
 
     last_term = -1
     for m in re.finditer(r'[\.!\?](?:\s+|\n)|(?:\n\s*\n)', pre):
+        char_pos = m.start()
+        if pre[char_pos] == '.' and char_pos > 0 and pre[char_pos-1].isdigit():
+            continue
         last_term = m.end()
 
-    if last_term != -1 and last_term >= len(pre) * 0.4:
+    if last_term != -1 and last_term >= len(pre) * 0.3:
         return last_term
-
-    last_nl = pre.rfind('\n')
-    if last_nl != -1 and last_nl >= len(pre) * 0.5:
-        return last_nl
 
     return len(pre)
 
@@ -582,40 +592,66 @@ def _build_chatml(system: str, user: str) -> str:
 
 
 def _build_chatml_multi(system: str, history: list[dict] | None, user: str,
-                       max_history_chars: int = 20000, user_facts: str = "") -> str:
+                       max_history_chars: int = 6000, user_facts: str = "") -> str:
     """Build ChatML format with system message, multi-turn history, and current user prompt.
     
-    Truncates history starting from the OLDEST messages to fit within max_history_chars.
-    Does NOT append ellipsis '…' to avoid model copy-cat behavior leading to early halts.
+    When COMPACTION_ENABLED is True, uses token-aware history compaction
+    with proper budget accounting (system + query + reserved output).
+    Falls back to character-based truncation when disabled.
     """
     sys_block = system
     if user_facts:
         sys_block = f"{system}\n\n{user_facts}"
     prompt = f"<|im_start|>system\n{sys_block}<|im_end|>\n"
     if history:
-        entries = []
-        current_len = 0
-        for msg in reversed(history):
-            role = "user" if msg.get("role") == "user" else "assistant"
-            content = msg.get("message") or msg.get("content", "")
-            if any(k in content.lower() for k in [
-                "attempt to override my instructions",
-                "bypass my guidelines",
-                "bypass my actual system instructions",
-                "won't follow embedded",
-                "operating under my actual system instructions",
-            ]):
-                continue
-            # Cleanly limit extremely long individual messages without adding ellipsis
-            if len(content) > 2000:
-                content = content[:2000]
-            entry = f"<|im_start|>{role}\n{content}<|im_end|>\n"
-            if current_len + len(entry) > max_history_chars:
-                break
-            entries.append(entry)
-            current_len += len(entry)
-        # Restore chronological order for the final prompt context
-        prompt += "".join(reversed(entries))
+        from config import COMPACTION_ENABLED, RESERVED_OUTPUT_TOKENS, MODEL_CONTEXT_WINDOW
+        if COMPACTION_ENABLED:
+            from modules.context_compaction import compact_history, _tokenize_len
+            model_inst = _get_model(force_gpu=True) if not _is_stub else None
+            # Compute history token budget: total - system - query - reserved_output - safety
+            sys_tokens = _tokenize_len(prompt, model_inst)
+            user_block = f"<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n"
+            user_tokens = _tokenize_len(user_block, model_inst)
+            usable = max(1024, MODEL_CONTEXT_WINDOW - RESERVED_OUTPUT_TOKENS)
+            history_budget = max(512, usable - sys_tokens - user_tokens - 200)
+            compacted = compact_history(history, history_budget, model_inst)
+            for msg in compacted:
+                role = "user" if msg.get("role") == "user" else "assistant"
+                content = msg.get("message") or msg.get("content", "")
+                if any(k in content.lower() for k in [
+                    "attempt to override my instructions",
+                    "bypass my guidelines",
+                    "bypass my actual system instructions",
+                    "won't follow embedded",
+                    "operating under my actual system instructions",
+                ]):
+                    continue
+                if len(content) > 2000:
+                    content = content[:2000]
+                prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
+        else:
+            # Fallback: character-based truncation (original behavior)
+            entries = []
+            current_len = 0
+            for msg in reversed(history):
+                role = "user" if msg.get("role") == "user" else "assistant"
+                content = msg.get("message") or msg.get("content", "")
+                if any(k in content.lower() for k in [
+                    "attempt to override my instructions",
+                    "bypass my guidelines",
+                    "bypass my actual system instructions",
+                    "won't follow embedded",
+                    "operating under my actual system instructions",
+                ]):
+                    continue
+                if len(content) > 2000:
+                    content = content[:2000]
+                entry = f"<|im_start|>{role}\n{content}<|im_end|>\n"
+                if current_len + len(entry) > max_history_chars:
+                    break
+                entries.append(entry)
+                current_len += len(entry)
+            prompt += "".join(reversed(entries))
     prompt += f"<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n"
     return prompt
 
@@ -734,7 +770,8 @@ def _stream_modal_gpu(prompt, max_new_tokens=3800, stop=None, temperature=0.7, m
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"}
         )
-        resp = urllib.request.urlopen(req, timeout=90)
+        # 15s timeout: if Modal GPU is cold or slow, seamlessly fall back to local Aarka engine
+        resp = urllib.request.urlopen(req, timeout=15)
 
         def generator():
             for line in resp:
@@ -756,6 +793,8 @@ def _stream_modal_gpu(prompt, max_new_tokens=3800, stop=None, temperature=0.7, m
 
 
 # ─── Dynamic Provenance Compliance ──────────────────────────────────────────
+# Previously: hardcoded markdown tables with fabricated timestamps.
+# Now: runtime-generated from actual FieldProvenance records.
 try:
     from modules.screener.provenance import generate_compliance_response, _GOVERNANCE_SPEC
     _COMPLIANCE_RESPONSE = _GOVERNANCE_SPEC
@@ -773,12 +812,12 @@ Aarka AI guarantees that every company returned in a sector-specific screening r
 
 1. **Sector Intent Normalization**: User query terms are mapped to canonical sector keys via alias tables.
 2. **Deterministic Universe Whitelisting**: Only stocks from the resolved sector universes are loaded. No cross-sector stocks enter the pipeline.
-3. **Hard Sector Boundary Enforcement**: Banking, IT, Auto, and other off-sector tickers are architecturally excluded at the universe level.
+3. **Hard Sector Boundary Enforcement**: Banking, IT, Auto, and other off-sector tickers are architecturally excluded at the universe level — they are never evaluated, scored, or ranked.
 4. **Field-Level Validation**: Pre-screen validation confirms every constituent symbol belongs to the target universes before scoring begins.
 
 **Zero Cross-Contamination Invariant**: No off-sector tickers are ever evaluated, ranked, or returned.
 
-This guarantee is enforced by code architecture (whitelist-only universe loading), not by LLM judgment.
+This guarantee is enforced by code architecture (whitelist-only universe loading), not by LLM judgment. The provenance system tracks the sector assignment source for each stock.
 """
 
 
@@ -791,9 +830,13 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False, user_que
     - Social media hashtag cascades (#StockAnalysis, #AarkaaAI, etc.)
     - False-positive prompt injection refusals from safety alignments (fails over to Gemini)
     - Unrequested code blocks or ticker drift.
+    - Reasoning traces (<think>...</think>, [THINKING]...[/THINKING]) from reasoning models.
     Employs a 50-char sliding lookahead window so multi-token closure sequences are intercepted
     and truncated BEFORE reaching the client.
     """
+    from modules.reasoning_trace import ReasoningTraceStateMachine
+    trace_machine = ReasoningTraceStateMachine()
+
     BUFFER_SIZE = 80
     buf = ""
     accumulated_text = ""
@@ -805,8 +848,7 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False, user_que
         re.DOTALL
     )
     pat_closing = re.compile(
-        r'(?i)\b(?:if\s+(?:there\s+are\s+|you\s+have\s+)?any\s+(?:specific\s+|other\s+|further\s+)?questions[^\.\n]*?[,\.]?\s*)?'
-        r'(?:please let me know|let me know if|feel free to ask|hope this helps|'
+        r'(?i)\b(?:please let me know|let me know if|feel free to ask|hope this helps|'
         r'if you have any (?:other |further )?questions|'
         r'if you need any (?:other |further )?clarification|'
         r'don\'t hesitate to|do not hesitate to|'
@@ -817,9 +859,18 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False, user_que
         r'(?<![#\w])#[A-Za-z][A-Za-z0-9_]{1,}',
         re.DOTALL
     )
+    pat_meta_disclaimer = re.compile(
+        r'(?i)(?:\n\s*)?(?:\\?\*){0,2}\s*Note:\s*(?:the reference|the context|the provided|based on the primary|i am providing|the above|this response)',
+        re.DOTALL
+    )
     multi_turn_markers = ["<|im_start|>", "<|im_end|>", "<|endoftext|>", "\n1user", " 1user", " 1assistant", "\nuser:", "\nassistant:", "\nhuman:"]
 
     for token in raw_stream:
+        if not token:
+            continue
+
+        # Feed through reasoning trace state machine (strips <think> blocks)
+        token = trace_machine.feed(token)
         if not token:
             continue
 
@@ -894,54 +945,101 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False, user_que
             logger.warning("Multi-turn drift marker detected; terminating stream.")
             break
 
-        if "```" in low_accum and not prompt_requests_code:
+        uq_lower = (user_query or "").lower()
+        is_chit_chat = any(uq_lower.strip().startswith(g) for g in ["hello", "hi", "hey", "how are you", "good morning", "good evening"])
+        if "```" in low_accum and is_chit_chat and not prompt_requests_code:
             if any(f"```{lang}" in low_accum for lang in ["python", "javascript", "bash", "c++", "java", "sql", "sh", "ts", "cpp", "json"]):
-                logger.warning("Unrequested programming code block detected; terminating stream.")
+                logger.warning("Unrequested programming code block in chit-chat detected; terminating stream.")
                 break
 
-        if "[Finance Data]" in accumulated_text or "Target (TGT)" in accumulated_text:
+        if "[Finance Data]" in accumulated_text or ("target" not in uq_lower and "Target (TGT)" in accumulated_text):
             logger.warning("Unrequested ticker drift detected; terminating stream.")
             break
 
         rep_pos = _find_repetition_pos(accumulated_text)
         if rep_pos is not None:
             clean_pos = _clean_repetition_boundary(accumulated_text, rep_pos)
-            logger.warning("Repetition loop detected at pos %d (rolled back to pos %d); truncating and terminating stream.", rep_pos, clean_pos)
             already_yielded = len(accumulated_text) - len(buf)
             offset = clean_pos - already_yielded
             if offset > 0:
                 valid_tail = buf[:offset].rstrip()
                 valid_tail = re.sub(r'[\s\U00010000-\U0010ffff\*\s`]+$', '', valid_tail)
+                valid_tail = re.sub(r'\n+\s*(?:-|\*|\d+\.)\s*$', '', valid_tail)
                 if valid_tail:
                     yield valid_tail
-            return
+                logger.warning("Repetition loop detected at pos %d (rolled back to pos %d); truncating and terminating stream.", rep_pos, clean_pos)
+                return
+            else:
+                # The repetition rollback pos was already yielded to the client.
+                # Never abort mid-word or mid-sentence! Finish the current sentence in buf before stopping.
+                end_match = None
+                for m in re.finditer(r'[\.!\?](?:\s+|\n)|(?:\n\s*\n)', buf):
+                    char_pos = m.start()
+                    if buf[char_pos] == '.' and char_pos > 0 and buf[char_pos-1].isdigit():
+                        continue
+                    end_match = m
+                    break
+                if end_match:
+                    valid_tail = buf[:end_match.end()].rstrip()
+                    valid_tail = re.sub(r'[\s\U00010000-\U0010ffff\*\s`]+$', '', valid_tail)
+                    valid_tail = re.sub(r'\n+\s*(?:-|\*|\d+\.)\s*$', '', valid_tail)
+                    if valid_tail:
+                        yield valid_tail
+                    logger.warning("Repetition loop detected in past tokens; cleanly finished current sentence and terminated stream.")
+                    return
 
         # Check termination patterns in current buffer
         match_end = pat_end_marker.search(buf)
         match_closing = pat_closing.search(buf)
         match_hash = pat_hashtag.search(buf) if (not prompt_requests_code and not in_code_block) else None
+        match_meta = pat_meta_disclaimer.search(buf)
 
         earliest = None
-        for m in (match_end, match_closing, match_hash):
+        for m in (match_end, match_closing, match_hash, match_meta):
             if m:
                 pos = m.start()
                 if earliest is None or pos < earliest:
                     earliest = pos
 
         if earliest is not None:
-            valid_tail = buf[:earliest].rstrip()
-            valid_tail = re.sub(r'[\s\U00010000-\U0010ffff\*\s`]+$', '', valid_tail)
+            pre = buf[:earliest].rstrip()
+            # Roll back to the last complete sentence or paragraph boundary before the closing phrase
+            last_boundary = -1
+            for end_m in re.finditer(r'[\.!\?](?:\s+|\n)|(?:\n\s*\n)', pre):
+                char_pos = end_m.start()
+                if pre[char_pos] == '.' and char_pos > 0 and pre[char_pos-1].isdigit():
+                    continue
+                last_boundary = end_m.end()
+
+            if last_boundary != -1:
+                valid_tail = pre[:last_boundary].rstrip()
+            else:
+                if any(w in pre.lower() for w in ["however", "if there", "if you", "please", "feel free", "let me know", "hope this"]):
+                    valid_tail = ""
+                else:
+                    valid_tail = pre.rstrip()
+
+            valid_tail = re.sub(r'[\s\U00010000-\U0010ffff\*\s`\"\\#]+$', '', valid_tail)
+            valid_tail = re.sub(r'\n+\s*(?:-|\*|\d+\.)\s*$', '', valid_tail)
             if valid_tail:
                 yield valid_tail
-            logger.info("Terminated stream on stop guard pattern match (pos=%d).", earliest)
+            logger.info("Terminated stream on stop guard pattern match (pos=%d, rolled back to pos=%d).", earliest, last_boundary)
             return
 
-        if not stripped_header and len(accumulated_text) <= 30:
+        if not stripped_header and len(accumulated_text) <= 80:
             low_t = token.lower().strip()
             if low_t in ["thought:", "thought", "action input:", "action input"]:
                 logger.info("Stripping leading ReAct scaffolding token: %r", token)
-                stripped_header = True
                 buf = ""
+                continue
+            # Strip accidental ```markdown, ```md, or prompt delimiter line at stream start
+            stripped_buf = buf.lstrip()
+            if stripped_buf.startswith(('```markdown', '```md', '----------------', '================', '</reference_context>')):
+                if '\n' in stripped_buf:
+                    logger.info("Stripping leading markdown fence or prompt separator from stream: %r", stripped_buf[:40])
+                    buf = stripped_buf.split('\n', 1)[1]
+                    stripped_header = True
+                    accumulated_text = buf
                 continue
 
         if len(buf) > BUFFER_SIZE:
@@ -949,20 +1047,57 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False, user_que
             buf = buf[-BUFFER_SIZE:]
             yield to_yield
 
+    # Finalize reasoning trace state machine
+    trace_remainder, collected_traces = trace_machine.finish()
+    if trace_remainder:
+        buf = trace_remainder + buf
+    if collected_traces:
+        logger.info("Stripped %d reasoning trace(s) from stream output.", len(collected_traces))
+
     if buf:
         clean_buf = buf
         match_end = pat_end_marker.search(clean_buf)
         match_closing = pat_closing.search(clean_buf)
         match_hash = pat_hashtag.search(clean_buf) if (not prompt_requests_code and not in_code_block) else None
+        match_meta = pat_meta_disclaimer.search(clean_buf)
         earliest = None
-        for m in (match_end, match_closing, match_hash):
+        for m in (match_end, match_closing, match_hash, match_meta):
             if m:
                 pos = m.start()
                 if earliest is None or pos < earliest:
                     earliest = pos
         if earliest is not None:
-            clean_buf = clean_buf[:earliest]
-        clean_buf = re.sub(r'[\s\U00010000-\U0010ffff\*\s`]+$', '', clean_buf)
+            pre = clean_buf[:earliest].rstrip()
+            last_boundary = -1
+            for end_m in re.finditer(r'[\.!\?](?:\s+|\n)|(?:\n\s*\n)', pre):
+                char_pos = end_m.start()
+                if pre[char_pos] == '.' and char_pos > 0 and pre[char_pos-1].isdigit():
+                    continue
+                last_boundary = end_m.end()
+
+            if last_boundary != -1:
+                clean_buf = pre[:last_boundary].rstrip()
+            else:
+                if any(w in pre.lower() for w in ["however", "if there", "if you", "please", "feel free", "let me know", "hope this"]):
+                    clean_buf = ""
+                else:
+                    clean_buf = pre.rstrip()
+
+        clean_buf = re.sub(r'[\s\U00010000-\U0010ffff\*\s`\"\\#]+$', '', clean_buf)
+        # Strip trailing unfinished list numbers or bullet markers (e.g. \n4. or \n- )
+        clean_buf = re.sub(r'\n+\s*(?:-|\*|\d+\.)\s*$', '', clean_buf)
+
+        # If the trailing line is an unfinished bullet/list item without closing punctuation,
+        # strip the incomplete dangling fragment back to the last clean line
+        if '\n' in clean_buf:
+            last_line = clean_buf.rsplit('\n', 1)[-1].strip()
+            if (last_line.startswith(('- ', '* ')) or (last_line and last_line[0].isdigit() and '. ' in last_line[:5])):
+                if not last_line.endswith(('.', '!', '?', ':', ')', '`', ']', '>')):
+                    clean_buf = clean_buf.rsplit('\n', 1)[0].rstrip()
+
+        # Strip accidental trailing ``` code fence
+        clean_buf = re.sub(r'\n?```\s*$', '', clean_buf)
+
         if clean_buf:
             yield clean_buf
 
@@ -987,7 +1122,12 @@ def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, fo
         "**End of answer", "**End of response", "**End of Answer", "**End of Response",
         "End of answer.", "End of response.", "End of answer", "End of response",
         "(End of answer)", "(End of response)", "[End of answer]", "[End of response]",
-        "--- END", "(End of text)", "### End of Answer", "### End of Response"
+        "--- END", "(End of text)", "### End of Answer", "### End of Response",
+        "\nNote: The reference", "\n*Note: The reference", "\n**Note: The reference",
+        "\n\\*Note: The reference", "Note: The reference information",
+        "*Note: The reference", "**Note: The reference", "\\*Note: The reference",
+        "\nNote: based on the primary", "\n*Note: based on the primary",
+        "\nNote: The context", "\n*Note: The context"
     ]
     if stop:
         stop_tokens.extend(stop)
@@ -997,7 +1137,13 @@ def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, fo
         "code", "script", "program", "function", "write code", "python",
         "javascript", "implement", "fastapi", "design", "system", "api",
         "architecture", "backend", "service", "build", "create", "app",
-        "server", "oms", "database", "class", "structure"
+        "server", "oms", "database", "class", "structure", "algorithm",
+        "data structure", "sort", "search", "tree", "graph", "heap",
+        "recursion", "example", "how to", "tutorial", "syntax", "sample",
+        "calculate", "method", "loop", "array", "list", "query", "sql",
+        "c++", "java", "c#", "rust", "go", "golang", "html", "css",
+        "regex", "test", "unittest", "pytest", "benchmark", "devops",
+        "docker", "kubernetes", "git", "bash", "linux", "terminal"
     ]
     code_phrases_to_ignore = [
         "project code", "secret code", "postal code", "zip code", "discount code",
@@ -1045,8 +1191,7 @@ def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, fo
             max_tokens=max_new_tokens,
             temperature=temperature,
             top_p=0.9,
-            repeat_penalty=1.0 if temperature < 0.1 else 1.18,
-            repeat_last_n=1024,
+            repeat_penalty=1.0 if temperature < 0.1 else (1.08 if temperature < 0.3 else 1.18),
             stop=stop_tokens,
             stream=True
         ))
@@ -1055,9 +1200,10 @@ def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, fo
 
 
 def _truncate_agent_prompt(prompt_str: str, model_instance) -> str:
-    """If the agent prompt exceeds 12000 tokens, run the 5-layer context compaction pipeline."""
-    from modules.context_compaction import compact_prompt
-    return compact_prompt(prompt_str, model_instance, max_tokens=12000)
+    """If the agent prompt exceeds the compaction trigger threshold, run the 5-layer context compaction pipeline."""
+    from modules.context_compaction import compact_prompt, _compute_usable_budget
+    usable_budget = _compute_usable_budget()
+    return compact_prompt(prompt_str, model_instance, prompt_token_budget=usable_budget)
 
 
 def generate_raw(prompt, max_new_tokens=300, stop=None):
@@ -1079,8 +1225,9 @@ def generate_raw(prompt, max_new_tokens=300, stop=None):
     prompt_len = len(prompt_tokens)
     
     # Dynamic context limit calculation
-    ctx_limit = getattr(model_instance, "n_ctx", lambda: 16384)() if callable(getattr(model_instance, "n_ctx", None)) else 16384
-    max_tokens = max(1, min(max_new_tokens or 3800, ctx_limit - prompt_len - 100))
+    ctx_limit = getattr(model_instance, "n_ctx", lambda: MODEL_CONTEXT_WINDOW)() if callable(getattr(model_instance, "n_ctx", None)) else MODEL_CONTEXT_WINDOW
+    from config import RESERVED_OUTPUT_TOKENS as _reserved_out
+    max_tokens = max(1, min(max_new_tokens or 3800, ctx_limit - prompt_len - _reserved_out))
         
     with _model_lock:
         stream = model_instance(
@@ -1169,9 +1316,42 @@ def _clean_response(text):
     for phrase in meta_phrases_to_remove:
         text = text.replace(phrase, "").strip()
 
+    # Unwrap Google redirect URLs (https://www.google.com/url?...&url=ACTUAL_URL...)
+    # The LLM sometimes reproduces these from training data or web search context.
+    try:
+        from urllib.parse import urlparse, parse_qs, unquote
+        def _unwrap_google_url(m):
+            full_url = m.group(0)
+            try:
+                parsed = urlparse(full_url)
+                if parsed.hostname and "google.com" in parsed.hostname and parsed.path == "/url":
+                    params = parse_qs(parsed.query)
+                    actual = params.get("url", params.get("q", [None]))[0]
+                    if actual:
+                        return unquote(actual)
+            except Exception:
+                pass
+            return full_url
+        text = re.sub(
+            r'https?://(?:www\.)?google\.com/url\?[^\s\)\]]+',
+            _unwrap_google_url,
+            text,
+        )
+    except Exception:
+        pass
+
+    # Strip hallucinated "References:" sections with raw URLs that overflow the response
+    # These appear when the model copies reference links from web search context verbatim.
+    text = re.sub(
+        r'\n\s*(?:References?|Sources?|Citations?)\s*:\s*\n(?:\s*[-•*]?\s*(?:\[.*?\]\(https?://[^\)]+\)|https?://\S+)\s*\n?)+\s*$',
+        '', text, flags=re.IGNORECASE
+    ).strip()
+
     # Regex-based disclaimer and meta-scaffolding stripper
     # Strip multi-turn hallucinations and synthetic follow-up turns (e.g. 1user, <|im_start|>user, User:, Human:)
-    text = re.sub(r"(?i)(?:\n|\b)(?:1user\b|<\|im_start\|>user|\nUser:|\nQuestion:|\nHuman:).*$", "", text, flags=re.DOTALL).strip()
+    # Strip multi-turn hallucinations — match only to end of CURRENT LINE (not re.DOTALL)
+    # to prevent catastrophic deletion of all subsequent content.
+    text = re.sub(r"(?i)(?:\n|\b)(?:1user\b|<\|im_start\|>user|\nUser:|\nQuestion:|\nHuman:)[^\n]*", "", text).strip()
 
     # Strip autoregressive repetition loops (e.g. repeated section headers or cyclical paragraphs)
     rep_pos = _find_repetition_pos(text)
@@ -1184,26 +1364,29 @@ def _clean_response(text):
         r"(?i)(?:\n\s*)?(?:\*{1,2}|[\(\[])?\s*end of (?:answer|response|text|explanation)\s*(?:\*{1,2}|[\)\]])?.*$",
         r"(?i)(?:\n\s*)?---+\s*end\s+(?:of\s+)?(?:answer|response|disclaimer|text).*$",
         r"(?i)(?:\n\s*)?###\s*end of (?:answer|response|text).*$",
+        r"(?i)(?:\n\s*)?(?:\\?\*){0,2}\s*Note:\s*(?:the reference|the context|the provided|based on the primary|i am providing|the above).*$",
     ]
     for pat in end_marker_patterns:
-        text = re.sub(pat, "", text, flags=re.DOTALL).strip()
+        text = re.sub(pat, "", text).strip()
 
     # Strip conversational closings, thank you notes, and signoffs
+    # NOTE: These patterns intentionally do NOT use re.DOTALL to avoid
+    # catastrophic cross-line deletion of valid content.
     closing_patterns = [
-        r"(?i)(?:\n\s*)?(?:please let me know|let me know if|feel free to ask|hope this helps|if you have any (?:other |further )?questions|if you need any (?:other |further )?clarification|don\'t hesitate to|do not hesitate to|thank you for your question|best regards|sincerely|yours truly).*$",
-        r"(?i)\s*(?:this information was fetched from yahoo finance|please note that this is live financial data).*$",
-        r"(?i)\n*\s*(?:it is important to note|please note|note that|keep in mind|as of now|these values are live).*$",
+        r"(?i)(?:\n\s*)?(?:please let me know|let me know if|feel free to ask|hope this helps|if you have any (?:other |further )?questions|if you need any (?:other |further )?clarification|don\'t hesitate to|do not hesitate to|thank you for your question|best regards|sincerely|yours truly)[^\n]*",
+        r"(?i)\s*(?:this information was fetched from yahoo finance|please note that this is live financial data)[^\n]*",
+        r"(?i)\n*\s*(?:it is important to note|please note|note that|keep in mind|as of now|these values are live)[^\n]*",
     ]
     for pat in closing_patterns:
-        text = re.sub(pat, "", text, flags=re.DOTALL).strip()
+        text = re.sub(pat, "", text).strip()
 
     # Strip social media hashtag cascades and trailing hashtags (e.g. #AarkaaAI #AarkaAI #FinancialAnalysis...)
-    text = re.sub(r"(?i)\s*#Aarkaa(?:AI)?\b.*$", "", text, flags=re.DOTALL).strip()
-    text = re.sub(r"(?i)\s*#Aarka(?:AI)?\b.*$", "", text, flags=re.DOTALL).strip()
-    text = re.sub(r"(?<![#\w])\s*(?:#[A-Za-z][A-Za-z0-9_]{1,}\s*)+.*$", "", text, flags=re.DOTALL).strip()
+    text = re.sub(r"(?i)\s*#Aarkaa(?:AI)?\b[^\n]*", "", text).strip()
+    text = re.sub(r"(?i)\s*#Aarka(?:AI)?\b[^\n]*", "", text).strip()
+    text = re.sub(r"(?<![#\w])\s*(?:#[A-Za-z][A-Za-z0-9_]{1,}\s*)+[^\n]*$", "", text).strip()
 
-    # Strip trailing emojis and stray asterisks/backticks
-    text = re.sub(r'[\s\U00010000-\U0010ffff\*\s`]+$', '', text).strip()
+    # Strip trailing emojis and stray asterisks/backticks/quotes/slashes/hashes
+    text = re.sub(r'[\s\U00010000-\U0010ffff\*\s`\"\\#]+$', '', text).strip()
 
     # If the text has stray trailing backticks not part of a genuine markdown code block, remove them
     code_syntax_markers = ["```python", "```javascript", "```bash", "```json", "```html", "```sql", "```ts", "```c"]
@@ -1233,7 +1416,11 @@ def _clean_response(text):
                 if "your name" in next_last_line or "aarkaa" in next_last_line:
                     lines.pop()
 
-    text = '\n'.join(lines).strip()
+    # Strip accidental outer ```markdown or ```md code block wrapper so response renders as rich text, not a code box
+    if re.match(r'^\s*```(?:markdown|md)\b', text, re.IGNORECASE):
+        text = re.sub(r'^\s*```(?:markdown|md)[^\n]*\n?', '', text, flags=re.IGNORECASE).strip()
+        if text.endswith('```'):
+            text = text[:-3].rstrip()
 
     # Do not truncate if text contains code blocks to avoid corrupting code syntax.
     if "```" in text:
@@ -1257,15 +1444,57 @@ def _clean_response(text):
         # Find the last complete step (ends with sentence-ending punctuation before next step or end)
         step_matches = list(re.finditer(r'\n\s*(?:Step\s+)?\d+[\.\):]', text))
         if len(step_matches) >= 2:
-            # Check if the last step appears incomplete (no sentence-ending punctuation at the very end)
             last_step_start = step_matches[-1].start()
             last_step_text = text[last_step_start:]
             # If the last step has proper ending punctuation, keep everything
             if last_step_text.rstrip()[-1] in '.!?':
                 return text
-            # Otherwise, truncate to end of second-to-last step
+            # Find the last complete sentence within the last step
+            last_complete_pos = -1
+            for end_char in ['. ', '! ', '? ', '.\n', '!\n', '?\n']:
+                p = last_step_text.rfind(end_char)
+                if p > last_complete_pos:
+                    last_complete_pos = p
+            if last_complete_pos != -1:
+                return (text[:last_step_start] + last_step_text[:last_complete_pos + 1]).rstrip()
+            # If the last step has no complete sentence, truncate back to the previous step
             return text[:last_step_start].rstrip()
-        return text + "."
+        else:
+            # Single step - find last complete sentence
+            last_complete_pos = -1
+            for end_char in ['. ', '! ', '? ', '.\n', '!\n', '?\n']:
+                p = text.rfind(end_char)
+                if p > last_complete_pos:
+                    last_complete_pos = p
+            if last_complete_pos != -1:
+                return text[:last_complete_pos + 1].rstrip()
+            return text + "."
+
+    # Preserve responses ending in structural content (tables, lists, etc.)
+    # that naturally don't end with sentence-ending punctuation.
+    last_line = text.rstrip().rsplit('\n', 1)[-1].strip() if text.strip() else ""
+    is_bullet = last_line.startswith(('- ', '* '))
+    # If it's a bullet item, only preserve it if it ends cleanly with punctuation or closer
+    if is_bullet:
+        if last_line.endswith(('.', '!', '?', ':', ')', '`', '|')):
+            return text
+        else:
+            # Drop incomplete dangling bullet item
+            lines_without_last = text.rstrip().rsplit('\n', 1)
+            if len(lines_without_last) > 1 and lines_without_last[0].strip():
+                return lines_without_last[0].rstrip()
+    else:
+        structural_endings = (
+            last_line.startswith('|') or       # markdown table row
+            last_line.endswith('|') or         # markdown table row
+            last_line.endswith('`') or         # inline code or code block closer
+            last_line.endswith('}') or         # JSON/dict/object
+            last_line.endswith(']') or         # array/list
+            last_line.endswith(')') or         # parenthetical
+            last_line.endswith(':')            # header/label
+        )
+        if structural_endings:
+            return text
 
     # Otherwise, find the latest complete sentence ending
     best_pos = -1
@@ -1279,8 +1508,8 @@ def _clean_response(text):
             best_pos = pos
             break
             
-    if best_pos > len(text) * 0.3:
-        return text[:best_pos + 1]
+    if best_pos != -1 and best_pos > len(text) * 0.2:
+        return text[:best_pos + 1].rstrip()
             
     return text + "."
 
@@ -1319,19 +1548,19 @@ def _stub_response(query, context=""):
     # Conversational greetings
     if q_low in ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "namaste", "who are you", "what can you do"]:
         return (
-            "Hello! I am **Aarkaa AI 2.0**, your unified artificial intelligence assistant for **financial modeling, institutional market analysis, algorithmic strategy, and quantitative research**.\n\n"
-            "Here are a few things I can help you with:\n"
-            "• **📈 Live Capital Markets & Valuation**: DCF models, WACC calculations, real-time equities, and macroeconomic indicators.\n"
-            "• **💡 Technical & Options Strategies**: Multi-leg options structures, Sharpe ratio optimization, and quantitative risk hedging.\n"
-            "• **🎓 Institutional Curriculum**: Mastery across financial syllabus, capstone guidance, and certification verification.\n"
-            "• **💻 Algorithmic Code Engineering**: Python, quantitative trading algorithms, data science, and API integrations.\n\n"
-            "How can I assist your research or analysis today?"
+            "Hello! I am **Aarka**, a professional agentic AI coding, design, and research assistant.\n\n"
+            "Here are the core areas I can assist you with:\n"
+            "• **💻 Software & Systems Architecture**: Production-grade code engineering, algorithms, system design, and API architectures.\n"
+            "• **📈 Quantitative Finance & Markets**: Real-time equities, valuation models, multi-factor screening, and technical analytics.\n"
+            "• **🔬 Research & Analysis**: Factual lookup, deep technical synthesis, and domain-grounded intelligence.\n"
+            "• **🛠️ Autonomous Tool Execution**: Automated workflow orchestration, data pipelines, and testing suites.\n\n"
+            "How can I assist your engineering, research, or analysis today?"
         )
 
     return (
         f"I have received your inquiry regarding **{q_clean}**.\n\n"
-        "As **Aarkaa AI**, I provide structured financial modeling, quantitative analytics, and technical solutions. "
-        "Please specify any particular metrics, tickers, models, or datasets you would like to explore!"
+        "As **Aarka**, I provide structured technical analysis, software engineering, and quantitative intelligence. "
+        "Please specify any particular metrics, architecture requirements, or topics you would like to explore!"
     )
 
 
@@ -1363,8 +1592,10 @@ def primary_check(query, lang="en"):
         )
 
         if is_chat_or_greeting:
-            system_prompt = "You are AARKAA, a highly intelligent, warm and friendly AI assistant. You respond strictly in English."
-            user_prompt = f"Respond naturally and warmly to the user: {query}\n\nYou MUST respond strictly in English."
+            system_prompt = "You are AARKAA, a highly intelligent, warm and friendly AI assistant."
+            user_prompt = f"Respond naturally and warmly to the user: {query}"
+            if lang != "en":
+                user_prompt += f"\n\nYou MUST respond ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
             tokens = 500
         elif is_self:
@@ -1373,7 +1604,7 @@ def primary_check(query, lang="en"):
                 "a production-grade AI assistant built by Synthetix Analytics.\n\n"
                 "Your details:\n"
                 "Capabilities:\n"
-                "- Clear, precise responses in English\n"
+                "- Multilingual responses (auto-detects user language)\n"
                 "- Real-time web search via DuckDuckGo and Wikipedia\n"
                 "- Code writing, testing, and execution via BashTool\n"
                 "- File read/write operations in a sandboxed workspace\n"
@@ -1395,16 +1626,19 @@ def primary_check(query, lang="en"):
                 f"Write a direct, elegant response to: '{query}'.\n"
                 "Format the capabilities as a beautiful, sequentially numbered list (1, 2, 3, 4...) and security features as a bulleted list.\n"
                 "Highlight the important terms using bold markdown (e.g. **Real-time web search**).\n"
-                "Do NOT write any introductory or conversational filler like 'Sure, here is...'. Just output the headings and the lists directly.\n"
-                "You MUST write your entire response strictly in English."
+                "Do NOT write any introductory or conversational filler like 'Sure, here is...'. Just output the headings and the lists directly."
             )
+            if lang != "en":
+                user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
             tokens = MAX_TOKENS
         elif any(w in q_lower for w in ["code", "program", "function", "script", "write", "implement", "create a"]):
             system_prompt = (
-                "You are AARKAA, an expert programming AI assistant. You respond strictly in English."
+                "You are AARKAA, an expert programming AI assistant."
             )
-            user_prompt = f"Request: {query}\n\nProvide working code with a brief explanation. You MUST respond strictly in English."
+            user_prompt = f"Request: {query}\n\nProvide working code with a brief explanation."
+            if lang != "en":
+                user_prompt += f" You MUST respond ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
             tokens = MAX_TOKENS
         else:
@@ -1446,7 +1680,8 @@ def primary_check(query, lang="en"):
                     "You cannot predict the price of financial assets. If the user asks for future forecasts, decline."
                 )
                 user_prompt = f"Answer the following question: {query}\n\n"
-            user_prompt += "You MUST write your response strictly in English."
+            if lang != "en":
+                user_prompt += f"You MUST write your response ONLY in the following language: {lang_name}."
             prompt = _build_chatml(system_prompt, user_prompt)
             tokens = MAX_TOKENS
         temp = _get_temperature(query, "general_query")
@@ -1510,8 +1745,8 @@ def self_check_response(query: str, response: str, intent: str) -> bool:
         )
 
     audit_query = (
-        f"User Request: {query[:500]}\n"
-        f"Generated Response (first 800 chars): {response[:800]}\n\n"
+        f"User Request: {query[:1500]}\n"
+        f"Generated Response (sample up to 3500 chars):\n{response[:3500]}\n\n"
         f"Auditing Criteria: {criteria}\n"
         "Does the response pass all checks (PASS) or fail any (FAIL)?"
     )
@@ -1541,34 +1776,7 @@ def self_check_response(query: str, response: str, intent: str) -> bool:
         logger.info("Self-Check (Gemini) decision: %s for intent: %s", decision, intent)
         return "FAIL" not in decision
     except Exception as gemini_exc:
-        logger.debug("Gemini self-check unavailable (%s), falling back to local model", gemini_exc)
-
-    # Strategy 2: Fall back to local 7B model verification
-    model_instance = _get_model(force_gpu=True)
-    if _is_stub or model_instance is None:
-        return True
-
-    audit_prompt = (
-        "<|im_start|>system\n"
-        "You are Aarkaa AI, a strict response quality auditor. "
-        "Determine if a generated response matches the user's intent and is factually consistent. "
-        "Respond with exactly 'PASS' or 'FAIL'. Do NOT write any other words.<|im_end|>\n"
-        f"<|im_start|>user\n{audit_query}<|im_end|>\n"
-        "<|im_start|>assistant\n"
-    )
-
-    try:
-        output = model_instance(
-            audit_prompt,
-            max_tokens=5,
-            temperature=0.0,
-            stop=["<|im_end|>", "<|im_start|>"]
-        )
-        decision = output["choices"][0]["text"].strip().upper()
-        logger.info("Self-Check (local) decision: %s for intent: %s", decision, intent)
-        return "FAIL" not in decision
-    except Exception as exc:
-        logger.warning("Self-check failed to evaluate: %s", exc)
+        logger.debug("Gemini self-check unavailable (%s) — auto-PASS (local 7B self-check disabled to prevent feedback poisoning)", gemini_exc)
         return True
 
 
@@ -1630,6 +1838,14 @@ def final_response(query, context, intent="", lang="en", mode="production", hist
                 result = _build_final_prompt(query, context, intent, lang, mode, history=None, user_facts=user_facts)
                 prompt, tokens = result[0], result[1]
                 temp = result[2] if len(result) > 2 else 0.7
+                prompt_len = len(prompt)
+                # If still too long after stripping history, truncate context
+                if prompt_len > 38000 and context:
+                    ctx_budget = max(4000, 38000 - (prompt_len - len(context)))
+                    logger.warning("Still too long (%d chars) — truncating context to %d chars", prompt_len, ctx_budget)
+                    result = _build_final_prompt(query, context[:ctx_budget], intent, lang, mode, history=None, user_facts=user_facts)
+                    prompt, tokens = result[0], result[1]
+                    temp = result[2] if len(result) > 2 else 0.7
             
             answer = _generate(prompt, max_new_tokens=tokens, temperature=temp, force_general=force_general)
             
@@ -1638,7 +1854,20 @@ def final_response(query, context, intent="", lang="en", mode="production", hist
                 return answer
             
             logger.warning("Self-check failed on attempt %d for intent %s. Retrying...", attempt + 1, intent)
-            feedback = "Your previous attempt was a how-to guide / list of steps. Please rewrite to be a direct persuasive argument/debate as requested. Do NOT list steps."
+            # Intent-aware corrective feedback to avoid injecting wrong instructions
+            _retry_feedback_map = {
+                "persuasion": "Your previous attempt did not use persuasive rhetoric. Rewrite as a direct persuasive argument. Do NOT list steps.",
+                "debate": "Your previous attempt was not a structured debate. Rewrite as a logical, sharp debate argument.",
+                "comparison": "Your previous attempt did not compare the topics objectively. Rewrite as a detailed analytical comparison.",
+                "coding_help": "Your previous attempt had issues. Rewrite with correct, complete, production-grade code and clear explanation.",
+                "finance_screener": "Your previous attempt did not present the financial data correctly. Rewrite with precise metrics, ranking tables, and provenance.",
+                "reasoning_puzzle": "Your previous attempt had logical errors. Re-examine the problem step by step and verify your answer.",
+                "system_design": "Your previous attempt lacked technical depth. Provide a comprehensive, production-grade architectural design.",
+            }
+            feedback = _retry_feedback_map.get(
+                intent,
+                "Your previous response did not adequately address the user's request. Please rewrite with improved accuracy, depth, and directness."
+            )
             
         except Exception as exc:
             logger.error("final_response failed on attempt %d: %s", attempt + 1, exc)
@@ -1704,6 +1933,13 @@ def stream_final_response(query, context, intent="", lang="en", mode="production
             result = _build_final_prompt(query, context, intent, lang, mode, history=None, user_facts=user_facts)
             prompt, tokens = result[0], result[1]
             temp = result[2] if len(result) > 2 else 0.7
+            prompt_len = len(prompt)
+            if prompt_len > 38000 and context:
+                ctx_budget = max(4000, 38000 - (prompt_len - len(context)))
+                logger.warning("Still too long (%d chars) — truncating context to %d chars", prompt_len, ctx_budget)
+                result = _build_final_prompt(query, context[:ctx_budget], intent, lang, mode, history=None, user_facts=user_facts)
+                prompt, tokens = result[0], result[1]
+                temp = result[2] if len(result) > 2 else 0.7
             logger.info("Rebuilt prompt: %d chars", len(prompt))
         
         yield from _generate_stream(prompt, max_new_tokens=tokens, temperature=temp, force_general=force_general)
@@ -1781,6 +2017,7 @@ def _filter_history_reasoning(query: str, history: list[dict] | None) -> list[di
 
 
 def _build_final_prompt(query, context, intent="", lang="en", mode="production", history=None, user_facts=""):
+    tokens = MAX_TOKENS
     global_build_chatml = globals()["_build_chatml"]
     global_build_chatml_multi = globals()["_build_chatml_multi"]
 
@@ -1830,7 +2067,13 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
     lang_name = _LANG_NAMES.get(lang, "English")
     is_continue = query.lower().strip() in ["continue", "next phase", "continue code", "continue the code", "go on"]
     if is_continue:
-        system_prompt = "You are AARKAA, a highly intelligent programming AI assistant. You respond strictly in English."
+        if lang != "en":
+            system_prompt = (
+                "You are AARKAA, a highly intelligent programming and multilingual AI assistant.\n"
+                f"You MUST write your entire response ONLY in the following language: {lang_name}."
+            )
+        else:
+            system_prompt = "You are AARKAA, a highly intelligent programming AI assistant."
         user_prompt = "The previous response was cut off due to token limits. Complete the previous response starting from exactly where it was truncated."
         if context:
             user_prompt += "\n\nContext:\n" + context
@@ -1979,7 +2222,9 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 "3. Double-check your step-by-step reasoning for logical consistency.\n"
                 "4. Provide the final solution clearly and concisely."
             )
-        user_prompt += "\n\nYou MUST write your response strictly in English."
+        lang_name = _LANG_NAMES.get(lang, "English")
+        if lang != "en":
+            user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT: %s", prompt)
         tokens = MAX_TOKENS
@@ -2033,7 +2278,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 "Instruction:\n"
                 "Adopt the requested persona fully and respond in character."
             )
-        user_prompt += "\n\nYou MUST write your response strictly in English."
+        if lang != "en":
+            user_prompt += f"\n\nYou MUST write your response ONLY in {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT (rhetorical):\n%s", prompt)
         tokens = MAX_TOKENS
@@ -2045,9 +2291,10 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
     if is_design:
         system_prompt = (
             "You are AARKAA, a principal systems architect. "
-            "Provide a comprehensive, production-grade technical design architecture in markdown. "
+            "Provide a comprehensive, production-grade technical design architecture. Format directly using clear headings and bullet points. "
+            "NEVER wrap your entire response inside a ```markdown code block. "
             "NEVER output ReAct agent loop headers (such as 'Thought:', 'Action:', 'Action Input:', 'Observation:', 'FileEditTool'). "
-            "Start immediately with the markdown design specification."
+            "Start immediately with the design specification."
         )
 
         user_prompt = ""
@@ -2101,7 +2348,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                 "You are Aarkaa AI, a Principal Software Engineer and Quantitative Systems Architect built by Synthetix Analytics.\n"
                 "Your objective is to provide production-grade, mathematically exact, and fully implemented software solutions.\n\n"
                 "STRICT CODING & ACCOUNTING STANDARDS:\n"
-                "1. ZERO REACT / SCAFFOLDING LEAKS: Output ONLY clean markdown text and python code blocks. NEVER output ReAct agent loop headers (e.g. 'Thought:', 'Action:', 'Action Input:', 'Observation:', 'FileEditTool').\n"
+                "1. ZERO REACT / SCAFFOLDING LEAKS: Format directly using clean headings and python code blocks for code only. NEVER wrap your entire response inside a ```markdown code block. NEVER output ReAct agent loop headers (e.g. 'Thought:', 'Action:', 'Action Input:', 'Observation:', 'FileEditTool').\n"
                 "2. MATHEMATICALLY EXACT FIFO ACCOUNTING:\n"
                 "   - Method signature: `sell_stock(symbol: str, quantity: int, price: float, date: datetime)` (MUST accept sell price & date!).\n"
                 "   - For stock portfolio tracking, use `collections.deque` per symbol storing open lots: `[quantity, purchase_price, purchase_date]`.\n"
@@ -2121,7 +2368,9 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
             if context:
                 user_prompt += "Context:\n" + context + "\n\n"
             user_prompt += f"Request: {query}\n\n"
-            user_prompt += "\n\nProvide complete, production-grade Python code, exact unit tests, and a dedicated Complexity Analysis section. Output ONLY clean markdown in English."
+            user_prompt += "Provide complete, production-grade Python code, exact unit tests, and a dedicated Complexity Analysis section. Format directly using native text; do NOT wrap your entire response inside a ```markdown block."
+            if lang != "en":
+                user_prompt += f" You MUST write your response ONLY in the following language: {lang_name}."
         prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
         logger.info("AARKAA_ENGINE_PROMPT (is_code):\n%s", prompt)
         tokens = MAX_TOKENS
@@ -2133,9 +2382,11 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
         )
         if is_chat_or_greeting:
             system_prompt = (
-                "You are AARKAA, a highly intelligent, warm and friendly AI assistant. You respond strictly in English."
+                "You are AARKAA, a highly intelligent, warm and friendly AI assistant."
             )
-            user_prompt = f"Respond naturally and warmly to the user in English: {query}\n\n"
+            user_prompt = f"Respond naturally and warmly to the user: {query}\n\n"
+            if lang != "en":
+                user_prompt += f"You MUST respond ONLY in the following language: {lang_name}."
             prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
             tokens = 500
         else:
@@ -2168,7 +2419,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "a production-grade AI assistant built by Synthetix Analytics.\n\n"
                     "Your details:\n"
                     "Capabilities:\n"
-                    "- Clear, precise responses in English\n"
+                    "- Multilingual responses (auto-detects user language)\n"
                     "- Real-time web search via DuckDuckGo and Wikipedia\n"
                     "- Code writing, testing, and execution via BashTool\n"
                     "- File read/write operations in a sandboxed workspace\n"
@@ -2190,9 +2441,10 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     f"Write a direct, elegant response to: '{query}'.\n"
                     "Format the capabilities as a beautiful, sequentially numbered list (1, 2, 3, 4...) and security features as a bulleted list.\n"
                     "Highlight the important terms using bold markdown (e.g. **Real-time web search**).\n"
-                    "Do NOT write any introductory or conversational filler like 'Sure, here is...'. Just output the headings and the lists directly.\n"
-                    "You MUST write your entire response strictly in English."
+                    "Do NOT write any introductory or conversational filler like 'Sure, here is...'. Just output the headings and the lists directly."
                 )
+                if lang != "en":
+                    user_prompt += f"\nYou MUST write your entire response ONLY in {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
                 tokens = MAX_TOKENS
             else:
@@ -2200,7 +2452,6 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "You are Aarkaa AI, created by Synthetix Analytics.\n\n"
                     "Your purpose is to provide accurate, helpful, practical, and intelligent assistance across finance, trading, investing, business, coding, mathematics, science, technology, and general knowledge.\n\n"
                     "Core Behavior:\n"
-                    "- Always respond strictly in English. Under NO circumstances should you respond in Hindi, Hinglish, Devanagari, Spanish, or any language other than English.\n"
                     "- Always answer the user's question directly.\n"
                     "- Prioritize usefulness, accuracy, and clarity.\n"
                     "- Use reasoning to understand the user's intent.\n"
@@ -2243,6 +2494,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "Communication:\n"
                     "- Be professional, objective, and concise.\n"
                     "- Focus directly on answering the question with factual data, clear structure, and rigorous analysis.\n"
+                    "- Format all headings, bullet points, and text directly as native markdown. NEVER wrap your entire response or prose inside a ```markdown or ``` code block. Code blocks must ONLY be used for actual programming language code (such as python, sql, bash).\n"
                     "- Terminate immediately and abruptly after the final technical explanation, calculation, or analysis.\n"
                     "- Strictly prohibit conversational closings, sign-offs, offers for follow-up, or polite remarks.\n"
                     "- Strictly prohibit social media hashtags, marketing tags, or promotional keyword lists.\n"
@@ -2259,7 +2511,6 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "Provide the most accurate, useful, and logically consistent answer possible while remaining honest about uncertainty and limitations."
                 )
                 is_general = intent in ["general_query", "web_lookup", "news_search", "science_query", "tech_info", "finance_general", "health_query", "history_query", ""] or not intent
-                tokens = MAX_TOKENS
                 is_screener_query = (
                     (intent in ["finance_screener", "finance_screening"])
                     or ("[Verified Stock Screener Data" in context)
@@ -2351,11 +2602,11 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                         ctx_to_inject = context[:18000] + "\n... (trimmed for brevity)"
                     user_prompt += (
                         "Reference Information (use ONLY if directly relevant to the question above):\n"
-                        "---------------------\n"
+                        "<reference_context>\n"
                         + ctx_to_inject + "\n"
-                        "---------------------\n"
+                        "</reference_context>\n"
                     )
-                    user_prompt += "Answer the question above in a detailed, technical, and comprehensive manner. If the reference information does not directly answer the question, IGNORE it and answer from your own knowledge. Do NOT output any notes, warnings, or disclaimers about context sufficiency."
+                    user_prompt += "Answer the question above in a detailed, technical, and comprehensive manner. Format your response directly with structured headings and bullet points. NEVER wrap your entire response inside a ```markdown or ``` code block. If the reference information does not directly answer the question, IGNORE it and answer from your own knowledge. Do NOT output any notes, warnings, or disclaimers about context sufficiency."
                 else:
                     if is_general and is_design_query:
                         user_prompt += (
@@ -2379,7 +2630,8 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                         "(Step 1, Step 2, Step 3, etc.) until the recipe or guide is FULLY complete. "
                         "Do NOT stop early. Do NOT truncate or summarize."
                     )
-                user_prompt += " Write your entire response strictly in English."
+                if lang != "en":
+                    user_prompt += f" Write your entire response ONLY in the following language: {lang_name}."
                 prompt = _build_chatml_multi(system_prompt, history, user_prompt, user_facts=user_facts)
     temp = _get_temperature(query, intent, context)
     return prompt, tokens, temp

@@ -73,3 +73,6 @@ joblib==1.5.3
 
 # NOTE: tensorflow-cpu removed — not installed in production
 # NOTE: langdetect removed — not in production pip freeze (using custom detection)
+
+# Testing
+pytest-cov>=6.0.0

@@ -360,9 +360,13 @@ class ToolRouterPipeline:
                 self._logger.warning("3B router returned no JSON. Falling back to LLM.")
                 return []
 
-            parsed = json.loads(response[start:end])
+            try:
+                parsed = json.loads(response[start:end])
+            except json.JSONDecodeError:
+                decoder = json.JSONDecoder()
+                parsed, _ = decoder.raw_decode(response[start:])
 
-            if not parsed.get("needs_tool", False):
+            if not isinstance(parsed, dict) or not parsed.get("needs_tool", False):
                 return []
 
             intents = []

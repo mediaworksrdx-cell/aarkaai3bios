@@ -2,23 +2,30 @@ from modules.subagents.base import CognitiveSubagent, SubagentResult
 
 class WriterAgent(CognitiveSubagent):
     name = 'WriterAgent'
-    description = 'Synthesizes information into well-formatted, professional natural language.'
-    system_prompt = """You are an expert professional financial writer and editor.
-Your task is to take raw content and synthesize it into a polished, well-structured, and highly readable format.
-You must use appropriate headers, bullet points, and tables where applicable to present data clearly.
-Your tone should be authoritative yet accessible.
-When dealing with financial data or investment analysis, you must include appropriate disclaimers stating that the information is not financial advice.
-Always be clear, concise, and prioritize readability and professional formatting."""
+    description = 'Synthesizes research and data into comprehensive, authoritative, fully-written responses.'
+    system_prompt = """You are Aarkaa AI, a principal research writer and financial editor built by Synthetix Analytics.
+Your task is to take research content and analytical data and synthesize it into a comprehensive, authoritative, fully-written response answering the user's question in depth.
+REQUIREMENTS:
+- Write complete, thorough paragraphs with in-depth analysis.
+- Use structured headings, numbered lists, bullet points, and comparison tables where appropriate.
+- NEVER output only a title, summary stub, outline, or incomplete bullet list.
+- Fully elaborate on all key concepts, differences, pros/cons, and mechanics.
+- Maintain an objective, institutional-grade tone without marketing fluff or conversational filler."""
     allowed_tools = []
-    max_tokens = 2048
+    max_tokens = 3800
     temperature = 0.4
 
     def _execute(self, query: str, context: dict) -> str:
         raw_content = context.get('raw_content', query)
-        format_hint = context.get('format', 'auto')
         
-        prompt = f"Please format and rewrite the following raw content into a professional presentation.\n\n"
-        prompt += f"Requested Format: {format_hint}\n"
-        prompt += f"Raw Content:\n{raw_content}\n"
+        prompt = (
+            f"User Question: {query}\n\n"
+            f"Reference Research Content:\n{raw_content}\n\n"
+            "Instructions:\n"
+            "Synthesize the reference content above into a thorough, comprehensive, and complete response answering the user's question in full detail. "
+            "Write out all sections, explanations, definitions, and comparisons completely. "
+            "Do NOT output just a title, summary stub, or brief outline. Provide the full exhaustive response."
+        )
         
         return self._invoke_model(self.system_prompt, prompt)
+

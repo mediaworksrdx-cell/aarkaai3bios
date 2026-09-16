@@ -367,7 +367,7 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
   let html = markdown.replace(/```(\w+)?\n([\s\S]*?)```/g, (_m, _lang, code) => {
     const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
     codeBlocks.push(
-      `<pre style="background: ${theme.codeBg}; color: ${theme.textPrimary}; padding: 14px; border-radius: 8px; font-family: Consolas, Monaco, monospace; font-size: 12px; overflow-x: auto; margin: 16px 0; border: 1px solid ${theme.codeBorder};"><code>${escapeHtml(code.trim())}</code></pre>`
+      `<pre style="background: ${theme.codeBg} !important; color: ${theme.textPrimary} !important; padding: 14px; border-radius: 8px; font-family: Consolas, Monaco, monospace; font-size: 12px; overflow-x: auto; margin: 16px 0; border: 1px solid ${theme.codeBorder};"><code>${escapeHtml(code.trim())}</code></pre>`
     );
     return placeholder;
   });
@@ -377,7 +377,7 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
   html = html.replace(/`([^`]+)`/g, (_m, code) => {
     const placeholder = `__INLINE_CODE_${inlineCodes.length}__`;
     inlineCodes.push(
-      `<code style="background: ${theme.cardBg}; color: ${theme.accent}; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; border: 1px solid ${theme.cardBorder};">${escapeHtml(code)}</code>`
+      `<code style="background: ${theme.cardBg} !important; color: ${theme.accent} !important; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; border: 1px solid ${theme.cardBorder};">${escapeHtml(code)}</code>`
     );
     return placeholder;
   });
@@ -398,12 +398,12 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
         r.split('|').slice(1, -1).map(c => c.trim());
 
       const headers = parseCells(rows[0]);
-      const headerHtml = `<thead><tr>${headers.map(h => `<th style="background:${theme.tableHeaderBg}; color:${theme.accent}; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; border-bottom:2px solid ${theme.cardBorder}; text-align:left;">${h}</th>`).join('')}</tr></thead>`;
+      const headerHtml = `<thead><tr>${headers.map(h => `<th style="background:${theme.tableHeaderBg} !important; color:${theme.accent} !important; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; border-bottom:2px solid ${theme.cardBorder}; text-align:left;">${h}</th>`).join('')}</tr></thead>`;
 
       const bodyRows = rows.slice(2).filter(r => r.trim().startsWith('|'));
       const bodyHtml = `<tbody>${bodyRows.map(r => {
         const cells = parseCells(r);
-        return `<tr>${cells.map(c => `<td style="padding:7px 10px; font-size:12px; color:${theme.textSecondary}; border-bottom:1px solid ${theme.cardBorder};">${c}</td>`).join('')}</tr>`;
+        return `<tr>${cells.map(c => `<td style="padding:7px 10px; font-size:12px; color:${theme.textSecondary} !important; border-bottom:1px solid ${theme.cardBorder};">${c}</td>`).join('')}</tr>`;
       }).join('')}</tbody>`;
 
       return `<div style="overflow-x:auto; margin:16px 0; border:1px solid ${theme.cardBorder}; border-radius:8px;"><table style="width:100%; border-collapse:collapse;">${headerHtml}${bodyHtml}</table></div>`;
@@ -411,21 +411,21 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
   );
 
   // Headers
-  html = html.replace(/^### (.*$)/gim, `<h3 style="color: ${theme.accent}; font-size: 14px; font-weight: 700; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: 0.5px;">$1</h3>`);
-  html = html.replace(/^## (.*$)/gim, `<h2 style="color: ${theme.textPrimary}; font-size: 18px; font-weight: 700; margin: 22px 0 10px; border-bottom: 1px solid ${theme.cardBorder}; padding-bottom: 6px;">$1</h2>`);
-  html = html.replace(/^# (.*$)/gim, `<h1 style="color: ${theme.textPrimary}; font-size: 22px; font-weight: 800; margin: 26px 0 12px; border-bottom: 2px solid ${theme.accent}; padding-bottom: 8px;"><span style="color:${theme.accent};">$1</span></h1>`);
+  html = html.replace(/^### (.*$)/gim, `<h3 style="color: ${theme.accent} !important; font-size: 14px; font-weight: 700; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: 0.5px;">$1</h3>`);
+  html = html.replace(/^## (.*$)/gim, `<h2 style="color: ${theme.textPrimary} !important; font-size: 18px; font-weight: 700; margin: 22px 0 10px; border-bottom: 1px solid ${theme.cardBorder}; padding-bottom: 6px;">$1</h2>`);
+  html = html.replace(/^# (.*$)/gim, `<h1 style="color: ${theme.textPrimary} !important; font-size: 22px; font-weight: 800; margin: 26px 0 12px; border-bottom: 2px solid ${theme.accent}; padding-bottom: 8px;"><span style="color:${theme.accent} !important;">$1</span></h1>`);
 
   // Blockquotes
-  html = html.replace(/^&gt; (.*$)/gim, `<blockquote style="border-left: 4px solid ${theme.blockquoteBorder}; background: ${theme.blockquoteBg}; color: ${theme.blockquoteText}; padding: 10px 14px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 12.5px;">$1</blockquote>`);
+  html = html.replace(/^&gt; (.*$)/gim, `<blockquote style="border-left: 4px solid ${theme.blockquoteBorder} !important; background: ${theme.blockquoteBg} !important; color: ${theme.blockquoteText} !important; padding: 10px 14px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 12.5px;">$1</blockquote>`);
 
   // Bold & Italic
-  html = html.replace(/\*\*([^*]+)\*\*/g, `<strong style="color: ${theme.textPrimary};">$1</strong>`);
+  html = html.replace(/\*\*([^*]+)\*\*/g, `<strong style="color: ${theme.textPrimary} !important;">$1</strong>`);
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
 
   // Lists
-  html = html.replace(/^\s*-\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:${theme.textSecondary};">$1</li>`);
-  html = html.replace(/^\s*\*\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:${theme.textSecondary};">$1</li>`);
-  html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:${theme.textSecondary};">$2</li>`);
+  html = html.replace(/^\s*-\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:${theme.textSecondary} !important;">$1</li>`);
+  html = html.replace(/^\s*\*\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:${theme.textSecondary} !important;">$1</li>`);
+  html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:${theme.textSecondary} !important;">$2</li>`);
 
   // Wrap lists
   html = html.replace(/(<li[\s\S]*<\/li>)/gm, '<ul style="padding-left: 24px; margin: 12px 0;">$1</ul>');
@@ -439,7 +439,7 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
       if (trimmed.startsWith('<h') || trimmed.startsWith('<pre') || trimmed.startsWith('<ul') || trimmed.startsWith('<blockquote') || trimmed.startsWith('<div') || trimmed.startsWith('__CODE_BLOCK_')) {
         return trimmed;
       }
-      return `<p style="margin: 0 0 12px; line-height: 1.7; color: ${theme.textSecondary}; font-size: 13px;">${trimmed.replace(/\n/g, '<br/>')}</p>`;
+      return `<p style="margin: 0 0 12px; line-height: 1.7; color: ${theme.textSecondary} !important; font-size: 13px;">${trimmed.replace(/\n/g, '<br/>')}</p>`;
     })
     .join('\n');
 
@@ -480,6 +480,9 @@ export function exportToPdf(options: {
     return;
   }
 
+  // Determine if this is a dark theme (bg is dark) — needed for print fallback
+  const isDarkTheme = theme.bg !== '#ffffff';
+
   const documentHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -490,32 +493,37 @@ export function exportToPdf(options: {
     @page {
       size: A4;
       margin: 14mm 15mm 14mm 15mm;
-      @top-left {
-        content: "AARKA AI · ${theme.badge}";
-        font-family: 'Inter', -apple-system, sans-serif;
-        font-size: 8px;
-        font-weight: 700;
-        color: ${theme.accent};
-        letter-spacing: 1px;
-      }
-      @bottom-right {
-        content: "Page " counter(page) " of " counter(pages);
-        font-family: 'Inter', -apple-system, sans-serif;
-        font-size: 8px;
-        color: ${theme.textSecondary};
-      }
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+    html {
+      background: ${theme.bg} !important;
+    }
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      color: ${theme.textPrimary};
-      background: ${theme.bg};
+      color: ${theme.textPrimary} !important;
+      background: ${theme.bg} !important;
       line-height: 1.65;
+      padding: 0;
+      margin: 0;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+    /* Full-bleed background wrapper to force dark backgrounds in PDF print */
+    .page-wrapper {
+      background: ${theme.bg} !important;
+      color: ${theme.textPrimary} !important;
+      min-height: 100vh;
       padding: 24px 30px;
       max-width: 860px;
       margin: 0 auto;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
     }
     .header {
       border-bottom: 1px solid ${theme.cardBorder};
@@ -532,7 +540,7 @@ export function exportToPdf(options: {
       font-size: 18px;
       font-weight: 800;
       letter-spacing: 1.5px;
-      color: ${theme.accent};
+      color: ${theme.accent} !important;
       text-transform: uppercase;
     }
     .badge {
@@ -543,19 +551,19 @@ export function exportToPdf(options: {
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      background: ${theme.accentMuted};
-      color: ${theme.accent};
+      background: ${theme.accentMuted} !important;
+      color: ${theme.accent} !important;
       border: 1px solid ${theme.accent};
     }
     .divider {
       height: 2px;
-      background: linear-gradient(90deg, ${theme.accent}, ${theme.cardBorder}, transparent);
+      background: linear-gradient(90deg, ${theme.accent}, ${theme.cardBorder}, transparent) !important;
       margin: 8px 0 16px;
     }
     .doc-title {
       font-size: 22px;
       font-weight: 800;
-      color: ${theme.textPrimary};
+      color: ${theme.textPrimary} !important;
       margin: 0 0 6px 0;
       letter-spacing: -0.5px;
     }
@@ -564,62 +572,105 @@ export function exportToPdf(options: {
       align-items: center;
       gap: 12px;
       font-size: 11px;
-      color: ${theme.textSecondary};
+      color: ${theme.textSecondary} !important;
     }
     .meta-tag {
-      background: ${theme.cardBg};
+      background: ${theme.cardBg} !important;
       padding: 2px 8px;
       border-radius: 6px;
       border: 1px solid ${theme.cardBorder};
-      color: ${theme.accent};
+      color: ${theme.accent} !important;
       font-weight: 600;
       font-size: 10px;
     }
     .content {
       font-size: 13px;
-      color: ${theme.textSecondary};
+      color: ${theme.textSecondary} !important;
+    }
+    .content p {
+      color: ${theme.textSecondary} !important;
+    }
+    .content h1, .content h2 {
+      color: ${theme.textPrimary} !important;
+    }
+    .content h3 {
+      color: ${theme.accent} !important;
+    }
+    .content strong {
+      color: ${theme.textPrimary} !important;
+    }
+    .content li {
+      color: ${theme.textSecondary} !important;
+    }
+    .content pre {
+      background: ${theme.codeBg} !important;
+      color: ${theme.textPrimary} !important;
+    }
+    .content blockquote {
+      background: ${theme.blockquoteBg} !important;
+      color: ${theme.blockquoteText} !important;
+      border-left-color: ${theme.blockquoteBorder} !important;
+    }
+    .content table th {
+      background: ${theme.tableHeaderBg} !important;
+      color: ${theme.accent} !important;
+    }
+    .content table td {
+      color: ${theme.textSecondary} !important;
     }
     .footer {
       margin-top: 40px;
       border-top: 1px solid ${theme.cardBorder};
       padding-top: 12px;
       font-size: 9.5px;
-      color: ${theme.textSecondary};
+      color: ${theme.textSecondary} !important;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
     @media print {
-      body { padding: 0; background: ${theme.bg}; }
+      html, body {
+        background: ${theme.bg} !important;
+        color: ${theme.textPrimary} !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+      }
+      .page-wrapper {
+        background: ${theme.bg} !important;
+        padding: 0;
+      }
       table, pre, blockquote { page-break-inside: avoid; }
       h1, h2, h3 { page-break-after: avoid; }
     }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="brand">
-      <div class="brand-title">AARKAAI · ${escapeHtml(theme.name)}</div>
-      <div class="badge">${escapeHtml(theme.badge)}</div>
+  <div class="page-wrapper">
+    <div class="header">
+      <div class="brand">
+        <div class="brand-title">AARKAAI · ${escapeHtml(theme.name)}</div>
+        <div class="badge">${escapeHtml(theme.badge)}</div>
+      </div>
+      <div class="divider"></div>
+      <h1 class="doc-title">${escapeHtml(options.title)}</h1>
+      <div class="meta-row">
+        <span>Generated: ${escapeHtml(dateStr)}</span>
+        <span>•</span>
+        <span class="meta-tag">${escapeHtml(options.modelUsed || 'Aarka AI 2.0')}</span>
+        <span>•</span>
+        <span>Verified Autonomous Delivery</span>
+      </div>
     </div>
-    <div class="divider"></div>
-    <h1 class="doc-title">${escapeHtml(options.title)}</h1>
-    <div class="meta-row">
-      <span>Generated: ${escapeHtml(dateStr)}</span>
-      <span>•</span>
-      <span class="meta-tag">${escapeHtml(options.modelUsed || 'Aarka AI 2.0')}</span>
-      <span>•</span>
-      <span>Verified Autonomous Delivery</span>
+
+    <div class="content">
+      ${bodyHtml}
     </div>
-  </div>
 
-  <div class="content">
-    ${bodyHtml}
-  </div>
-
-  <div class="footer">
-    <span>© 2026 AARKAAI. Precision Conversational Intelligence & Research Systems.</span>
-    <span>STRICTLY CONFIDENTIAL · ARCHIVAL GRADE</span>
+    <div class="footer">
+      <span>© 2026 AARKAAI. Precision Conversational Intelligence & Research Systems.</span>
+      <span>STRICTLY CONFIDENTIAL · ARCHIVAL GRADE</span>
+    </div>
   </div>
 
   <script>

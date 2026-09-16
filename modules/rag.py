@@ -372,6 +372,50 @@ def get_context(query: str, top_k: int = 3, user_id: Optional[str] = None,
     return "\n\n---\n\n".join(lines)
 
 
+def probe_knowledge(query: str, user_id: Optional[str] = None,
+                    query_domain: Optional[str] = None,
+                    threshold: Optional[float] = None) -> Optional[dict]:
+    """
+    Fast single-result probe for knowledge-first resolution.
+
+    Returns the best matching knowledge entry if similarity >= threshold,
+    otherwise returns None. Includes full metadata for audit logging
+    and freshness validation downstream.
+
+    Returns: {"content", "topic", "score", "source", "timestamp"} or None
+    """
+    from config import KNOWLEDGE_FIRST_THRESHOLD
+
+    if _embedding_fn is None or _collection is None:
+        return None
+    try:
+        if _collection.count() == 0:
+            return None
+    except Exception:
+        return None
+
+    effective_threshold = threshold or KNOWLEDGE_FIRST_THRESHOLD
+
+    results = search(query, top_k=1, user_id=user_id, query_domain=query_domain)
+    if not results:
+        logger.debug(
+            "KNOWLEDGE_FIRST_MISS | query=%r | no_results | threshold=%.2f",
+            query[:60], effective_threshold,
+        )
+        return None
+
+    best = results[0]
+    if best["score"] >= effective_threshold:
+        best.setdefault("timestamp", "")
+        return best
+
+    logger.debug(
+        "KNOWLEDGE_FIRST_MISS | query=%r | best_score=%.4f | threshold=%.2f",
+        query[:60], best["score"], effective_threshold,
+    )
+    return None
+
+
 def get_entry_count() -> int:
     """Return total number of knowledge entries."""
     if _collection is None:

@@ -24,6 +24,7 @@ from config import (
     PUBLIC_ROUTES,
     RATE_LIMIT_ENABLED,
     RATE_LIMIT_RPM,
+    RESPONSE_CACHE_TTL,
 )
 
 logger = logging.getLogger(__name__)
@@ -309,15 +310,27 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
         cache_key = hashlib.sha256(cache_input).hexdigest()
         redis_key = f"cache:response:{cache_key}"
 
+        # Check if client requested no-cache or if query asks for real-time data
+        cache_control = request.headers.get("cache-control", "").lower()
+        skip_cache = "no-cache" in cache_control or "no-store" in cache_control
+        
+        # Real-time / live queries should not serve stale cached responses
+        low_body = body_bytes.lower()
+        is_realtime_query = any(kw in low_body for kw in [
+            b'"price"', b'"quote"', b'"market"', b'"live"', b'"news"', b'"current"',
+            b'"weather"', b'"today"', b'"now"', b'"gainers"', b'"losers"'
+        ])
+
         # Check Redis cache
-        try:
-            cached_data = r.get(redis_key)
-            if cached_data:
-                response = Response(content=cached_data, media_type="application/json")
-                response.headers["X-Cache"] = "HIT"
-                return response
-        except Exception as e:
-            logger.warning("Redis cache get error: %s", e)
+        if not skip_cache and not is_realtime_query:
+            try:
+                cached_data = r.get(redis_key)
+                if cached_data:
+                    response = Response(content=cached_data, media_type="application/json")
+                    response.headers["X-Cache"] = "HIT"
+                    return response
+            except Exception as e:
+                logger.warning("Redis cache get error: %s", e)
 
         # Cache miss - call next
         response = await call_next(request)
@@ -330,12 +343,13 @@ class ResponseCacheMiddleware(BaseHTTPMiddleware):
                     chunk = chunk.encode("utf-8")
                 body += chunk
         
-        # Store in Redis
-        try:
-            if response.status_code == 200:
-                r.setex(redis_key, 3600, body.decode("utf-8"))
-        except Exception as e:
-            logger.warning("Redis cache set error: %s", e)
+        # Store in Redis with configurable TTL (default 60s, not 1 hour)
+        if not skip_cache and not is_realtime_query:
+            try:
+                if response.status_code == 200:
+                    r.setex(redis_key, RESPONSE_CACHE_TTL, body.decode("utf-8"))
+            except Exception as e:
+                logger.warning("Redis cache set error: %s", e)
 
         # Reconstruct response with consumed content
         new_response = Response(
