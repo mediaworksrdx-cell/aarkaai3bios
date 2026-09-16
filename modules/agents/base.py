@@ -85,16 +85,19 @@ class BaseAgent:
         memory.update_user_memory(user_id, key=key, value=value, category=f"agent_memory:{agent_key}")
 
     def get_tools_context(self) -> str:
-        """Dynamically builds a list of tools owned by this agent."""
+        """Dynamically builds a list of tools owned by this agent.
+        Tools are sorted alphabetically for deterministic KV-cache prefix ordering."""
         if not self.allowed_tools:
             return ""
         from modules.tools import registry
-        lines = [f"[Allowed Tools for {self.name}]"]
-        for t_name in self.allowed_tools:
+        tool_entries = []
+        for t_name in sorted(self.allowed_tools):
             tool = registry.get_tool(t_name)
             if tool:
-                lines.append(f"- {tool.name}: {tool.description}")
-        return "\n".join(lines)
+                tool_entries.append(f"- {tool.name}: {tool.description}")
+        if not tool_entries:
+            return ""
+        return f"[Allowed Tools for {self.name}]\n" + "\n".join(tool_entries)
 
     def get_rag_context(self, query: str) -> str:
         """Injects relevant RAG documents if enabled."""
@@ -112,27 +115,90 @@ class BaseAgent:
             logger.error("RAG retrieval failed: %s", e)
         return ""
 
-    def compile_prompt(self, user_id: str, session_id: str, device: str, query: str = "") -> str:
-        """Assembles base system definitions, rules, session context, user profiles, agent memory, tools, and RAG."""
-        system_part = f"{self.persona}\n\n[Core Operating Guidelines]\n"
+    def compile_prompt_layered(self, user_id: str, session_id: str, device: str,
+                                query: str = "") -> tuple[str, str]:
+        """Partitions the system prompt into static and dynamic layers for KV-cache prefix stability.
+
+        Layer 0 (STATIC — frozen, cacheable):
+          - Agent persona text
+          - Core operating guidelines / rules
+          - Tool schema definitions (sorted alphabetically)
+
+        Layer 1 (DYNAMIC — changes per request):
+          - Session context (timestamp, session ID, device)
+          - User profile facts
+          - Agent-specific memory
+          - RAG context (if enabled)
+
+        Returns:
+            (static_prefix, dynamic_suffix): Two strings that, when concatenated
+            with a delimiter, form the complete system prompt. The static prefix
+            is identical across requests for the same agent configuration.
+        """
+        # Layer 0: Static content (persona + rules + tool schemas)
+        static_parts = [f"{self.persona}\n\n[Core Operating Guidelines]"]
         for rule in self.rules:
-            system_part += f"- {rule}\n"
+            static_parts.append(f"- {rule}")
 
-        session_part = self.get_session_context(session_id, device)
-        profile_part = self.get_user_profile_context(user_id)
-        agent_mem_part = self.get_agent_memory_context(user_id)
         tools_part = self.get_tools_context()
-        rag_part = self.get_rag_context(query) if query else ""
-
-        components = [system_part, session_part, profile_part]
-        if agent_mem_part:
-            components.append(agent_mem_part)
         if tools_part:
-            components.append(tools_part)
-        if rag_part:
-            components.append(rag_part)
+            static_parts.append("")
+            static_parts.append(tools_part)
 
-        return "\n\n".join(components) + "\n---"
+        static_prefix = "\n".join(static_parts)
+
+        # Layer 1: Dynamic content (session + profile + memory + RAG)
+        dynamic_parts = []
+        dynamic_parts.append(self.get_session_context(session_id, device))
+        dynamic_parts.append(self.get_user_profile_context(user_id))
+
+        agent_mem_part = self.get_agent_memory_context(user_id)
+        if agent_mem_part:
+            dynamic_parts.append(agent_mem_part)
+
+        rag_part = self.get_rag_context(query) if query else ""
+        if rag_part:
+            dynamic_parts.append(rag_part)
+
+        dynamic_suffix = "\n\n".join(dynamic_parts)
+
+        return static_prefix, dynamic_suffix
+
+    def compile_prompt(self, user_id: str, session_id: str, device: str, query: str = "") -> str:
+        """Assembles base system definitions, rules, session context, user profiles, agent memory, tools, and RAG.
+
+        When KV_PREFIX_CACHE_ENABLED is True, uses the layered prompt structure
+        where static content (persona, rules, tools) appears first for cache
+        prefix stability, followed by dynamic content after a delimiter.
+        """
+        from config import KV_PREFIX_CACHE_ENABLED
+        if KV_PREFIX_CACHE_ENABLED:
+            static_prefix, dynamic_suffix = self.compile_prompt_layered(
+                user_id, session_id, device, query
+            )
+            # Single system block with delimiter separating static from dynamic
+            return f"{static_prefix}\n---\n[Session State]\n{dynamic_suffix}\n---"
+        else:
+            # Original ordering (backward compatibility)
+            system_part = f"{self.persona}\n\n[Core Operating Guidelines]\n"
+            for rule in self.rules:
+                system_part += f"- {rule}\n"
+
+            session_part = self.get_session_context(session_id, device)
+            profile_part = self.get_user_profile_context(user_id)
+            agent_mem_part = self.get_agent_memory_context(user_id)
+            tools_part = self.get_tools_context()
+            rag_part = self.get_rag_context(query) if query else ""
+
+            components = [system_part, session_part, profile_part]
+            if agent_mem_part:
+                components.append(agent_mem_part)
+            if tools_part:
+                components.append(tools_part)
+            if rag_part:
+                components.append(rag_part)
+
+            return "\n\n".join(components) + "\n---"
 
     def invoke(
         self,

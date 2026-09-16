@@ -36,6 +36,18 @@ function CodeBlockComponent({ className, children, ...props }: any) {
     );
   }
 
+  // If the model wrapped normal response text inside a ```markdown or ```md block,
+  // render it directly as rich formatted markdown instead of an ugly raw code box!
+  if (language === 'markdown' || language === 'md') {
+    return (
+      <div className="my-2 not-prose text-[var(--text-primary)] leading-relaxed">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {textContent}
+        </ReactMarkdown>
+      </div>
+    );
+  }
+
   return (
     <div className="relative my-4 rounded-xl overflow-hidden bg-[var(--code-bg)] border border-[var(--border-strong)] shadow-[var(--shadow-sm)] group">
       {/* Code Header Bar */}
@@ -77,6 +89,13 @@ function CodeBlockComponent({ className, children, ...props }: any) {
 
 export function MarkdownRenderer({ content, className = '', isStreaming = false }: MarkdownRendererProps) {
   if (!content) return null;
+
+  let cleanContent = content;
+  // Strip accidental outer ```markdown or ```md wrapper so the response is never rendered inside a code box
+  if (/^\s*```(?:markdown|md)\b/i.test(cleanContent)) {
+    cleanContent = cleanContent.replace(/^\s*```(?:markdown|md)[^\n]*\n?/i, '');
+    cleanContent = cleanContent.replace(/\n?```\s*$/i, '');
+  }
 
   return (
     <div className={`prose ${className}`}>

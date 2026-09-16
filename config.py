@@ -124,9 +124,15 @@ else:
 RATE_LIMIT_RPM = int(os.getenv("AARKAAI_RATE_LIMIT_RPM", "30"))  # Requests per minute per IP
 RATE_LIMIT_ENABLED = IS_PRODUCTION or os.getenv("AARKAAI_RATE_LIMIT_ENABLED", "false").lower() == "true"
 
-# ─── Input Validation ────────────────────────────────────────────────────────
+# ─── Input Validation & Generation Limits ──────────────────────────────────
 MAX_QUERY_LENGTH = int(os.getenv("AARKAAI_MAX_QUERY_LENGTH", "32000"))
-MAX_TOKENS = int(os.getenv("AARKAAI_MAX_TOKENS", "3800"))
+MAX_TOKENS = int(os.getenv("AARKAAI_MAX_TOKENS", "8192"))
+TEMPERATURE = float(os.getenv("AARKAAI_TEMPERATURE", "0.7"))
+RESPONSE_CACHE_TTL = int(os.getenv("AARKAAI_RESPONSE_CACHE_TTL", "60"))
+VERIFIER_ENABLED = os.getenv("AARKAAI_VERIFIER_ENABLED", "false").lower() == "true"
+MODEL_CONTEXT_WINDOW = int(os.getenv("AARKAAI_MODEL_CONTEXT_WINDOW", "16384"))
+CONTEXT_BUDGET = int(os.getenv("AARKAAI_CONTEXT_BUDGET", "8000"))
+MAX_HISTORY_CHARS = int(os.getenv("AARKAAI_MAX_HISTORY_CHARS", "6000"))
 
 # ─── Embedding Model ─────────────────────────────────────────────────────────
 EMBEDDING_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
@@ -162,6 +168,13 @@ CONFIDENCE_THRESHOLD = float(os.getenv("AARKAAI_CONFIDENCE_THRESHOLD", "0.85"))
 
 # ─── Auto-Learning ───────────────────────────────────────────────────────────
 AUTO_LEARN_INTERVAL = 15  # Trigger auto-learn every N messages
+AUTO_LEARN_MIN_RESPONSE_CHARS = int(os.getenv("AARKAAI_AUTO_LEARN_MIN_RESPONSE_CHARS", "200"))
+AUTO_LEARN_MIN_CONFIDENCE = float(os.getenv("AARKAAI_AUTO_LEARN_MIN_CONFIDENCE", "0.70"))
+
+# ─── Knowledge-First Resolution (Beta — Feature-Flagged) ─────────────────────
+KNOWLEDGE_FIRST_ENABLED = os.getenv("AARKAAI_KNOWLEDGE_FIRST_ENABLED", "false").lower() == "true"
+KNOWLEDGE_FIRST_THRESHOLD = float(os.getenv("AARKAAI_KNOWLEDGE_FIRST_THRESHOLD", "0.75"))
+KNOWLEDGE_FIRST_HISTORY_KEEPALIVE = int(os.getenv("AARKAAI_KNOWLEDGE_FIRST_HISTORY_KEEPALIVE", "5"))
 
 # ─── Freemium / Subscription ─────────────────────────────────────────────────
 FREE_TIER_STRATEGY_LIMIT = int(os.getenv("AARKAAI_FREE_STRATEGY_LIMIT", "15"))
@@ -212,15 +225,15 @@ ALLOWED_UPLOAD_EXTENSIONS = {
 # Feature flag: when False, the existing pipeline.py waterfall is used unchanged.
 # When True, queries are routed through the new HybridQueryRouter with parallel
 # data source execution.  Default is False for safe, gradual rollout.
-HQR_ENABLED = os.getenv("AARKAAI_HQR_ENABLED", "true").lower() == "true"
+HQR_ENABLED = os.getenv("AARKAAI_HQR_ENABLED", "false").lower() == "true"
 HQR_MAX_WORKERS = int(os.getenv("AARKAAI_HQR_MAX_WORKERS", "6"))
-HQR_MARKET_TIMEOUT = float(os.getenv("AARKAAI_HQR_MARKET_TIMEOUT", "5.0"))
+HQR_MARKET_TIMEOUT = float(os.getenv("AARKAAI_HQR_MARKET_TIMEOUT", "8.0"))
 HQR_WEB_TIMEOUT = float(os.getenv("AARKAAI_HQR_WEB_TIMEOUT", "8.0"))
 HQR_NEWS_TIMEOUT = float(os.getenv("AARKAAI_HQR_NEWS_TIMEOUT", "6.0"))
 HQR_DB_TIMEOUT = float(os.getenv("AARKAAI_HQR_DB_TIMEOUT", "3.0"))
-HQR_RAG_TIMEOUT = float(os.getenv("AARKAAI_HQR_RAG_TIMEOUT", "3.0"))
+HQR_RAG_TIMEOUT = float(os.getenv("AARKAAI_HQR_RAG_TIMEOUT", "8.0"))
 HQR_TOOL_TIMEOUT = float(os.getenv("AARKAAI_HQR_TOOL_TIMEOUT", "10.0"))
-HQR_CONTEXT_BUDGET = int(os.getenv("AARKAAI_HQR_CONTEXT_BUDGET", "6000"))
+HQR_CONTEXT_BUDGET = int(os.getenv("AARKAAI_HQR_CONTEXT_BUDGET", "24000"))
 HQR_ENABLE_PARALLEL = os.getenv("AARKAAI_HQR_PARALLEL", "true").lower() == "true"
 # Confidence threshold below which simple data-only queries (e.g. "SBI price")
 # can return tool results directly without a 7B synthesis pass.
@@ -233,3 +246,24 @@ MODAL_GPU_ENDPOINT = os.getenv(
 )
 MODAL_GPU_ENABLED = os.getenv("MODAL_GPU_ENABLED", "true").lower() == "true"
 
+# ─── Context Compaction ──────────────────────────────────────────────────────
+COMPACTION_ENABLED = os.getenv("AARKAAI_COMPACTION_ENABLED", "true").lower() == "true"
+COMPACTION_TRIGGER_RATIO = float(os.getenv("AARKAAI_COMPACTION_TRIGGER", "0.80"))
+COMPACTION_PRESERVE_TURNS = int(os.getenv("AARKAAI_COMPACTION_PRESERVE_TURNS", "3"))
+RESERVED_OUTPUT_TOKENS = int(os.getenv("AARKAAI_RESERVED_OUTPUT_TOKENS", "2048"))
+
+# ─── KV-Cache Prefix Stability ──────────────────────────────────────────────
+KV_PREFIX_CACHE_ENABLED = os.getenv("AARKAAI_KV_PREFIX_CACHE", "true").lower() == "true"
+KV_CACHE_DIAGNOSTICS = os.getenv("AARKAAI_KV_CACHE_DIAGNOSTICS", "false").lower() == "true"
+
+# ─── Code Mode / Programmatic Tool Calling (Controlled Beta) ────────────────
+CODE_MODE_ENABLED = os.getenv("AARKAAI_CODE_MODE_ENABLED", "false").lower() == "true"
+CODE_MODE_TIMEOUT = float(os.getenv("AARKAAI_CODE_MODE_TIMEOUT", "30.0"))
+CODE_MODE_MAX_TOOL_CALLS = int(os.getenv("AARKAAI_CODE_MODE_MAX_CALLS", "15"))
+CODE_MODE_SANDBOX_BACKEND = os.getenv("AARKAAI_CODE_MODE_SANDBOX", "docker")
+CODE_MODE_MAX_OUTPUT_BYTES = int(os.getenv("AARKAAI_CODE_MODE_MAX_OUTPUT", str(1024 * 1024)))
+CODE_MODE_MAX_MEMORY_MB = int(os.getenv("AARKAAI_CODE_MODE_MAX_MEMORY", "512"))
+
+# ─── MCP Client (Deferred) ──────────────────────────────────────────────────
+MCP_ENABLED = os.getenv("AARKAAI_MCP_ENABLED", "false").lower() == "true"
+MCP_CONFIG_PATH = os.getenv("AARKAAI_MCP_CONFIG", str(BASE_DIR / "mcp_config.yaml"))

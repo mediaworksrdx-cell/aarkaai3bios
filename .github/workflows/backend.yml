@@ -24,10 +24,18 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pytest
+          pip install pytest pytest-cov
 
-      - name: Run tests
-        run: python -m pytest tests/ -v --tb=short
+      - name: Run tests with coverage
+        run: python -m pytest tests/ -v --tb=short --cov=. --cov-config=pyproject.toml --cov-report=term-missing --cov-fail-under=40
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: htmlcov/
+          retention-days: 14
 
       - name: Lint with ruff
         run: pip install ruff && ruff check . --select E,F,I,W

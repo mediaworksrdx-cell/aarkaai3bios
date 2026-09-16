@@ -400,14 +400,17 @@ def get_web_context(query: str, max_results: int = 5, lang: str = "en", filter_l
     # Sort all candidates (Wikipedia + DDG) together by composite score descending
     candidates.sort(key=lambda x: x["composite_score"], reverse=True)
 
-    # Format the unified context string
+    # Format the unified context string (cap to top 3 candidates, max 600 chars per snippet to keep prompt light)
     formatted_parts = []
-    for c in candidates:
+    for c in candidates[:3]:
+        snip = c['snippet'].strip()
+        if len(snip) > 600:
+            snip = snip[:600] + "..."
         formatted_parts.append(
-            f"- [{c['title']}]({c['url']}) [Source Tier: {c['tier']}] [Freshness Weight: {c['freshness']:.2f}]: {c['snippet']}"
+            f"- [{c['title']}]({c['url']}): {snip}"
         )
 
-    return "[Web Search Results (Ranked by Combined Authority & Freshness)]\n" + "\n".join(formatted_parts)
+    return "[Web Search Results]\n" + "\n".join(formatted_parts)
 
 # Financial news source domains for targeted search
 _FINANCIAL_NEWS_DOMAINS = [

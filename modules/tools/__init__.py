@@ -134,3 +134,13 @@ registry.register(DatabaseQueryTool())
 registry.register(NotificationTool())
 registry.register(AuthPermissionTool())
 
+# ─── MCP Client (Quarantine-First) ───────────────────────────────────────────
+mcp_client = None
+try:
+    import config
+    if config.MCP_ENABLED:
+        from modules.mcp_client import MCPClient
+        mcp_client = MCPClient(config.MCP_CONFIG_PATH, registry)
+except Exception as _mcp_err:
+    import logging
+    logging.getLogger(__name__).warning("MCP client init skipped: %s", _mcp_err)

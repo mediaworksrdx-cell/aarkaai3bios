@@ -1,4 +1,4 @@
-﻿"""
+"""
 AARKAAI – Agent Coordinator
 Manages the ReAct (Reasoning and Acting) loop using aarkaa_engine.
 """
@@ -287,6 +287,32 @@ Final Answer: I have created a professional premium PDF document of the previous
 ---------------------------
 """
 
+def _is_code_mode_eligible(query: str, context: str) -> bool:
+    """Check if query is eligible for Code Mode execution.
+    Eligible when: 2+ anticipated tool operations AND task is coding/file-related."""
+    q_lower = query.lower()
+    tool_indicators = [
+        "create a file", "modify file", "write to file", "edit file",
+        "read file", "run", "execute", "test", "build",
+        "fix the bug", "refactor", "and then", "after that",
+    ]
+    matches = sum(1 for ind in tool_indicators if ind in q_lower)
+    return matches >= 2
+
+def _build_code_mode_prompt(query: str, context: str, tool_descs: list[str]) -> str:
+    """Build a prompt that instructs the model to generate a Python script using tools."""
+    return f"Context:\n{context}\n\nTools:\n{chr(10).join(tool_descs)}\n\nQuery:\n{query}\n\nGenerate Python code to solve the query using the Tools."
+
+def _extract_python_code(text: str) -> str | None:
+    """Extract Python code from markdown fences or raw code block."""
+    import re
+    match = re.search(r"```(?:python)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1)
+    if text.strip() and not text.strip().startswith("```"):
+        return text.strip()
+    return None
+
 def stream_task(query: str, context: str = ""):
     """Run an agent loop until completion or max iterations, yielding status updates."""
     # 1. Build tool descriptions
@@ -313,6 +339,33 @@ def stream_task(query: str, context: str = ""):
         prompt += f"\n\nContext:\n{context}\n"
     
     prompt += f"\nRequest: {query}\n"
+    
+    # Code Mode: attempt single-pass execution for eligible multi-tool tasks
+    import config
+    if config.CODE_MODE_ENABLED and _is_code_mode_eligible(query, context):
+        yield "status", "Generating execution plan (Code Mode)..."
+        # Build code mode prompt and generate code
+        code_prompt = _build_code_mode_prompt(query, context, tool_descs)
+        code_block = aarkaa_engine.generate_raw(code_prompt, max_new_tokens=2048)
+        # Extract Python code from markdown fences if present
+        code_block = _extract_python_code(code_block)
+        if code_block:
+            from modules.code_mode import CodeModeExecutor
+            executor = CodeModeExecutor(
+                tool_registry=registry,
+                workspace_dir=str(config.SAFE_WORK_DIR),
+                timeout=config.CODE_MODE_TIMEOUT,
+                max_tool_calls=config.CODE_MODE_MAX_TOOL_CALLS,
+                max_output_bytes=config.CODE_MODE_MAX_OUTPUT_BYTES,
+            )
+            namespace = executor.build_tool_namespace([name for name in registry.tools])
+            result = executor.execute_code_block(code_block, namespace, user_id="system", session_id="code_mode")
+            if result.success:
+                yield "final", result.format_final_answer()
+                return
+            else:
+                logger.warning("Code Mode failed: %s. Falling back to ReAct.", result.error)
+                yield "status", "Code Mode failed, switching to step-by-step execution..."
     
     MAX_LOOPS = 10
     executed_actions = set()

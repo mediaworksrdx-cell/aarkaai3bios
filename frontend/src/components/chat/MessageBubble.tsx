@@ -41,6 +41,18 @@ function CodeBlock({ className, children, ...props }: any) {
     }
   };
 
+  // If the model wrapped normal response text inside a ```markdown or ```md block,
+  // render it directly as rich formatted markdown instead of an ugly raw code box!
+  if (language === 'markdown' || language === 'md') {
+    return (
+      <div className="my-2 not-prose text-[var(--text-primary)] leading-relaxed">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {codeContent}
+        </ReactMarkdown>
+      </div>
+    );
+  }
+
   if (match || codeContent.includes('\n')) {
     return (
       <div className="relative my-4 rounded-xl overflow-hidden bg-[var(--code-bg)] border border-[var(--border-strong)] shadow-[var(--shadow-sm)] group">
@@ -91,12 +103,18 @@ function CodeBlock({ className, children, ...props }: any) {
 function MarkdownRenderer({ content, className = '', isStreaming = false }: { content: string; className?: string; isStreaming?: boolean }) {
   if (!content) return null;
 
-  const displayContent = content
+  let displayContent = content
     .replace(/(?:\r?\n|\s)*(?:\*{1,2}|[\(\[])?\s*end of (?:answer|response|text|explanation)\s*(?:\*{1,2}|[\)\]])?\.?[\s`]*$/gi, '')
     .replace(/(?:\r?\n|\s)*---+\s*end\s+(?:of\s+)?(?:answer|response|disclaimer|text)\s*---+[\s`]*$/gi, '')
     .replace(/(?:\r?\n|\s)*(?:#Aarkaa(?:AI)?|#Aarka(?:AI)?)\b.*$/gi, '')
     .replace(/(?:\r?\n|\s)*(?:#[A-Za-z0-9_\-\/]+)+\s*$/gi, '')
     .trimEnd();
+
+  // Strip accidental outer ```markdown or ```md wrapper so the response is never rendered inside a code box
+  if (/^\s*```(?:markdown|md)\b/i.test(displayContent)) {
+    displayContent = displayContent.replace(/^\s*```(?:markdown|md)[^\n]*\n?/i, '');
+    displayContent = displayContent.replace(/\n?```\s*$/i, '');
+  }
 
   return (
     <div className={`prose ${className}`}>
