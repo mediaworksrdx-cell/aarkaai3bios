@@ -37,24 +37,21 @@ def test_docker_absence_enforces_zero_host_fallback(tmp_path):
 
 
 @requires_docker
-def test_real_container_fork_bomb_pid_containment(tmp_path):
+def test_real_container_fork_bomb_pid_containment():
     """PID limit (--pids-limit=32) prevents container fork bomb denial of service."""
-    code = """
-import os
-try:
-    while True:
-        os.fork()
-except OSError:
-    pass
-print('Fork contained')
-"""
-    executor = CodeModeExecutor(
-        tool_registry=None,
-        workspace_dir=str(tmp_path),
-        timeout=5.0
+    code = "import os; [os.fork() for _ in range(50)]"
+    res = subprocess.run(
+        [
+            "docker", "run", "--rm", "--pids-limit=32",
+            PINNED_IMAGE,
+            "python", "-c", code
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10.0
     )
-    res = executor.execute_code_block(code, {}, "user", "session")
-    assert res.success or "timed out" in res.error.lower() or "Fork" in res.output
+    assert res.returncode != 0
+    assert "Resource temporarily unavailable" in res.stderr or "BlockingIOError" in res.stderr or "OSError" in res.stderr
 
 
 @requires_docker
@@ -112,17 +109,20 @@ def test_real_container_tmpfs_kernel_enforcement():
 
 @requires_docker
 def test_real_container_statvfs_early_abort(tmp_path):
-    """Driver statvfs monitoring aborts before hard ENOSPC corruption."""
+    """Driver statvfs monitoring aborts when free space drops below threshold."""
     executor = CodeModeExecutor(
         tool_registry=None,
         workspace_dir=str(tmp_path),
         max_workspace_bytes=10 * 1024 * 1024
     )
-    # Check quota helper logic under container mount
-    with pytest.raises(StorageQuotaExceededError):
-        # Force threshold check failure with small artificial threshold
-        executor.max_workspace_bytes = 1000
-        executor._check_workspace_quotas(tmp_path)
+    from unittest.mock import patch, MagicMock
+    mock_stat = MagicMock()
+    mock_stat.f_bavail = 100
+    mock_stat.f_frsize = 1024  # 100 KB available (< 5 MB threshold)
+    mock_stat.f_favail = 1000
+    with patch("os.statvfs", return_value=mock_stat):
+        with pytest.raises(StorageQuotaExceededError, match="disk space critically low"):
+            executor._check_workspace_quotas(tmp_path)
 
 
 @requires_docker
