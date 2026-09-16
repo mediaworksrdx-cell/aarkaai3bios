@@ -256,14 +256,37 @@ RESERVED_OUTPUT_TOKENS = int(os.getenv("AARKAAI_RESERVED_OUTPUT_TOKENS", "2048")
 KV_PREFIX_CACHE_ENABLED = os.getenv("AARKAAI_KV_PREFIX_CACHE", "true").lower() == "true"
 KV_CACHE_DIAGNOSTICS = os.getenv("AARKAAI_KV_CACHE_DIAGNOSTICS", "false").lower() == "true"
 
-# ─── Code Mode / Programmatic Tool Calling (Controlled Beta) ────────────────
+# ─── Code Mode / Programmatic Tool Calling (Stage 1 Hardened) ───────────────
 CODE_MODE_ENABLED = os.getenv("AARKAAI_CODE_MODE_ENABLED", "false").lower() == "true"
 CODE_MODE_TIMEOUT = float(os.getenv("AARKAAI_CODE_MODE_TIMEOUT", "30.0"))
 CODE_MODE_MAX_TOOL_CALLS = int(os.getenv("AARKAAI_CODE_MODE_MAX_CALLS", "15"))
 CODE_MODE_SANDBOX_BACKEND = os.getenv("AARKAAI_CODE_MODE_SANDBOX", "docker")
 CODE_MODE_MAX_OUTPUT_BYTES = int(os.getenv("AARKAAI_CODE_MODE_MAX_OUTPUT", str(1024 * 1024)))
 CODE_MODE_MAX_MEMORY_MB = int(os.getenv("AARKAAI_CODE_MODE_MAX_MEMORY", "512"))
+CODE_MODE_DOCKER_IMAGE = os.getenv(
+    "AARKAAI_CODE_MODE_IMAGE",
+    "python:3.11.8-slim@sha256:72c448d6174a72d1767073238e833446820524419cb7d48354db1a7191136b80"
+)
+CODE_MODE_CONTAINER_USER = "10001:10001"
+CODE_MODE_CPU_LIMIT = "1.0"
+CODE_MODE_PIDS_LIMIT = 32
+CODE_MODE_MAX_SCRIPT_BYTES = 65536  # 64 KB
+CODE_MODE_MAX_WORKSPACE_BYTES = 104857600  # 100 MB
+CODE_MODE_MAX_WORKSPACE_FILES = 1000
+CODE_MODE_CI_SIGNING_KEY = os.getenv("AARKAAI_CI_SIGNING_KEY", "")
+CODE_MODE_CI_NONCE_DB = str(BASE_DIR / "var" / "ci_nonces.db")
 
-# ─── MCP Client (Deferred) ──────────────────────────────────────────────────
+# ─── MCP Client (Stage 1 Hardened) ──────────────────────────────────────────
 MCP_ENABLED = os.getenv("AARKAAI_MCP_ENABLED", "false").lower() == "true"
 MCP_CONFIG_PATH = os.getenv("AARKAAI_MCP_CONFIG", str(BASE_DIR / "mcp_config.yaml"))
+MCP_ADMIN_ALLOWED_BINARIES = {
+    # Populated by system administrator in production deployments
+}
+MCP_SSRF_BLOCKED_CIDRS = [
+    "127.0.0.0/8", "::1/128",
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+    "169.254.0.0/16", "fe80::/10",
+    "224.0.0.0/4", "ff00::/8",
+    "fd00::/8", "169.254.169.254/32"
+]
+

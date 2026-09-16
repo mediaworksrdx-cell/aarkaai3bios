@@ -43,7 +43,7 @@ def test_build_tool_namespace():
     mock_registry = MagicMock()
     mock_registry.execute_tool.return_value = "Success"
     
-    executor = CodeModeExecutor(mock_registry, "/tmp", 10, 5, 1024)
+    executor = CodeModeExecutor(mock_registry, "/tmp", 10, 5, 1024, approval_context={"human_approved": True})
     namespace = executor.build_tool_namespace(["BashTool", "FileEditTool"])
     
     assert "BashTool" in namespace
@@ -55,7 +55,7 @@ def test_build_tool_namespace():
 
 def test_tool_call_counter_limit():
     mock_registry = MagicMock()
-    executor = CodeModeExecutor(mock_registry, "/tmp", 10, 2, 1024)
+    executor = CodeModeExecutor(mock_registry, "/tmp", 10, 2, 1024, approval_context={"human_approved": True})
     namespace = executor.build_tool_namespace(["BashTool"])
     
     namespace["BashTool"](command="ls")
