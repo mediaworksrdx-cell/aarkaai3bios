@@ -21,7 +21,7 @@ from modules.code_mode import (
 
 DOCKER_AVAILABLE = shutil.which("docker") is not None and CodeModeExecutor.is_docker_available()
 requires_docker = pytest.mark.skipif(not DOCKER_AVAILABLE, reason="Docker daemon not available on this host")
-PINNED_IMAGE = "python:3.11.8-slim@sha256:72c448d6174a72d1767073238e833446820524419cb7d48354db1a7191136b80"
+PINNED_IMAGE = "python:3.11.8-slim@sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bfbf263656654dc9b"
 
 
 def test_docker_absence_enforces_zero_host_fallback(tmp_path):

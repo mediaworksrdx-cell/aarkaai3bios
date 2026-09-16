@@ -1,6 +1,6 @@
 # AARKAAI Hardened Sandbox Dockerfile
 # Pinned official base digest for reproducible, verifiable builds
-FROM python:3.11.8-slim@sha256:72c448d6174a72d1767073238e833446820524419cb7d48354db1a7191136b80 AS base
+FROM python:3.11.8-slim@sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bfbf263656654dc9b AS base
 
 # Create dedicated non-root user and group (UID/GID 10001)
 RUN groupadd -g 10001 appgroup && \
