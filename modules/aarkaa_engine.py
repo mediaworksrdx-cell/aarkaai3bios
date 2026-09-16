@@ -604,8 +604,9 @@ def _build_chatml_multi(system: str, history: list[dict] | None, user: str,
         sys_block = f"{system}\n\n{user_facts}"
     prompt = f"<|im_start|>system\n{sys_block}<|im_end|>\n"
     if history:
-        from config import COMPACTION_ENABLED, RESERVED_OUTPUT_TOKENS, MODEL_CONTEXT_WINDOW
-        if COMPACTION_ENABLED:
+        from config import RESERVED_OUTPUT_TOKENS, MODEL_CONTEXT_WINDOW
+        from modules.context_compaction import is_compaction_enabled
+        if is_compaction_enabled():
             from modules.context_compaction import compact_history, _tokenize_len
             model_inst = _get_model(force_gpu=True) if not _is_stub else None
             # Compute history token budget: total - system - query - reserved_output - safety
@@ -1102,8 +1103,98 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False, user_que
             yield clean_buf
 
 
+_last_prompt_tokens: list[int] = []
+_last_ttft_metrics: dict = {}
+
+
+def _measure_prefix_cache_hit(new_prompt: str, backend: str, ttft_ms: float, model_instance: Any = None) -> dict:
+    """Diagnostic helper: compares new_prompt tokens against _last_prompt_tokens.
+    Measures:
+    - common_prefix_tokens: number of leading tokens identical to last prompt
+    - prefix_match_ratio: common_prefix_tokens / len(new_prompt_tokens)
+    - measured_ttft_ms: actual observed time to first token
+    - backend: 'modal_gpu' or 'cpu_fallback'
+    """
+    global _last_prompt_tokens, _last_ttft_metrics
+    # Tokenize if model instance available, else character 4-gram tokens
+    if model_instance and hasattr(model_instance, "tokenize"):
+        try:
+            tokens = model_instance.tokenize(new_prompt.encode("utf-8"), special=True)
+        except Exception:
+            tokens = [hash(new_prompt[i:i+4]) for i in range(0, len(new_prompt), 4)]
+    else:
+        tokens = [hash(new_prompt[i:i+4]) for i in range(0, len(new_prompt), 4)]
+
+    common_len = 0
+    min_len = min(len(tokens), len(_last_prompt_tokens))
+    for i in range(min_len):
+        if tokens[i] == _last_prompt_tokens[i]:
+            common_len += 1
+        else:
+            break
+
+    ratio = (common_len / len(tokens)) if tokens else 0.0
+    _last_prompt_tokens = list(tokens)
+
+    metrics = {
+        "common_prefix_tokens": common_len,
+        "prefix_match_ratio": round(ratio, 4),
+        "measured_ttft_ms": round(ttft_ms, 2),
+        "backend": backend,
+        "total_prompt_tokens": len(tokens),
+    }
+    _last_ttft_metrics = metrics
+
+    from config import KV_CACHE_DIAGNOSTICS
+    if KV_CACHE_DIAGNOSTICS:
+        logger.info(
+            "KV-Cache Prefix Diagnostic: %d shared tokens (%.1f%% match) | TTFT: %.1fms [%s]",
+            common_len, ratio * 100, ttft_ms, backend
+        )
+    return metrics
+
+
+def benchmark_prefix_ttft(runs: int = 2) -> dict:
+    """Empirical TTFT benchmark comparing cold vs warm prefix generation.
+    Returns real measured metrics rather than hypothetical speedups.
+    """
+    import time
+    static_prefix = (
+        "<|im_start|>system\nYou are AARKAA, an enterprise AI assistant with deterministic tools: "
+        "FileReadTool, FileEditTool, BashTool. Follow all safety and precision rules strictly.<|im_end|>\n"
+    )
+    cold_prompt = static_prefix + "<|im_start|>user\nProvide a 1-sentence description of binary search.<|im_end|>\n<|im_start|>assistant\n"
+    warm_prompt = static_prefix + "<|im_start|>user\nProvide a 1-sentence description of quicksort.<|im_end|>\n<|im_start|>assistant\n"
+
+    # Run cold
+    t0 = time.perf_counter()
+    cold_tokens = list(_generate_stream(cold_prompt, max_new_tokens=30, force_general=True))
+    cold_total_ms = (time.perf_counter() - t0) * 1000.0
+    cold_metric = dict(_last_ttft_metrics)
+
+    # Run warm (same prefix)
+    t1 = time.perf_counter()
+    warm_tokens = list(_generate_stream(warm_prompt, max_new_tokens=30, force_general=True))
+    warm_total_ms = (time.perf_counter() - t1) * 1000.0
+    warm_metric = dict(_last_ttft_metrics)
+
+    return {
+        "cold_ttft_ms": cold_metric.get("measured_ttft_ms", 0.0),
+        "cold_total_ms": round(cold_total_ms, 2),
+        "warm_ttft_ms": warm_metric.get("measured_ttft_ms", 0.0),
+        "warm_total_ms": round(warm_total_ms, 2),
+        "prefix_match_tokens": warm_metric.get("common_prefix_tokens", 0),
+        "prefix_match_ratio": warm_metric.get("prefix_match_ratio", 0.0),
+        "backend": warm_metric.get("backend", "unknown"),
+        "cold_tokens_generated": len(cold_tokens),
+        "warm_tokens_generated": len(warm_tokens),
+    }
+
+
 def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, force_general=False):
     """Run generation via Modal GPU (primary) or local llama.cpp (fallback), yielding tokens with repetition guard."""
+    import time
+    t_start = time.perf_counter()
     stop_tokens = [
         "<|im_end|>", "<|im_start|>", "<|endoftext|>", "\n\n---",
         "<|im_start|>user", "<|im_start|>system", "<|im_start|>assistant",
@@ -1173,7 +1264,12 @@ def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, fo
     modal_stream = _stream_modal_gpu(prompt, max_new_tokens=max_new_tokens, stop=stop_tokens, temperature=temperature, model_name=modal_model)
     if modal_stream is not None:
         yielded_any = False
+        first_token_seen = False
         for token in _guard_token_stream(modal_stream, prompt_requests_code=prompt_requests_code, user_query=clean_user_q):
+            if not first_token_seen:
+                first_token_seen = True
+                ttft_ms = (time.perf_counter() - t_start) * 1000.0
+                _measure_prefix_cache_hit(prompt, "modal_gpu", ttft_ms)
             yielded_any = True
             yield token
         if yielded_any:
@@ -1195,7 +1291,13 @@ def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, fo
             stop=stop_tokens,
             stream=True
         ))
-        yield from _guard_token_stream(raw_stream, prompt_requests_code=prompt_requests_code, user_query=clean_user_q)
+        first_token_seen = False
+        for token in _guard_token_stream(raw_stream, prompt_requests_code=prompt_requests_code, user_query=clean_user_q):
+            if not first_token_seen:
+                first_token_seen = True
+                ttft_ms = (time.perf_counter() - t_start) * 1000.0
+                _measure_prefix_cache_hit(prompt, "cpu_fallback", ttft_ms, model_instance)
+            yield token
 
 
 
