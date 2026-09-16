@@ -21,7 +21,15 @@ from modules.code_mode import (
 
 DOCKER_AVAILABLE = shutil.which("docker") is not None and CodeModeExecutor.is_docker_available()
 requires_docker = pytest.mark.skipif(not DOCKER_AVAILABLE, reason="Docker daemon not available on this host")
-PINNED_IMAGE = "python:3.11.8-slim@sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bfbf263656654dc9b"
+BASE_IMAGE = "python:3.11.8-slim@sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bfbf263656654dc9b"
+if DOCKER_AVAILABLE:
+    try:
+        has_hardened = subprocess.run(["docker", "image", "inspect", "aarkaa-sandbox:3.11.8-hardened"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        PINNED_IMAGE = os.getenv("AARKAAI_CODE_MODE_IMAGE", "aarkaa-sandbox:3.11.8-hardened" if has_hardened else BASE_IMAGE)
+    except Exception:
+        PINNED_IMAGE = BASE_IMAGE
+else:
+    PINNED_IMAGE = BASE_IMAGE
 
 
 def test_docker_absence_enforces_zero_host_fallback(tmp_path):

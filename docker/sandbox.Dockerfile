@@ -6,8 +6,13 @@ FROM python:3.11.8-slim@sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bf
 RUN groupadd -g 10001 appgroup && \
     useradd -u 10001 -g appgroup -s /sbin/nologin -M -d /workspace appuser
 
-# Remove package managers and clean system caches to minimize attack surface
-RUN rm -rf /var/lib/apt/lists/* /var/cache/apt/* /var/cache/debconf/* /usr/share/man /usr/share/doc
+# Remove unnecessary pip, wheel, and setuptools to eliminate CVE-2025-47273 and CVE-2026-24049
+RUN rm -rf /usr/local/lib/python3.11/site-packages/setuptools* \
+           /usr/local/lib/python3.11/site-packages/wheel* \
+           /usr/local/lib/python3.11/site-packages/pip* \
+           /usr/local/bin/pip* \
+           /usr/local/bin/wheel \
+           /var/lib/apt/lists/* /var/cache/apt/* /var/cache/debconf/* /usr/share/man /usr/share/doc
 
 # Prepare workspace directory with strict non-root ownership
 RUN mkdir -p /workspace /tmp && \
