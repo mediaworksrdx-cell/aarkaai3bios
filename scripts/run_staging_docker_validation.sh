@@ -65,26 +65,30 @@ INDEPENDENT_VERIFICATION: PASS
 EOF
 echo "Image digest cryptographically verified."
 
-echo "=== [3/6] Generating Vulnerability Scan Report ==="
+echo "=== [3/6] Building Hardened Minimal Sandbox Image ==="
+docker build -t aarkaa-sandbox:3.11.8-hardened -f docker/sandbox.Dockerfile .
+echo "Hardened sandbox image built."
+
+echo "=== [4/6] Generating Vulnerability Scan Report for Hardened Image ==="
 if command -v trivy &> /dev/null; then
-    trivy image --severity HIGH,CRITICAL --format json -o "${ARTIFACTS_DIR}/trivy_report.json" "${PINNED_IMAGE}"
-    echo "Trivy report generated."
+    trivy image --severity HIGH,CRITICAL --format json -o "${ARTIFACTS_DIR}/trivy_report.json" aarkaa-sandbox:3.11.8-hardened
+    echo "Trivy report generated for hardened image."
 else
     echo "Trivy not found locally; generating structured scan summary from CI scanner."
 fi
 
-echo "=== [4/6] Generating Software Bill of Materials (SBOM) ==="
+echo "=== [5/6] Generating Software Bill of Materials (SBOM) for Hardened Image ==="
 if command -v syft &> /dev/null; then
-    syft "${PINNED_IMAGE}" -o spdx-json="${ARTIFACTS_DIR}/sbom-spdx.json"
-    syft "${PINNED_IMAGE}" -o cyclonedx-json="${ARTIFACTS_DIR}/sbom-cyclonedx.json"
-    echo "SBOMs generated with syft."
+    syft aarkaa-sandbox:3.11.8-hardened -o spdx-json="${ARTIFACTS_DIR}/sbom-spdx.json"
+    syft aarkaa-sandbox:3.11.8-hardened -o cyclonedx-json="${ARTIFACTS_DIR}/sbom-cyclonedx.json"
+    echo "SBOMs generated with syft for hardened image."
 fi
 
-echo "=== [5/6] Executing Real Docker Adversarial Integration Test Suite ==="
+echo "=== [6/7] Executing Real Docker Adversarial Integration Test Suite ==="
 python -m pytest tests/integration/test_code_mode_docker.py -v --override-ini="addopts=" 2>&1 | tee "${ARTIFACTS_DIR}/integration_test.log"
 TEST_EXIT_CODE="${PIPESTATUS[0]}"
 
-echo "=== [6/6] Archiving Test Execution Summary ==="
+echo "=== [7/7] Archiving Test Execution Summary ==="
 cat <<EOF > "${ARTIFACTS_DIR}/test_execution_summary.json"
 {
   "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
