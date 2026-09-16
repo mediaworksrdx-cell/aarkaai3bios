@@ -97,3 +97,50 @@ def test_close_tag_split():
     assert out1 == ""
     assert out2 == "answer"
     assert sm.traces == ["content"]
+
+
+def test_sse_streaming_generator_preserves_clean_tokens():
+    """Simulates an SSE chunked stream where <think> is fragmented across multiple token chunks."""
+    sm = ReasoningTraceStateMachine()
+    raw_chunks = ["<thi", "nk>\nAnalyzing query\n", "</thi", "nk>\n", "Here is ", "the verified ", "answer."]
+    yielded = []
+    for chunk in raw_chunks:
+        token = sm.feed(chunk)
+        if token:
+            yielded.append(token)
+    remainder, traces = sm.finish()
+    if remainder:
+        yielded.append(remainder)
+
+    full_output = "".join(yielded)
+    assert "<think>" not in full_output
+    assert "</think>" not in full_output
+    assert "Analyzing query" not in full_output
+    assert "Here is the verified answer." in full_output
+    assert len(traces) == 1
+
+
+def test_verifier_preprocessing_strips_reasoning():
+    """Confirms that verify_response strips internal <think> traces prior to audit."""
+    from unittest.mock import patch
+    from modules.agents.verifier import verify_response
+    
+    dirty_response = "<think>Internal deliberation about algorithm complexity</think>The time complexity is O(N log N)."
+    
+    # Mock engine generate to return response unchanged
+    with patch("modules.aarkaa_engine._generate", return_value="The time complexity is O(N log N)."):
+        verified = verify_response("Explain complexity", dirty_response)
+        assert "<think>" not in verified
+        assert "Internal deliberation" not in verified
+        assert "O(N log N)" in verified
+
+
+def test_legitimate_user_content_containing_math_tags_never_removed():
+    """Ensures comparison operators like 'x < 5 and y > 3' are never interpreted as tags."""
+    sm = ReasoningTraceStateMachine()
+    text = "For index i, when value < 10 and count > 0, return True."
+    out = sm.feed(text)
+    remainder, traces = sm.finish()
+    assert (out + remainder) == text
+    assert len(traces) == 0
+

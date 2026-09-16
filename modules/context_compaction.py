@@ -26,6 +26,19 @@ from config import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Dynamic feature flag check
+# ---------------------------------------------------------------------------
+
+def is_compaction_enabled() -> bool:
+    """Check if compaction is enabled, prioritizing runtime AARKAAI_COMPACTION_ENABLED env var."""
+    import os
+    env_val = os.getenv("AARKAAI_COMPACTION_ENABLED")
+    if env_val is not None:
+        return env_val.lower() == "true"
+    import config
+    return getattr(config, "COMPACTION_ENABLED", True)
+
+# ---------------------------------------------------------------------------
 # Token budget helpers
 # ---------------------------------------------------------------------------
 
@@ -352,7 +365,7 @@ def compact_prompt(
         max_tokens: Legacy parameter for backward compatibility.
             Used only when prompt_token_budget is 0 and COMPACTION_ENABLED is False.
     """
-    if not COMPACTION_ENABLED:
+    if not is_compaction_enabled():
         # Rollback path: use safe token-aware fallback, NOT old character-based truncation.
         # This still applies Layers 1-3 (cheap text cleanup) and Layer 5 (turn truncation)
         # but skips the LLM summarization in Layer 4.

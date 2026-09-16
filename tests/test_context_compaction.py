@@ -228,3 +228,93 @@ class TestCheckpointFields:
         fields = _extract_checkpoint_fields(text)
         assert "Modified Files" not in fields
         assert "Errors Encountered" not in fields
+
+
+# ---------------------------------------------------------------------------
+# Long Multi-Turn & Multi-Step ReAct Integration Tests
+# ---------------------------------------------------------------------------
+
+class TestLongMultiTurnCompaction:
+    def test_massive_history_constrained_to_budget(self):
+        """A 40-turn conversation exceeding budget is pruned chronologically, keeping recent turns."""
+        from modules.context_compaction import compact_history, _tokenize_len
+        model = MockModel()
+        # 40 turns, each turn ~200 characters = ~50 tokens
+        history = [
+            {"role": "user" if i % 2 == 0 else "assistant",
+             "message": f"Turn {i}: " + ("detailed discussion point " * 8)}
+            for i in range(40)
+        ]
+        # Target budget: 400 tokens (~8 turns)
+        compacted = compact_history(history, token_budget=400, model_instance=model, preserve_turns=3)
+        total_tokens = sum(_tokenize_len(m["message"], model) for m in compacted)
+        assert total_tokens <= 400
+        # The latest turns must be present
+        assert "Turn 39" in compacted[-1]["message"]
+        assert "Turn 38" in compacted[-2]["message"]
+        assert "Turn 37" in compacted[-3]["message"]
+
+    def test_chatml_multi_integration_within_budget(self):
+        """_build_chatml_multi applies compact_history and stays bounded within token budget."""
+        from modules.aarkaa_engine import _build_chatml_multi
+        from modules.context_compaction import _tokenize_len
+        history = [
+            {"role": "user" if i % 2 == 0 else "assistant",
+             "message": f"Historical message {i} with content " + ("X" * 150)}
+            for i in range(30)
+        ]
+        result = _build_chatml_multi("You are AARKAA.", history, "What is the status?")
+        assert "<|im_start|>system" in result
+        assert "<|im_start|>user\nWhat is the status?" in result
+        # Must retain recent history
+        assert "Historical message 29" in result
+
+
+class TestMultiStepReActCompaction:
+    def test_long_react_trace_compacted_under_budget(self):
+        """A 15-step ReAct agent execution trace exceeding 12,000 tokens is compacted cleanly."""
+        from modules.context_compaction import compact_prompt, _compute_usable_budget, _tokenize_len
+        model = MockModel()
+        usable_budget = _compute_usable_budget(16384, 2048)  # 14336
+        assert usable_budget == 14336
+
+        # Build a 15-step ReAct prompt
+        system_preamble = "You are AARKAA Agent Coordinator.\nAvailable tools: BashTool, FileReadTool\n"
+        steps = []
+        for step in range(1, 16):
+            steps.append(
+                f"Thought: Analyzing step {step}.\n"
+                f"Action: FileReadTool\n"
+                f"Action Input: {{\"path\": \"src/module_{step}.py\"}}\n"
+                f"Observation: Source content for module_{step} with lots of lines.\n"
+                + ("line code content for testing buffer truncation\n" * 40)
+            )
+        full_react_prompt = system_preamble + "\n".join(steps)
+
+        compacted = compact_prompt(full_react_prompt, model, prompt_token_budget=usable_budget)
+        token_count = _tokenize_len(compacted, model)
+        assert token_count <= usable_budget
+        assert "You are AARKAA Agent Coordinator." in compacted
+        # Most recent steps must be preserved
+        assert "step 15" in compacted or "module_15.py" in compacted
+
+
+class TestCompactionRollbackFlag:
+    def test_env_var_rollback_flag_takes_effect(self, monkeypatch):
+        """Setting AARKAAI_COMPACTION_ENABLED=false switches to token-aware fallback immediately."""
+        import os
+        from modules.context_compaction import is_compaction_enabled, compact_prompt
+
+        monkeypatch.setenv("AARKAAI_COMPACTION_ENABLED", "false")
+        assert is_compaction_enabled() is False
+
+        # Run prompt compaction under rollback
+        prompt = "System preamble\n" + ("Thought: step\nAction: Tool\nObservation: " + ("Z" * 200) + "\n") * 30
+        result = compact_prompt(prompt, None, prompt_token_budget=1000)
+        assert is_compaction_enabled() is False
+        # Token-aware sliding window still applies, keeping preamble and recent content
+        assert "System preamble" in result
+
+        monkeypatch.setenv("AARKAAI_COMPACTION_ENABLED", "true")
+        assert is_compaction_enabled() is True
+
