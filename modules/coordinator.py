@@ -364,8 +364,19 @@ def stream_task(query: str, context: str = ""):
                 yield "final", result.format_final_answer()
                 return
             else:
-                logger.warning("Code Mode failed: %s. Falling back to ReAct.", result.error)
-                yield "status", "Code Mode failed, switching to step-by-step execution..."
+                logger.warning("Code Mode failed: %s. Falling back to contained ReAct.", result.error)
+                yield "status", "Code Mode failed, switching to safe read-only step-by-step execution..."
+                # Fallback containment: restrict available tools strictly to SAFE_FALLBACK_TOOLS
+                from modules.code_mode import SAFE_FALLBACK_TOOLS
+                tool_descs = [
+                    f"- {name}: {tool.description}"
+                    for name, tool in registry.tools.items()
+                    if name in SAFE_FALLBACK_TOOLS
+                ]
+                prompt = SYSTEM_PROMPT.format(tools="\n".join(tool_descs))
+                if context:
+                    prompt += f"\n\nContext:\n{context}\n"
+                prompt += f"\nRequest: {query}\n"
     
     MAX_LOOPS = 10
     executed_actions = set()

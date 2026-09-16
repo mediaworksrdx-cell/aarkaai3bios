@@ -1,0 +1,51 @@
+name: Stage 1 Hardening & Real Docker Validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, harness-integration-v2 ]
+    paths:
+      - 'docker/**'
+      - 'modules/code_mode.py'
+      - 'modules/mcp_client.py'
+      - 'modules/ci_nonce_store.py'
+      - 'modules/security_audit.py'
+      - 'tests/integration/test_code_mode_docker.py'
+
+jobs:
+  validate-container-sandbox:
+    name: Adversarial Docker Isolation & Evidence Collection
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov portalocker jsonschema
+
+      - name: Install Syft & Trivy
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Run Staging Docker Validation & Evidence Collection
+        run: |
+          chmod +x scripts/run_staging_docker_validation.sh
+          ./scripts/run_staging_docker_validation.sh
+
+      - name: Upload Verifiable Staging Evidence Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage1-hardening-evidence
+          path: ci/artifacts/
+          retention-days: 30
