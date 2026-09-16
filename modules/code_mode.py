@@ -125,7 +125,7 @@ class CodeModeExecutor:
         max_script_bytes: int = 65536,
         max_workspace_bytes: int = 104857600,  # 100 MB
         max_workspace_files: int = 1000,
-        docker_image: str = "python:3.11.8-slim@sha256:72c448d6174a72d1767073238e833446820524419cb7d48354db1a7191136b80",
+        docker_image: str = "python:3.11.8-slim@sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bfbf263656654dc9b",
         approval_context: Optional[Dict[str, Any]] = None,
         force_mock_container: bool = False  # For unit testing without Docker daemon
     ):

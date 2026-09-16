@@ -12,8 +12,9 @@ set -euo pipefail
 ARTIFACTS_DIR="ci/artifacts"
 mkdir -p "${ARTIFACTS_DIR}"
 
-PINNED_IMAGE="python:3.11.8-slim@sha256:72c448d6174a72d1767073238e833446820524419cb7d48354db1a7191136b80"
-EXPECTED_DIGEST="sha256:72c448d6174a72d1767073238e833446820524419cb7d48354db1a7191136b80"
+PINNED_IMAGE="python:3.11.8-slim@sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bfbf263656654dc9b"
+EXPECTED_DIGEST="sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bfbf263656654dc9b"
+EXPECTED_AMD64_DIGEST="sha256:346e2b922dbd8f853cd1a63f142290fc7449b0a59b0e2b600ef7dc98ca5ab436"
 
 echo "=== [1/6] Validating Docker Daemon & Runtime Platform ==="
 if ! command -v docker &> /dev/null; then
@@ -45,11 +46,12 @@ echo "=== [2/6] Pulling & Verifying Pinned Base Image Digest ==="
 docker pull "${PINNED_IMAGE}"
 
 PULLED_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${PINNED_IMAGE}" | cut -d@ -f2 || echo "")
-echo "Expected Digest: ${EXPECTED_DIGEST}"
-echo "Pulled Digest:   ${PULLED_DIGEST}"
+echo "Expected Index Digest: ${EXPECTED_DIGEST}"
+echo "Expected Arch Digest:  ${EXPECTED_AMD64_DIGEST}"
+echo "Pulled Digest:         ${PULLED_DIGEST}"
 
-if [ "${PULLED_DIGEST}" != "${EXPECTED_DIGEST}" ]; then
-    echo "ERROR: Pinned image digest mismatch! Expected ${EXPECTED_DIGEST}, got ${PULLED_DIGEST}" >&2
+if [ "${PULLED_DIGEST}" != "${EXPECTED_DIGEST}" ] && [ "${PULLED_DIGEST}" != "${EXPECTED_AMD64_DIGEST}" ]; then
+    echo "ERROR: Pinned image digest mismatch! Expected ${EXPECTED_DIGEST} or ${EXPECTED_AMD64_DIGEST}, got ${PULLED_DIGEST}" >&2
     exit 1
 fi
 
