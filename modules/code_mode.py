@@ -278,9 +278,18 @@ class CodeModeExecutor:
         # Ephemeral isolated workspace directory
         with tempfile.TemporaryDirectory(prefix="aarkaa_box_") as temp_dir:
             temp_path = Path(temp_dir)
+            try:
+                os.chmod(temp_dir, 0o777)
+            except Exception:
+                pass
+
             script_path = temp_path / "code_mode_runner.py"
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(runner_code)
+            try:
+                os.chmod(script_path, 0o666)
+            except Exception:
+                pass
 
             audit_event("sandbox.created", container_id=container_id, user_id=user_id, session_id=session_id)
 
