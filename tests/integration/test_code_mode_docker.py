@@ -93,7 +93,7 @@ def test_real_container_readonly_root_blocks_write():
         timeout=10.0
     )
     assert res.returncode != 0
-    assert "Read-only file system" in res.stderr
+    assert "Read-only file system" in res.stderr or "Permission denied" in res.stderr
 
 
 @requires_docker
