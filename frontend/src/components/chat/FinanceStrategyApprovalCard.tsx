@@ -43,7 +43,15 @@ export function FinanceStrategyApprovalCard({
     return strategyData.master_recommended || candidates[0]?.candidate_id || '';
   });
 
-  const [status, setStatus] = useState<ApprovalStatus>(request.status || 'pending');
+function normalizeStatus(s?: string): ApprovalStatus {
+  const norm = (s || 'pending').toLowerCase();
+  if (norm === 'approved' || norm === 'approve') return 'approved';
+  if (norm === 'rejected' || norm === 'reject' || norm === 'deny' || norm === 'denied') return 'rejected';
+  if (norm === 'timeout' || norm === 'expired') return 'timeout';
+  return 'pending';
+}
+
+  const [status, setStatus] = useState<ApprovalStatus>(() => normalizeStatus(request.status));
   const [remainingSeconds, setRemainingSeconds] = useState<number>(() => {
     const rawCreatedAt = request.created_at || Date.now();
     const createdAtMs = rawCreatedAt < 1e11 ? rawCreatedAt * 1000 : rawCreatedAt;
@@ -57,10 +65,13 @@ export function FinanceStrategyApprovalCard({
 
   // Synchronize when parent updates request.status (e.g. via approval_resolved SSE event)
   useEffect(() => {
-    if (request.status && request.status !== status) {
-      setStatus(request.status);
+    if (request.status) {
+      const nextStatus = normalizeStatus(request.status);
+      if (nextStatus !== status) {
+        setStatus(nextStatus);
+      }
     }
-  }, [request.status]);
+  }, [request.status, status]);
 
   // 120s countdown timer
   useEffect(() => {

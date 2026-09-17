@@ -90,6 +90,10 @@ class ToolApprovalRecord:
             d["expires_at"] = int(d["expires_at"] * 1000)
         if d.get("resolved_at") and d["resolved_at"] < 1e11:
             d["resolved_at"] = int(d["resolved_at"] * 1000)
+        if "status" in d and isinstance(d["status"], str):
+            d["status"] = d["status"].lower()
+        if "risk_level" in d and isinstance(d["risk_level"], str):
+            d["mutation_risk"] = d["risk_level"].lower()
         return d
 
 
