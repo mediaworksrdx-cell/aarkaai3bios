@@ -108,7 +108,6 @@ PUBLIC_ROUTES = {
     "/auth/register", "/auth/login", "/auth/visitor-token",
     "/auth/github/login", "/auth/github/callback",
     "/auth/google/login", "/auth/google/callback", "/auth/google/verify", "/auth/google",
-    "/download",
 }
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────

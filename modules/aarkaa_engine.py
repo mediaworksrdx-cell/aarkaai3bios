@@ -158,7 +158,7 @@ _LANG_NAMES = {
     "ne": "Nepali",
     "se": "Sami, Northern",
     "no": "Norwegian",
-    "nb": "Norwegian Bokmål",
+    "nb": "Norwegian Bokmal",
     "nn": "Norwegian Nynorsk",
     "ii": "Sichuan Yi",
     "oc": "Occitan",
@@ -214,7 +214,7 @@ _LANG_NAMES = {
     "uz": "Uzbek",
     "ve": "Venda",
     "vi": "Vietnamese",
-    "vo": "Volapük",
+    "vo": "Volapuk",
     "wa": "Walloon",
     "cy": "Welsh",
     "wo": "Wolof",
@@ -226,12 +226,12 @@ _LANG_NAMES = {
 }
 
 _GGUF_CANDIDATES = [
-    # 7B Model (Highest Reasoning Quality) — priority 1
+    # 7B Model (Highest Reasoning Quality) -- priority 1
     Path(MODEL_PATH).parent / "aarkaa-7b-q8.gguf",
     Path(MODEL_PATH).parent / "aarkaa-7b-f16.gguf",
     Path(MODEL_PATH) / "aarkaa-7b-q8.gguf",
     Path(MODEL_PATH) / "aarkaa-7b-f16.gguf",
-    # 3B Fallbacks — priority 2
+    # 3B Fallbacks -- priority 2
     Path(MODEL_PATH).parent / "aarkaa-3b-q8.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-f16.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-f32.gguf",
@@ -730,7 +730,7 @@ def _get_temperature(query: str, intent: str, context: str = "") -> float:
     if any(w in q_low for w in creative_words):
         return 0.9
 
-    # 5. General / Knowledge queries (temp: 0.45 — lowered from 0.7 to reduce
+    # 5. General / Knowledge queries (temp: 0.45 -- lowered from 0.7 to reduce
     #    hallucination rate on factual queries with the 7B model)
     return 0.45
 
@@ -793,7 +793,7 @@ def _stream_modal_gpu(prompt, max_new_tokens=3800, stop=None, temperature=0.7, m
         return None
 
 
-# ─── Dynamic Provenance Compliance ──────────────────────────────────────────
+# --- Dynamic Provenance Compliance ------------------------------------------
 # Previously: hardcoded markdown tables with fabricated timestamps.
 # Now: runtime-generated from actual FieldProvenance records.
 try:
@@ -801,7 +801,7 @@ try:
     _COMPLIANCE_RESPONSE = _GOVERNANCE_SPEC
 except ImportError:
     _COMPLIANCE_RESPONSE = (
-        "### Aarka AI — Data Governance\n\n"
+        "### Aarka AI -- Data Governance\n\n"
         "Aarka enforces field-level provenance for every displayed metric. "
         "Each value carries source, retrieval timestamp, classification, and quality status. "
         "Full provenance audit available via `/screener/provenance` endpoint."
@@ -813,7 +813,7 @@ Aarka AI guarantees that every company returned in a sector-specific screening r
 
 1. **Sector Intent Normalization**: User query terms are mapped to canonical sector keys via alias tables.
 2. **Deterministic Universe Whitelisting**: Only stocks from the resolved sector universes are loaded. No cross-sector stocks enter the pipeline.
-3. **Hard Sector Boundary Enforcement**: Banking, IT, Auto, and other off-sector tickers are architecturally excluded at the universe level — they are never evaluated, scored, or ranked.
+3. **Hard Sector Boundary Enforcement**: Banking, IT, Auto, and other off-sector tickers are architecturally excluded at the universe level -- they are never evaluated, scored, or ranked.
 4. **Field-Level Validation**: Pre-screen validation confirms every constituent symbol belongs to the target universes before scoring begins.
 
 **Zero Cross-Contamination Invariant**: No off-sector tickers are ever evaluated, ranked, or returned.
@@ -1254,7 +1254,7 @@ def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, fo
     if clean_user_q.startswith("Request: "):
         clean_user_q = clean_user_q[9:].strip()
 
-    # ── 1. Attempt Modal Serverless GPU First ──
+    # -- 1. Attempt Modal Serverless GPU First --
     modal_model = "7b"
     if not force_general:
         req_dom = request_domain.get()
@@ -1275,7 +1275,7 @@ def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, fo
         if yielded_any:
             return
 
-    # ── 2. Local Fallback (llama.cpp) ──
+    # -- 2. Local Fallback (llama.cpp) --
     model_instance = _get_model(force_gpu=True, force_general=force_general)
     if _is_stub or model_instance is None:
         yield _stub_response(prompt)
@@ -1375,7 +1375,7 @@ def generate_raw(prompt, max_new_tokens=300, stop=None):
                     break
     result = generated_text.strip()
     if not result:
-        logger.warning("generate_raw: model returned empty output — possible KV cache overflow (max_tokens=%d, prompt_len=%d). Returning stub.", max_tokens, prompt_len)
+        logger.warning("generate_raw: model returned empty output -- possible KV cache overflow (max_tokens=%d, prompt_len=%d). Returning stub.", max_tokens, prompt_len)
         return "I was unable to generate a response. Please try rephrasing your query."
     return result
 
@@ -1445,13 +1445,13 @@ def _clean_response(text):
     # Strip hallucinated "References:" sections with raw URLs that overflow the response
     # These appear when the model copies reference links from web search context verbatim.
     text = re.sub(
-        r'\n\s*(?:References?|Sources?|Citations?)\s*:\s*\n(?:\s*[-•*]?\s*(?:\[.*?\]\(https?://[^\)]+\)|https?://\S+)\s*\n?)+\s*$',
+        r'\n\s*(?:References?|Sources?|Citations?)\s*:\s*\n(?:\s*[-**]?\s*(?:\[.*?\]\(https?://[^\)]+\)|https?://\S+)\s*\n?)+\s*$',
         '', text, flags=re.IGNORECASE
     ).strip()
 
     # Regex-based disclaimer and meta-scaffolding stripper
     # Strip multi-turn hallucinations and synthetic follow-up turns (e.g. 1user, <|im_start|>user, User:, Human:)
-    # Strip multi-turn hallucinations — match only to end of CURRENT LINE (not re.DOTALL)
+    # Strip multi-turn hallucinations -- match only to end of CURRENT LINE (not re.DOTALL)
     # to prevent catastrophic deletion of all subsequent content.
     text = re.sub(r"(?i)(?:\n|\b)(?:1user\b|<\|im_start\|>user|\nUser:|\nQuestion:|\nHuman:)[^\n]*", "", text).strip()
 
@@ -1652,10 +1652,10 @@ def _stub_response(query, context=""):
         return (
             "Hello! I am **Aarka**, a professional agentic AI coding, design, and research assistant.\n\n"
             "Here are the core areas I can assist you with:\n"
-            "• **💻 Software & Systems Architecture**: Production-grade code engineering, algorithms, system design, and API architectures.\n"
-            "• **📈 Quantitative Finance & Markets**: Real-time equities, valuation models, multi-factor screening, and technical analytics.\n"
-            "• **🔬 Research & Analysis**: Factual lookup, deep technical synthesis, and domain-grounded intelligence.\n"
-            "• **🛠️ Autonomous Tool Execution**: Automated workflow orchestration, data pipelines, and testing suites.\n\n"
+            "* **💻 Software & Systems Architecture**: Production-grade code engineering, algorithms, system design, and API architectures.\n"
+            "* **📈 Quantitative Finance & Markets**: Real-time equities, valuation models, multi-factor screening, and technical analytics.\n"
+            "* **🔬 Research & Analysis**: Factual lookup, deep technical synthesis, and domain-grounded intelligence.\n"
+            "* **🛠️ Autonomous Tool Execution**: Automated workflow orchestration, data pipelines, and testing suites.\n\n"
             "How can I assist your engineering, research, or analysis today?"
         )
 
@@ -1878,7 +1878,7 @@ def self_check_response(query: str, response: str, intent: str) -> bool:
         logger.info("Self-Check (Gemini) decision: %s for intent: %s", decision, intent)
         return "FAIL" not in decision
     except Exception as gemini_exc:
-        logger.debug("Gemini self-check unavailable (%s) — auto-PASS (local 7B self-check disabled to prevent feedback poisoning)", gemini_exc)
+        logger.debug("Gemini self-check unavailable (%s) -- auto-PASS (local 7B self-check disabled to prevent feedback poisoning)", gemini_exc)
         return True
 
 
@@ -1936,7 +1936,7 @@ def final_response(query, context, intent="", lang="en", mode="production", hist
             prompt_len = len(prompt)
             logger.info("final_response (attempt %d): prompt_len=%d chars, max_tokens=%d, temp=%.2f", attempt + 1, prompt_len, tokens, temp)
             if prompt_len > 38000:
-                logger.warning("Prompt too long (%d chars) — rebuilding without history to prevent context overflow", prompt_len)
+                logger.warning("Prompt too long (%d chars) -- rebuilding without history to prevent context overflow", prompt_len)
                 result = _build_final_prompt(query, context, intent, lang, mode, history=None, user_facts=user_facts)
                 prompt, tokens = result[0], result[1]
                 temp = result[2] if len(result) > 2 else 0.7
@@ -1944,7 +1944,7 @@ def final_response(query, context, intent="", lang="en", mode="production", hist
                 # If still too long after stripping history, truncate context
                 if prompt_len > 38000 and context:
                     ctx_budget = max(4000, 38000 - (prompt_len - len(context)))
-                    logger.warning("Still too long (%d chars) — truncating context to %d chars", prompt_len, ctx_budget)
+                    logger.warning("Still too long (%d chars) -- truncating context to %d chars", prompt_len, ctx_budget)
                     result = _build_final_prompt(query, context[:ctx_budget], intent, lang, mode, history=None, user_facts=user_facts)
                     prompt, tokens = result[0], result[1]
                     temp = result[2] if len(result) > 2 else 0.7
@@ -2031,14 +2031,14 @@ def stream_final_response(query, context, intent="", lang="en", mode="production
         prompt_len = len(prompt)
         logger.info("stream_final_response: prompt_len=%d chars, max_tokens=%d, temp=%.2f", prompt_len, tokens, temp)
         if prompt_len > 38000:
-            logger.warning("Prompt too long (%d chars) — rebuilding without history to prevent context overflow", prompt_len)
+            logger.warning("Prompt too long (%d chars) -- rebuilding without history to prevent context overflow", prompt_len)
             result = _build_final_prompt(query, context, intent, lang, mode, history=None, user_facts=user_facts)
             prompt, tokens = result[0], result[1]
             temp = result[2] if len(result) > 2 else 0.7
             prompt_len = len(prompt)
             if prompt_len > 38000 and context:
                 ctx_budget = max(4000, 38000 - (prompt_len - len(context)))
-                logger.warning("Still too long (%d chars) — truncating context to %d chars", prompt_len, ctx_budget)
+                logger.warning("Still too long (%d chars) -- truncating context to %d chars", prompt_len, ctx_budget)
                 result = _build_final_prompt(query, context[:ctx_budget], intent, lang, mode, history=None, user_facts=user_facts)
                 prompt, tokens = result[0], result[1]
                 temp = result[2] if len(result) > 2 else 0.7
@@ -2580,7 +2580,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "- For future prices, valuations, elections, or unknown future events, explain that the outcome cannot be known with certainty.\n\n"
                     "Trading & Technical Analysis:\n"
                     "- Understand technical analysis, market structure, liquidity, order blocks, fair value gaps (FVG), break of structure (BOS), change of character (CHOCH), market structure shift (MSS), Smart Money Concepts (SMC), order flow, liquidity sweeps, and price action.\n"
-                    "- In trading, financial markets, and technical chart analysis, 'SMC' stands for Smart Money Concepts — a methodology focused on tracking institutional order flow, smart money accumulation/distribution, order blocks (OB), fair value gaps (FVG), liquidity pools/sweeps, and structural breaks (BOS/CHoCH).\n"
+                    "- In trading, financial markets, and technical chart analysis, 'SMC' stands for Smart Money Concepts -- a methodology focused on tracking institutional order flow, smart money accumulation/distribution, order blocks (OB), fair value gaps (FVG), liquidity pools/sweeps, and structural breaks (BOS/CHoCH).\n"
                     "- Explain trading concepts objectively, comprehensively, and with clear market structure mechanics.\n"
                     "- Never guarantee profits or future market outcomes.\n\n"
                     "Coding:\n"
@@ -2651,7 +2651,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                             "1. ZERO UNRELATED INJECTIONS: Answer ONLY the specific topics requested by the user. NEVER inject unrelated stock tickers (e.g. Target/TGT), technical indicators (RSI, MACD, Bollinger Bands), options strategies (Iron Condor), or unrequested Python code blocks.\n"
                             "2. ACCURATE CAUSAL & FIXED INCOME REASONING:\n"
                             "   - BOND DURATION RIGOR: Long-duration bonds are ALWAYS MORE SENSITIVE to interest rate changes than short-duration bonds (higher Macaulay/Modified duration = higher price volatility when yields move).\n"
-                            "   - NIM DEPENDENCY: Net Interest Margin (NIM) expansion is balance-sheet dependent — whether NIM expands depends on how quickly floating loans reprice (EBLR vs MCLR) relative to deposit repricing and the bank's funding mix (especially CASA ratio).\n"
+                            "   - NIM DEPENDENCY: Net Interest Margin (NIM) expansion is balance-sheet dependent -- whether NIM expands depends on how quickly floating loans reprice (EBLR vs MCLR) relative to deposit repricing and the bank's funding mix (especially CASA ratio).\n"
                             "   - STAGFLATION DEFINITION: A rate hike does NOT 'create' stagflation; it is a monetary tightening response to existing inflation during slowing GDP growth. It aims to anchor inflation expectations while accepting a temporary growth sacrifice.\n"
                             "3. CORE ECONOMIC TOPICS TO COVER FOR RATE HIKES:\n"
                             "   - Commercial Banks: Funding mix (CASA vs Term Deposits), EBLR vs MCLR transmission lags, ALM, balance-sheet specific Net Interest Margin (NIM) dynamics.\n"

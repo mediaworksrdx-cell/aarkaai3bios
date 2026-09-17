@@ -166,7 +166,7 @@ def risk_reward_ratio(entry_price: float, target_price: float, stoploss_price: f
         logger.error(f"Error in risk_reward_ratio: {e}")
         return {"risk": 0.0, "reward": 0.0, "ratio": 0.0, "is_favorable": False}
 
-def position_size(total_capital: float, risk_per_trade_pct: float, entry_price: float, stoploss_price: float) -> dict:
+def position_size(total_capital: float, risk_per_trade_pct: float, entry_price: float, stoploss_price: float = 0.0) -> dict:
     """Position sizing. Returns quantity, risk_amount, position_value."""
     if total_capital <= 0 or risk_per_trade_pct <= 0 or entry_price <= 0 or stoploss_price <= 0 or entry_price == stoploss_price:
         return {"quantity": 0, "risk_amount": 0.0, "position_value": 0.0}

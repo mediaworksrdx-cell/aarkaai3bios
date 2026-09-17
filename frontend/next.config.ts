@@ -60,6 +60,14 @@ const nextConfig: NextConfig = {
         source: '/download/:filename*',
         destination: `${backendUrl}/download/:filename*`,
       },
+      {
+        source: '/screener/:path*',
+        destination: `${backendUrl}/screener/:path*`,
+      },
+      {
+        source: '/screener',
+        destination: `${backendUrl}/screener`,
+      },
     ];
   },
   async headers() {

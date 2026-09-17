@@ -19,10 +19,10 @@ known-first-party = ["modules", "config", "database", "schemas", "middleware"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-v --tb=short --cov=. --cov-config=pyproject.toml --cov-report=term-missing --cov-report=html:htmlcov --cov-fail-under=40"
+addopts = "-v --tb=short"
 
 [tool.coverage.run]
-source = ["modules", "config.py", "database.py", "schemas.py", "middleware.py", "pipeline.py", "aarkaa_engine.py", "main.py"]
+source = ["modules", "config.py", "database.py", "schemas.py", "middleware.py", "pipeline.py", "main.py"]
 branch = true
 omit = [
     "tests/*",

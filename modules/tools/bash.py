@@ -26,8 +26,6 @@ logger = logging.getLogger(__name__)
 
 # ─── Allowlist: Only these base commands are permitted ────────────────────────
 ALLOWED_COMMANDS = {
-    # Python
-    "python", "python3", "pip", "pip3",
     # Node.js
     "node", "npm", "npx",
     # Read-only file inspection
@@ -78,8 +76,39 @@ ALWAYS_BLOCKED_PATTERNS = [
 ]
 
 
+def _validate_python_ast(code: str) -> Tuple[bool, str]:
+    """Validate Python code against dangerous system operations."""
+    import ast
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return False, f"Syntax Error in Python code: {e}"
+
+    forbidden_imports = {'socket', 'subprocess', 'pty', 'ptyprocess', 'paramiko'}
+    forbidden_builtins = {'compile'}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                base = alias.name.split('.')[0]
+                if base in forbidden_imports:
+                    return False, f"Forbidden import in Python command: {base}"
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                base = node.module.split('.')[0]
+                if base in forbidden_imports:
+                    return False, f"Forbidden import in Python command: {base}"
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in forbidden_builtins:
+                return False, f"Forbidden builtin in Python command: {node.func.id}"
+            elif isinstance(node.func, ast.Attribute):
+                if node.func.attr in {'system', 'popen', 'spawn', 'execv', 'execve', 'fork'}:
+                    return False, f"Forbidden call in Python command: {node.func.attr}"
+    return True, "Allowed"
+
+
 def _validate_command(command: str) -> Tuple[bool, str]:
-    """Validate command against allowlist and dangerous pattern checks.
+    """Validate command against allowlist, dangerous pattern checks, and Python AST validation.
     
     Returns:
         (is_valid, reason) tuple.
@@ -94,7 +123,6 @@ def _validate_command(command: str) -> Tuple[bool, str]:
     
     # Step 2: Extract base command and validate against allowlist
     # Handle compound commands (&&, ||, ;) by checking each part
-    # Split on shell operators
     parts = re.split(r'\s*(?:&&|\|\||;)\s*', command.strip())
     
     for part in parts:
@@ -125,6 +153,9 @@ def _validate_command(command: str) -> Tuple[bool, str]:
         # Strip version suffixes (python3.11 -> python3)
         base_cmd_normalized = re.sub(r'(\d+\.\d+)$', '', base_cmd)
         
+        if base_cmd_normalized in ("python", "python3", "pip", "pip3") or base_cmd in ("python", "python3", "pip", "pip3"):
+            return False, "Blocked: raw python/pip execution is prohibited on the host for security. Enforce all scripting via CodeModeExecutor inside containerized boundaries."
+
         if base_cmd not in ALLOWED_COMMANDS and base_cmd_normalized not in ALLOWED_COMMANDS:
             return False, f"Blocked: '{base_cmd}' is not in the allowed commands list"
     
@@ -135,8 +166,9 @@ class BashTool(Tool):
     name = "BashTool"
     description = (
         "Execute a shell command inside a sandboxed workspace. Use this for running "
-        "tests, checking system state, or executing code. Provide the 'command' argument. "
-        "NOTE: This server runs Linux. Always use 'python3' (not 'python') to run Python code."
+        "tests or checking system state. Provide the 'command' argument. "
+        "NOTE: Raw python/pip execution on the host is prohibited for security; "
+        "enforce all scripting via CodeModeExecutor inside containerized boundaries."
     )
     risk_level = "HIGH"
     latency_weight = 2.5

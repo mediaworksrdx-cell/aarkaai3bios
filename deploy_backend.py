@@ -45,7 +45,6 @@ PM2_ENV = (
 SYNC_PATHS = [
     "main.py",
     "pipeline.py",
-    "aarkaa_engine.py",
     "config.py",
     "database.py",
     "middleware.py",

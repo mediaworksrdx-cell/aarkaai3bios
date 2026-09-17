@@ -1,6 +1,9 @@
+import os
 import sys
 import traceback
 import builtins
+
+sys.path.insert(0, os.path.abspath("."))
 
 # Mocking input for HumanInput just in case
 builtins.input = lambda x: 'test_input_response'

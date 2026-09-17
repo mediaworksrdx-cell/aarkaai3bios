@@ -63,18 +63,23 @@ if hasattr(config, 'MAX_QUERY_LENGTH'):
 else:
     print("  WARN: No MAX_QUERY_LENGTH set")
 
-# Check for print statements in production modules
+# Check for print statements in production modules using AST
 print("\n=== 9. Print Statement Check ===")
-import glob
+import glob, ast
 prod_prints = []
 for f in glob.glob("modules/**/*.py", recursive=True):
     if "test" in f or "__pycache__" in f:
         continue
-    with open(f, 'r', encoding='utf-8', errors='ignore') as fh:
-        for i, line in enumerate(fh, 1):
-            stripped = line.strip()
-            if stripped.startswith("print(") and not stripped.startswith("#"):
-                prod_prints.append(f"  {f}:{i}: {stripped[:80]}")
+    try:
+        with open(f, 'r', encoding='utf-8', errors='ignore') as fh:
+            content = fh.read()
+        tree = ast.parse(content, filename=f)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print":
+                prod_prints.append(f"  {f}:{node.lineno}: print(...)")
+    except Exception:
+        pass
+
 if prod_prints:
     print(f"  WARN: {len(prod_prints)} print() calls in production modules")
     for p in prod_prints[:10]:

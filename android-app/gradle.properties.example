@@ -4,13 +4,13 @@ android.useAndroidX=true
 kotlin.code.style=official
 android.nonTransitiveRClass=true
 
-# ─── Signing (fill in your values) ───
+# ─── Signing (fill in your values or export AARKAAI_RELEASE_* env vars) ───
 RELEASE_STORE_FILE=../release.jks
-RELEASE_STORE_PASSWORD=your_store_password_here
-RELEASE_KEY_ALIAS=your_key_alias_here
-RELEASE_KEY_PASSWORD=your_key_password_here
+RELEASE_STORE_PASSWORD=
+RELEASE_KEY_ALIAS=
+RELEASE_KEY_PASSWORD=
 
 # ─── Backend URL ───
 # Emulator:   http://10.0.2.2:5000/
-# Production: https://aarka-ai.com/
-AARKAAI_BASE_URL=https://aarka-ai.com/
+# Production: https://synthetixanalytics.com/
+AARKAAI_BASE_URL=https://synthetixanalytics.com/
