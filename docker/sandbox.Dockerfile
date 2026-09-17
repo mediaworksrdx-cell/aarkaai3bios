@@ -3,8 +3,9 @@
 FROM python:3.11.8-slim@sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bfbf263656654dc9b AS base
 
 # Update Debian security packages to patch base OS vulnerabilities
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
-    apt-get upgrade -y && \
+    apt-get upgrade -y --no-install-recommends && \
     apt-get autoremove -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
