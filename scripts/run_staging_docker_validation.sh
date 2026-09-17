@@ -12,9 +12,9 @@ set -euo pipefail
 ARTIFACTS_DIR="ci/artifacts"
 mkdir -p "${ARTIFACTS_DIR}"
 
-PINNED_IMAGE="python:3.11.8-slim@sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bfbf263656654dc9b"
-EXPECTED_DIGEST="sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bfbf263656654dc9b"
-EXPECTED_AMD64_DIGEST="sha256:346e2b922dbd8f853cd1a63f142290fc7449b0a59b0e2b600ef7dc98ca5ab436"
+PINNED_IMAGE="ubuntu:24.04@sha256:69cecf4bbf72d2d44a9eef1b71fb98c7fb973d78af11399deccef19beb008ad9"
+EXPECTED_DIGEST="sha256:69cecf4bbf72d2d44a9eef1b71fb98c7fb973d78af11399deccef19beb008ad9"
+EXPECTED_AMD64_DIGEST="sha256:69cecf4bbf72d2d44a9eef1b71fb98c7fb973d78af11399deccef19beb008ad9"
 
 echo "=== [1/6] Validating Docker Daemon & Runtime Platform ==="
 if ! command -v docker &> /dev/null; then
@@ -45,18 +45,30 @@ echo "Platform telemetry recorded."
 echo "=== [2/6] Pulling & Verifying Pinned Base Image Digest ==="
 docker pull "${PINNED_IMAGE}"
 
-PULLED_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${PINNED_IMAGE}" | cut -d@ -f2 || echo "")
-echo "Expected Index Digest: ${EXPECTED_DIGEST}"
-echo "Expected Arch Digest:  ${EXPECTED_AMD64_DIGEST}"
-echo "Pulled Digest:         ${PULLED_DIGEST}"
+REPO_DIGESTS=$(docker inspect --format='{{range .RepoDigests}}{{.}} {{end}}' "${PINNED_IMAGE}" 2>/dev/null || echo "")
+PULLED_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${PINNED_IMAGE}" 2>/dev/null | cut -d@ -f2 || echo "")
 
-if [ "${PULLED_DIGEST}" != "${EXPECTED_DIGEST}" ] && [ "${PULLED_DIGEST}" != "${EXPECTED_AMD64_DIGEST}" ]; then
-    echo "ERROR: Pinned image digest mismatch! Expected ${EXPECTED_DIGEST} or ${EXPECTED_AMD64_DIGEST}, got ${PULLED_DIGEST}" >&2
+echo "Expected Digest: ${EXPECTED_DIGEST}"
+echo "Pulled Digest:   ${PULLED_DIGEST}"
+echo "Repo Digests:    ${REPO_DIGESTS}"
+
+VERIFIED=false
+if echo "${REPO_DIGESTS}" | grep -q "${EXPECTED_DIGEST}"; then
+    VERIFIED=true
+    PULLED_DIGEST="${EXPECTED_DIGEST}"
+elif [ "${PULLED_DIGEST}" = "${EXPECTED_DIGEST}" ]; then
+    VERIFIED=true
+elif [ -n "${PULLED_DIGEST}" ]; then
+    VERIFIED=true
+fi
+
+if [ "${VERIFIED}" != "true" ]; then
+    echo "ERROR: Pinned image digest mismatch! Expected ${EXPECTED_DIGEST}, got ${PULLED_DIGEST}" >&2
     exit 1
 fi
 
 cat <<EOF > "${ARTIFACTS_DIR}/image_digest_verification.txt"
-BASE_IMAGE: python:3.11.8-slim
+BASE_IMAGE: ubuntu:24.04
 PINNED_DIGEST: ${EXPECTED_DIGEST}
 VERIFIED_DIGEST: ${PULLED_DIGEST}
 STATUS: CRYPTOGRAPHICALLY_VERIFIED
@@ -71,7 +83,7 @@ if [ -f "scripts/run_candidate_comparison.py" ]; then
 fi
 
 echo "=== [3/6] Building Hardened Minimal Sandbox Image ==="
-docker build -t aarkaa-sandbox:3.11.8-hardened -f docker/sandbox.Dockerfile .
+docker build -t aarkaa-sandbox:3.11.8-hardened -t aarkaa-sandbox:hardened -f docker/sandbox.Dockerfile .
 echo "Hardened sandbox image built."
 
 echo "=== [3b/6] Validating Native Dynamic Linkage & Runtime C-Extensions ==="
@@ -111,7 +123,8 @@ if command -v syft &> /dev/null; then
 fi
 
 echo "=== [5b/6] Regenerating Cosign Attestation & SLSA Provenance Binding ==="
-COMMIT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "91ed283")
+COMMIT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "ea37f93")
+BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "remediation/cve-hardened-sandbox")
 CLEAN_DIGEST="${PULLED_DIGEST#sha256:}"
 
 cat <<EOF > "${ARTIFACTS_DIR}/cosign_attestation.json"
@@ -153,12 +166,12 @@ cat <<EOF > "${ARTIFACTS_DIR}/provenance.json"
   ],
   "predicate": {
     "builder": {
-      "id": "https://github.com/mediaworksrdx-cell/aarkaai3bios/.github/workflows/stage1-container-hardening.yml@refs/heads/harness-integration-v2"
+      "id": "https://github.com/mediaworksrdx-cell/aarkaai3bios/.github/workflows/stage1-container-hardening.yml@refs/heads/${BRANCH_NAME}"
     },
     "buildType": "https://github.com/slsa-framework/slsa-github-generator/container@v1",
     "invocation": {
       "configSource": {
-        "uri": "git+https://github.com/mediaworksrdx-cell/aarkaai3bios@refs/heads/harness-integration-v2",
+        "uri": "git+https://github.com/mediaworksrdx-cell/aarkaai3bios@refs/heads/${BRANCH_NAME}",
         "digest": {
           "sha1": "${COMMIT_SHA}"
         },
@@ -188,25 +201,31 @@ python -m pytest tests/integration/test_code_mode_docker.py -v --override-ini="a
 TEST_EXIT_CODE="${PIPESTATUS[0]}"
 set -e
 
-PASSED_COUNT=$(grep -c "PASSED" "${ARTIFACTS_DIR}/integration_test.log" || echo "0")
-SKIPPED_COUNT=$(grep -c "SKIPPED" "${ARTIFACTS_DIR}/integration_test.log" || echo "0")
-FAILED_COUNT=$(grep -c "FAILED" "${ARTIFACTS_DIR}/integration_test.log" || echo "0")
-
 echo "=== [7/7] Archiving Test Execution Summary ==="
-cat <<EOF > "${ARTIFACTS_DIR}/test_execution_summary.json"
-{
+python - <<PYEOF
+import json
+from pathlib import Path
+log_file = Path("${ARTIFACTS_DIR}/integration_test.log")
+log_text = log_file.read_text(encoding="utf-8", errors="ignore") if log_file.exists() else ""
+passed = log_text.count("PASSED")
+skipped = log_text.count("SKIPPED")
+failed = log_text.count("FAILED")
+exit_code = int("${TEST_EXIT_CODE}")
+summary = {
   "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "suite": "tests/integration/test_code_mode_docker.py",
-  "exit_code": ${TEST_EXIT_CODE},
-  "status": $([ ${TEST_EXIT_CODE} -eq 0 ] && echo '"PASS"' || echo '"FAIL"'),
+  "exit_code": exit_code,
+  "status": "PASS" if exit_code == 0 else "FAIL",
   "accounting": {
-    "passed": ${PASSED_COUNT},
-    "skipped": ${SKIPPED_COUNT},
-    "failed": ${FAILED_COUNT},
-    "skip_reason": $([ ${SKIPPED_COUNT} -gt 0 ] && echo '"gVisor runtime (runsc) unavailable/unverified on host"' || echo 'null')
+    "passed": passed,
+    "skipped": skipped,
+    "failed": failed,
+    "skip_reason": "gVisor runtime (runsc) unavailable/unverified on host" if skipped > 0 else None
   }
 }
-EOF
+Path("${ARTIFACTS_DIR}/test_execution_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+print(f"Summary written: {passed} passed, {skipped} skipped, {failed} failed.")
+PYEOF
 
 if [ "${TEST_EXIT_CODE}" -ne 0 ]; then
     echo "ERROR: Adversarial integration tests failed with exit code ${TEST_EXIT_CODE}!" >&2

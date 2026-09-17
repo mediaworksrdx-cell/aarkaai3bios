@@ -51,14 +51,16 @@ Candidates are evaluated through a strict hierarchical elimination order:
 
 ## 3. Empirical Candidate Evaluation Matrix
 
-Automated comparison results are recorded in [`ci/artifacts/candidate_comparison_scorecard.json`](file:///c:/Users/daarv/.gemini/antigravity/scratch/aarkaai3b/ci/artifacts/candidate_comparison_scorecard.json):
+Automated comparison results from Linux CI (Run `35172519153`, commit `ea37f93`) recorded in [`ci/artifacts/candidate_comparison_scorecard.json`](file:///c:/Users/daarv/.gemini/antigravity/scratch/aarkaai3b/ci/artifacts/candidate_comparison_scorecard.json):
 
-| Candidate ID | Name | Target Reference / Resolved Digest | Gate 1 (Isolation) | Gate 2 (Linkage) | Gate 3 (Trivy) | Image Size | Packages | Selection Status |
+| Candidate ID | Name | Resolved Immutable Digest | Gate 1 (Isolation) | Gate 2 (Linkage) | Gate 3 (Trivy) | Image Size | Packages | Selection Status |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| `candidate_a_debian_slim` | **Debian 12 Slim (Baseline)** | `python:3.11.8-slim@sha256:90f87955...` | 15P, 1S, 0F | PASS | WAIVER_REQ (5C / 59H) | 148 MB | 108 | Baseline Control |
-| `candidate_b_wolfi_python` | **Chainguard / Wolfi Python** | `cgr.dev/chainguard/python@sha256:<resolved>` | Pending CI | Pending CI | Pending CI | TBD | TBD | Candidate Under Eval |
-| `candidate_c_distroless_python` | **Distroless Python 3** | `gcr.io/distroless/python3-debian12@sha256:<resolved>` | Pending CI | Pending CI | Pending CI | TBD | TBD | Candidate Under Eval |
-| `candidate_d_ubuntu_minimal` | **Ubuntu 24.04 Minimal** | `ubuntu:24.04@sha256:<resolved>` | Pending CI | Pending CI | Pending CI | TBD | TBD | Candidate Under Eval |
+| `candidate_a_debian_slim` | **Debian 12 Slim (Baseline)** | `sha256:90f8795536170fd08236...` | 15P, 1S, 0F | PASS | WAIVER_REQ (5C / 59H) | 183.3 MB | 108 | **REJECTED** (Gate 3 CVEs) |
+| `candidate_b_wolfi_python` | **Chainguard / Wolfi Python** | `sha256:c8e464ca00c86bd80498...` | SKIPPED | FAIL (Path/Entrypoint) | SKIPPED | 63.4 MB | N/A | **REJECTED** (Gate 2 Linkage) |
+| `candidate_c_distroless_python` | **Distroless Python 3** | `sha256:2fdb05402a2cf21cf78f...` | SKIPPED | FAIL (Path/Entrypoint) | SKIPPED | 50.6 MB | N/A | **REJECTED** (Gate 2 Linkage) |
+| `candidate_d_ubuntu_minimal` | **Ubuntu 24.04 Minimal** | `sha256:69cecf4bbf72d2d44a9e...` | **15P, 1S, 0F** | **PASS** (`zlib 1.3`, `expat 2.6.1`, `sqlite 3.45.1`) | **PASS (0 Crit / 0 High)** | **111.4 MB** | **107** | **SELECTED WINNER** |
+
+*Selection Rationale*: `candidate_d_ubuntu_minimal` was the sole candidate to pass Gate 1 (15 passed, 1 skipped - gVisor unverified, 0 failed), pass Gate 2 (all native C-extensions functional under non-root UID 10001:10001), and pass Gate 3 with **zero Critical and zero High vulnerabilities** detected by Trivy.
 
 ---
 
