@@ -213,6 +213,8 @@ class SQLiteApprovalStore(ApprovalStoreInterface):
         import uuid
         now = time.time()
         expires_at = now + timeout_seconds
+        target_resource = target_resource or ""
+        mcp_server_id = mcp_server_id or ""
         approval_id = f"appr_{uuid.uuid4().hex[:16]}"
         action_hash = compute_action_hash(
             tool_name=tool_name,

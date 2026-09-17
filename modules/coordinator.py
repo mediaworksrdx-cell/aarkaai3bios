@@ -515,7 +515,7 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
                 args=params,
                 risk_level=risk,
                 human_summary=summary,
-                target_resource=target_res or None,
+                target_resource=target_res or "",
                 diff_preview=diff_prev,
                 command_preview=cmd_prev,
                 timeout_seconds=120.0
