@@ -1726,6 +1726,7 @@ import pydantic
 class ApprovalActionRequest(pydantic.BaseModel):
     approval_id: str
     decision: str  # "APPROVED" | "REJECTED"
+    selected_master_strategy: str | None = None
 
 
 @app.post("/codemode/approve", tags=["codemode"])

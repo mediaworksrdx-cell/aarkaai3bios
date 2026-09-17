@@ -22,6 +22,7 @@ import { MODEL_OPTIONS } from '@/styles/theme';
 import { useChatContext } from '@/context/ChatContext';
 import { exportToPdf, exportToWord, exportToMarkdown, PdfTemplateId } from '@/lib/api';
 import { ToolApprovalCard } from './ToolApprovalCard';
+import { FinanceStrategyApprovalCard } from './FinanceStrategyApprovalCard';
 import { CodeModeSandboxCard } from './CodeModeSandboxCard';
 
 interface MessageBubbleProps {
@@ -302,7 +303,11 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
                 )}
 
                 {message.approvalRequest && (
-                  <ToolApprovalCard request={message.approvalRequest} onResolve={resolveApproval} />
+                  message.approvalRequest.tool_name === 'FinanceStrategyMasterSelection' ? (
+                    <FinanceStrategyApprovalCard request={message.approvalRequest} onResolve={resolveApproval} />
+                  ) : (
+                    <ToolApprovalCard request={message.approvalRequest} onResolve={resolveApproval} />
+                  )
                 )}
 
                 {isMessageStreaming && !message.content && !message.codeModeExecution && !message.approvalRequest && (

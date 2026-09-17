@@ -1968,6 +1968,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     start = time.perf_counter()
     sources: list[str] = []
     context_parts: list[str] = []
+    finance_strategy_req: dict | None = None
 
     # Check for external agent model overrides (Gemini / Claude / GPT-OSS)
     if model_override and (model_override.startswith("gemini") or model_override.startswith("claude") or model_override.startswith("gpt")):
@@ -2425,6 +2426,31 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
                         context_parts.append(f"[Options Strategy]\n{strat_text}")
                         sources.append("strategy")
 
+                        # Generate candidate strategies for Master of Technology selection gate
+                        try:
+                            candidate_data = options_strategy.generate_candidate_strategies(
+                                symbol=target_symbol,
+                                indicators=indicators,
+                                signal=signal,
+                                risk_reward=5.0,
+                            )
+                            if candidate_data:
+                                from modules.approval_store import get_approval_store
+                                appr_store = get_approval_store()
+                                strat_req = appr_store.create_request(
+                                    user_id=user_id,
+                                    session_id=session_id,
+                                    tool_name="FinanceStrategyMasterSelection",
+                                    args=candidate_data,
+                                    risk_level="HIGH",
+                                    human_summary=f"Select Master of Technology Strategy for {target_symbol} ({signal})",
+                                    target_resource=target_symbol,
+                                    timeout_seconds=120.0,
+                                )
+                                finance_strategy_req = strat_req.to_dict()
+                        except Exception as strat_gate_err:
+                            logger.warning("Failed creating finance strategy approval gate: %s", strat_gate_err)
+
                     subscription.record_premium_usage(user_id)
             else:
                 # Paywall message
@@ -2484,12 +2510,22 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     ]
     is_knowledge = any(sig in query.lower() for sig in _knowledge_signals)
 
+    mutating_action_signals = [
+        "save it to", "save to", "save this to", "write to file", "save file",
+        "create a file", "create file", "modify file", "edit file", "delete file",
+        "save it in", "save in", "write a script and save", "write script and save",
+        "in the workspace", "to workspace", "to the workspace", "in workspace",
+        "execute script", "run script", "run the script", "run command"
+    ]
+    has_mutating_action_intent = any(sig in query.lower() for sig in mutating_action_signals)
+
     needs_agent = (
         not is_coding_output
-        and not is_knowledge
-        and not is_coding_query
+        and (not is_knowledge or has_mutating_action_intent)
+        and (not is_coding_query or has_mutating_action_intent)
         and (
-            any(w in query.lower() for w in agent_triggers)
+            has_mutating_action_intent
+            or any(w in query.lower() for w in agent_triggers)
             or bool(re.search(r"\brun\b", query.lower()))
             or bool(re.search(r"\bgit\b", query.lower()))
             or _is_calculation_query(query)
@@ -2559,6 +2595,13 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         "sources": sources,
         "detected_language": detected_lang
     }
+
+    # If a finance strategy approval gate was generated, emit it immediately to the client
+    if finance_strategy_req:
+        yield {
+            "type": "approval_request",
+            "payload": finance_strategy_req
+        }
 
     user_facts = ""
     try:
@@ -2669,9 +2712,13 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         agent_ctx = _build_agent_ctx(chat_ctx, context_parts, sources)
         
         final_answer = ""
-        for event_type, data in coordinator.stream_task(query, agent_ctx):
+        for event_type, data in coordinator.stream_task(query, agent_ctx, user_id=user_id, session_id=session_id):
             if event_type == "status":
                 yield {"type": "status", "status": data}
+            elif event_type == "approval_request":
+                yield {"type": "approval_request", "payload": data}
+            elif event_type == "approval_resolved":
+                yield {"type": "approval_resolved", "payload": data}
             elif event_type == "error":
                 yield {"type": "error", "detail": data}
                 return

@@ -83,6 +83,36 @@ export interface ToolApprovalRequest {
 export interface ToolApprovalDecision {
   decision: 'approve' | 'deny';
   reason?: string;
+  selected_master_strategy?: string;
+}
+
+export interface CandidateFinanceStrategy {
+  candidate_id: string;
+  category: string;
+  technology_tag: string;
+  strategy_name: string;
+  strategy_type: string;
+  legs: Array<{ action: string; type: string; strike: number; premium_est: number }>;
+  entry_trigger?: string;
+  stop_loss?: string;
+  target?: string;
+  max_loss_per_lot?: string;
+  max_gain_per_lot?: string;
+  risk_reward_actual?: string;
+  win_rate_est?: string;
+  rationale?: string;
+}
+
+export interface FinanceStrategyApprovalData {
+  symbol: string;
+  current_price: number;
+  lot_size: number;
+  expiry: string;
+  signal: string;
+  currency: string;
+  master_recommended: string;
+  candidates: CandidateFinanceStrategy[];
+  disclaimer?: string;
 }
 
 // ==========================================

@@ -2,14 +2,74 @@
 
 import React, { useState } from 'react';
 import { ToolApprovalCard } from '@/components/chat/ToolApprovalCard';
+import { FinanceStrategyApprovalCard } from '@/components/chat/FinanceStrategyApprovalCard';
 import { CodeModeSandboxCard } from '@/components/chat/CodeModeSandboxCard';
 import { ToolApprovalRequest, CodeModeExecution } from '@/types';
 import { ArrowLeft, RefreshCw, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 
 export default function TestApprovalPage() {
-  const [activeTab, setActiveTab] = useState<'approvals' | 'sandbox'>('approvals');
+  const [activeTab, setActiveTab] = useState<'approvals' | 'sandbox' | 'finance'>('approvals');
   const [resolvedLog, setResolvedLog] = useState<string[]>([]);
+
+  const demoFinanceReq: ToolApprovalRequest = {
+    approval_id: 'appr-strat-master-59210',
+    tool_name: 'FinanceStrategyMasterSelection',
+    arguments: {
+      symbol: 'SBIN.NS',
+      current_price: 814.5,
+      lot_size: 1500,
+      expiry: '28-MAY-2026',
+      signal: 'BULLISH',
+      currency: '₹',
+      master_recommended: 'candidate_defined_risk',
+      candidates: [
+        {
+          candidate_id: 'candidate_defined_risk',
+          category: 'Defined Risk (Spread)',
+          technology_tag: 'Institutional Hedged Spread',
+          strategy_name: 'Bull Call Spread (Defined Risk)',
+          strategy_type: 'bull_call_spread',
+          legs: [
+            { action: 'BUY', type: 'CE', strike: 815, premium_est: 18.5 },
+            { action: 'SELL', type: 'CE', strike: 835, premium_est: 7.2 },
+          ],
+          entry_trigger: 'Enter when price holds above EMA 20 (₹812.00)',
+          stop_loss: 'Exit both legs if spot drops below ₹800.00',
+          target: 'Hold till expiry if spot closes above ₹835.00',
+          max_loss_per_lot: '₹16,950',
+          max_gain_per_lot: '₹13,050',
+          risk_reward_actual: '1:1.3',
+          win_rate_est: '68%',
+          rationale: 'RSI at 56 with positive divergence. Defined risk limits downside against volatility drops.',
+        },
+        {
+          candidate_id: 'candidate_alpha_momentum',
+          category: 'High-Alpha Momentum',
+          technology_tag: 'Algorithmic Directional Outright',
+          strategy_name: 'Naked Long Call (Aggressive Momentum)',
+          strategy_type: 'long_call',
+          legs: [
+            { action: 'BUY', type: 'CE', strike: 820, premium_est: 15.0 },
+          ],
+          entry_trigger: 'Enter on 15m volume breakout above ₹818.00',
+          stop_loss: 'Exit if premium drops below ₹7.50 (-50%)',
+          target: 'Target ₹845.00',
+          max_loss_per_lot: '₹22,500',
+          max_gain_per_lot: '₹45,000',
+          risk_reward_actual: '1:2.0',
+          win_rate_est: '52%',
+          rationale: 'Breakout above monthly pivot with institutional orderbook absorption.',
+        },
+      ],
+    },
+    mutation_risk: 'high',
+    action_hash: '9a8d4f1837c35a10ad629bce664775fd381d812c8b17743392b5fb78f8488e14',
+    description: 'Authorize Master of Technology Strategy for SBIN.NS',
+    timeout_seconds: 120,
+    created_at: Date.now(),
+    status: 'pending',
+  };
 
   // Demo interactive pending request
   const [pendingReq, setPendingReq] = useState<ToolApprovalRequest>({
@@ -202,6 +262,16 @@ export default function TestApprovalPage() {
             >
               CodeMode Sandbox
             </button>
+            <button
+              onClick={() => setActiveTab('finance')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                activeTab === 'finance'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
+              }`}
+            >
+              Master Strategy Gate
+            </button>
           </div>
         </div>
 
@@ -294,6 +364,24 @@ export default function TestApprovalPage() {
             </div>
 
             <CodeModeSandboxCard execution={demoExecution} />
+          </div>
+        )}
+
+        {/* Tab 3: Master of Technology Finance Strategy Approval Gate */}
+        {activeTab === 'finance' && (
+          <div className="space-y-6">
+            <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-amber-500/30 space-y-3">
+              <div>
+                <h2 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
+                  Master of Technology Finance Strategy Selection Gate
+                </h2>
+                <p className="text-[11px] text-[var(--text-tertiary)]">
+                  Compare candidate algorithmic models (Defined-Risk Hedged Spread vs High-Alpha Outright), evaluate quantitative Greeks & Win Rates, and authorize the master execution model.
+                </p>
+              </div>
+
+              <FinanceStrategyApprovalCard request={demoFinanceReq} onResolve={handleResolve} />
+            </div>
           </div>
         )}
       </div>

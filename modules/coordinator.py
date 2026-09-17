@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Dict, Any
 
 from modules import aarkaa_engine
@@ -313,7 +314,7 @@ def _extract_python_code(text: str) -> str | None:
         return text.strip()
     return None
 
-def stream_task(query: str, context: str = ""):
+def stream_task(query: str, context: str = "", user_id: str = "default", session_id: str = "default"):
     """Run an agent loop until completion or max iterations, yielding status updates."""
     # 1. Build tool descriptions
     tool_descs = []
@@ -629,6 +630,65 @@ def stream_task(query: str, context: str = ""):
             
         yield "status", f"Running {action_name}..."
         logger.info(f"Executing tool {action_name} with params {params}")
+
+        # Intercept mutating tools with human-in-the-loop approval gate
+        from modules.code_mode import MUTATING_TOOLS
+        if action_name in MUTATING_TOOLS:
+            from modules.approval_store import get_approval_store
+            store = get_approval_store()
+            summary = f"Execute mutating tool: {action_name}"
+            target_res = ""
+            diff_prev = None
+            cmd_prev = None
+
+            if action_name == "FileEditTool":
+                target_res = str(params.get("path", ""))
+                summary = f"Modify file: {target_res}"
+                diff_prev = params.get("content", "")
+            elif action_name == "BashTool":
+                cmd_prev = str(params.get("command", ""))
+                summary = f"Execute shell command: {cmd_prev[:60]}"
+            elif action_name == "DeployTool":
+                target_res = str(params.get("target", ""))
+                summary = f"Deploy application to: {target_res}"
+
+            risk = "CRITICAL" if action_name in ["DeployTool", "DeleteSkillTool"] else "HIGH"
+
+            record = store.create_request(
+                user_id=user_id,
+                session_id=session_id,
+                tool_name=action_name,
+                args=params,
+                risk_level=risk,
+                human_summary=summary,
+                target_resource=target_res or None,
+                diff_preview=diff_prev,
+                command_preview=cmd_prev,
+                timeout_seconds=120.0
+            )
+
+            # Yield approval_request event directly to client's SSE stream!
+            yield "approval_request", record.to_dict()
+
+            # Await resolution from human operator
+            approved, resolution_reason = store.await_resolution(
+                approval_id=record.approval_id,
+                expected_action_hash=record.action_hash,
+                timeout_seconds=120.0
+            )
+
+            yield "approval_resolved", {
+                "approval_id": record.approval_id,
+                "status": "approved" if approved else "rejected",
+                "resolved_at": int(time.time() * 1000)
+            }
+
+            if not approved:
+                observation = f"Action cancelled by operator: {resolution_reason}"
+                logger.warning(f"Tool {action_name} denied by operator: {resolution_reason}")
+                prompt += f"\n{full_response}\nObservation: {observation}\n"
+                continue
+
         try:
             observation = registry.execute_tool(action_name, params)
         except Exception as exc:

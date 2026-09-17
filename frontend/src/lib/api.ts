@@ -850,7 +850,8 @@ export async function updateSettingsApi(settings: Record<string, any>): Promise<
 export async function submitToolApproval(
   approvalId: string,
   decision: 'approve' | 'deny',
-  reason?: string
+  reason?: string,
+  selectedMasterStrategy?: string
 ): Promise<{ status: string; approval_id: string; resolution: string; message?: string }> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -864,6 +865,7 @@ export async function submitToolApproval(
       approval_id: approvalId,
       decision,
       reason,
+      selected_master_strategy: selectedMasterStrategy,
     }),
   });
 
