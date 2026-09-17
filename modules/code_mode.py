@@ -365,7 +365,7 @@ class CodeModeExecutor:
 
                         try:
                             msg = json.loads(line)
-                            if msg.get("type") == "tool_call":
+                            if isinstance(msg, dict) and msg.get("type") == "tool_call":
                                 t_name = msg.get("tool")
                                 t_args = msg.get("args", {})
                                 tool_calls_audit.append({"tool": t_name, "args": t_args})
@@ -378,11 +378,13 @@ class CodeModeExecutor:
 
                                 proc.stdin.write(json.dumps(resp) + "\n")
                                 proc.stdin.flush()
-                            elif msg.get("type") == "error":
+                            elif isinstance(msg, dict) and msg.get("type") == "error":
                                 return CodeModeResult(
                                     success=False, output="".join(final_output),
                                     tool_calls=tool_calls_audit, error=msg.get("error")
                                 )
+                            else:
+                                final_output.append(line)
                         except json.JSONDecodeError:
                             final_output.append(line)
 
