@@ -102,7 +102,7 @@ def test_real_container_tmpfs_kernel_enforcement():
     res = subprocess.run(
         [
             "docker", "run", "--rm",
-            "--tmpfs", "/workspace:rw,nosuid,size=10m",
+            "--tmpfs", "/workspace:rw,nosuid,size=10m,mode=1777",
             "-w", "/workspace",
             PINNED_IMAGE,
             "python", "-c", "open('big.dat', 'wb').write(b'0' * (15 * 1024 * 1024))"
@@ -148,7 +148,7 @@ time.sleep(1)
     res = subprocess.run(
         [
             "docker", "run", "--rm",
-            "--tmpfs", "/workspace:rw,nosuid,size=10m",
+            "--tmpfs", "/workspace:rw,nosuid,size=10m,mode=1777",
             "-w", "/workspace",
             PINNED_IMAGE,
             "python", "-c", code
@@ -166,7 +166,7 @@ def test_real_container_sparse_file_detected():
     res = subprocess.run(
         [
             "docker", "run", "--rm",
-            "--tmpfs", "/workspace:rw,nosuid,size=10m",
+            "--tmpfs", "/workspace:rw,nosuid,size=10m,mode=1777",
             "-w", "/workspace",
             PINNED_IMAGE,
             "python", "-c", "with open('sparse.bin', 'wb') as f: f.seek(20 * 1024 * 1024); f.write(b'1')"
@@ -186,7 +186,7 @@ def test_real_container_symlink_escape_blocked():
         [
             "docker", "run", "--rm",
             "--read-only",
-            "--tmpfs", "/workspace:rw,nosuid,size=10m",
+            "--tmpfs", "/workspace:rw,nosuid,size=10m,mode=1777",
             "-w", "/workspace",
             PINNED_IMAGE,
             "python", "-c", "import os; os.symlink('/etc/shadow', 'escaped'); print(os.path.realpath('escaped'))"
@@ -206,7 +206,7 @@ def test_real_container_hardlink_root_inode_blocked():
         [
             "docker", "run", "--rm",
             "--read-only",
-            "--tmpfs", "/workspace:rw,nosuid,size=10m",
+            "--tmpfs", "/workspace:rw,nosuid,size=10m,mode=1777",
             "-w", "/workspace",
             PINNED_IMAGE,
             "python", "-c", "import os; os.link('/etc/passwd', 'hardlink_passwd')"

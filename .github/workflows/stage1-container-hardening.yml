@@ -44,6 +44,20 @@ jobs:
           chmod +x scripts/run_staging_docker_validation.sh
           ./scripts/run_staging_docker_validation.sh
 
+      - name: Print Validation Logs
+        if: always()
+        run: |
+          echo "=== Artifacts Directory ==="
+          ls -la ci/artifacts/ || true
+          if [ -f ci/artifacts/test_execution_summary.json ]; then
+            echo "=== test_execution_summary.json ==="
+            cat ci/artifacts/test_execution_summary.json
+          fi
+          if [ -f ci/artifacts/integration_test.log ]; then
+            echo "=== integration_test.log ==="
+            cat ci/artifacts/integration_test.log
+          fi
+
       - name: Upload Verifiable Staging Evidence Artifacts
         if: always()
         uses: actions/upload-artifact@v4

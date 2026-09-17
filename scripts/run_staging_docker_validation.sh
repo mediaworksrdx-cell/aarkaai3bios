@@ -157,8 +157,10 @@ EOF
 echo "Cryptographic attestation and SLSA provenance bound to verified digest: ${CLEAN_DIGEST}"
 
 echo "=== [6/7] Executing Real Docker Adversarial Integration Test Suite ==="
+set +e
 python -m pytest tests/integration/test_code_mode_docker.py -v --override-ini="addopts=" 2>&1 | tee "${ARTIFACTS_DIR}/integration_test.log"
 TEST_EXIT_CODE="${PIPESTATUS[0]}"
+set -e
 
 echo "=== [7/7] Archiving Test Execution Summary ==="
 cat <<EOF > "${ARTIFACTS_DIR}/test_execution_summary.json"
