@@ -91,6 +91,46 @@ if PROMETHEUS_AVAILABLE:
         labelnames=["service"],
     )
     
+    # ─── Code Mode & Sandbox Metrics ──────────────────────────────────
+    CODE_MODE_EXECUTIONS = Counter(
+        "aarkaai_code_mode_executions_total",
+        "Total Code Mode executions",
+        labelnames=["status", "sandbox"],
+    )
+    CODE_MODE_DURATION = Histogram(
+        "aarkaai_code_mode_duration_seconds",
+        "Duration of Code Mode sandbox executions",
+        buckets=[0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0],
+    )
+    
+    # ─── MCP Client Metrics ───────────────────────────────────────────
+    MCP_TOOL_CALLS = Counter(
+        "aarkaai_mcp_tool_calls_total",
+        "Total MCP tool calls",
+        labelnames=["server", "tool", "status"],
+    )
+    MCP_TOOL_DURATION = Histogram(
+        "aarkaai_mcp_tool_duration_seconds",
+        "Duration of MCP tool calls",
+        labelnames=["server", "tool"],
+        buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+    )
+    
+    # ─── Security & Reliability Metrics ───────────────────────────────
+    SECURITY_VIOLATIONS = Counter(
+        "aarkaai_security_violations_total",
+        "Total security boundary violations detected",
+        labelnames=["violation_type"],
+    )
+    SYSTEM_MEMORY_USAGE = Gauge(
+        "aarkaai_system_memory_bytes",
+        "Process RSS memory usage in bytes",
+    )
+    WORKSPACE_STORAGE_USAGE = Gauge(
+        "aarkaai_workspace_storage_bytes",
+        "Sandbox workspace storage usage in bytes",
+    )
+
     # ─── System Metrics ──────────────────────────────────────────────
     ACTIVE_CONNECTIONS = Gauge(
         "aarkaai_active_connections",
@@ -122,6 +162,13 @@ else:
     CIRCUIT_BREAKER_STATE = _NoOpMetric()
     ACTIVE_CONNECTIONS = _NoOpMetric()
     BUILD_INFO = _NoOpMetric()
+    CODE_MODE_EXECUTIONS = _NoOpMetric()
+    CODE_MODE_DURATION = _NoOpMetric()
+    MCP_TOOL_CALLS = _NoOpMetric()
+    MCP_TOOL_DURATION = _NoOpMetric()
+    SECURITY_VIOLATIONS = _NoOpMetric()
+    SYSTEM_MEMORY_USAGE = _NoOpMetric()
+    WORKSPACE_STORAGE_USAGE = _NoOpMetric()
 
 
 def setup_metrics(app) -> None:

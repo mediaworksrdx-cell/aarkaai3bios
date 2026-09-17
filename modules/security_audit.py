@@ -321,3 +321,55 @@ class SecurityAuditLogger:
 def audit_event(event_type: str, **details) -> str:
     """Convenience helper to record an audit event via the singleton logger."""
     return SecurityAuditLogger.get_instance().log_event(event_type, details)
+
+
+def verify_audit_log_integrity(log_path: Path) -> tuple[bool, int, Optional[str]]:
+    """
+    Cryptographically verify the SHA-256 hash chain of an audit log.
+    Returns (is_valid, record_count, error_message).
+    """
+    path = Path(log_path)
+    if not path.exists():
+        return False, 0, f"Audit log not found: {path}"
+
+    count = 0
+    expected_prev = None
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for idx, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError as e:
+                    return False, count, f"Line {idx}: malformed JSON ({e})"
+
+                stated_hash = record.pop("record_hash", None)
+                if not stated_hash:
+                    return False, count, f"Line {idx}: missing 'record_hash'"
+
+                actual_prev = record.get("prev_record_hash")
+                if expected_prev is not None and actual_prev != expected_prev:
+                    return False, count, (
+                        f"Line {idx}: hash chain broken. "
+                        f"Expected prev_record_hash '{expected_prev}', got '{actual_prev}'"
+                    )
+
+                content_str = json.dumps(record, sort_keys=True)
+                recomputed_hash = hashlib.sha256(content_str.encode("utf-8")).hexdigest()
+
+                if recomputed_hash != stated_hash:
+                    return False, count, (
+                        f"Line {idx}: tampering detected. "
+                        f"Stored hash '{stated_hash}' != recomputed '{recomputed_hash}'"
+                    )
+
+                expected_prev = stated_hash
+                count += 1
+
+        return True, count, None
+    except Exception as e:
+        return False, count, f"Audit verification error: {e}"
