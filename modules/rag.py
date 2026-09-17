@@ -344,6 +344,11 @@ def search(query: str, top_k: int = 5, user_id: Optional[str] = None, query_doma
     return final_results
 
 
+def query_knowledge(query: str, threshold: float = 0.35, limit: int = 3, user_id: Optional[str] = None) -> list[dict]:
+    """Compatibility retrieval function for BaseAgent and coordinator modules."""
+    return search(query, top_k=limit, user_id=user_id)
+
+
 def get_context(query: str, top_k: int = 3, user_id: Optional[str] = None,
                 max_chars: int = RAG_MAX_CONTEXT_CHARS, query_domain: Optional[str] = None,
                 source_filter: Optional[str] = None) -> str:

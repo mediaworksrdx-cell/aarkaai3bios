@@ -18,6 +18,7 @@ Usage:
 """
 
 import os
+import re
 import json
 import yaml
 import logging
@@ -44,9 +45,14 @@ class SkillRegistry:
         self.skills: dict[str, dict] = {}  # name -> {description, path}
         self._index = None
         self._embedder = None
+        self._embeddings = None
         self._names: list[str] = []
 
         self._load_registry()
+        try:
+            self.build_index()
+        except Exception as _idx_err:
+            logger.debug("SkillRegistry auto-index skipped: %s", _idx_err)
 
     CORE_SKILLS = {
         "pdf", "docx", "xlsx", "pptx", "html", 
@@ -260,51 +266,87 @@ class SkillRegistry:
 
     def build_index(self):
         """
-        Embed all skill descriptions and build a FAISS index.
+        Embed all skill descriptions and build a FAISS or NumPy cosine vector index.
         Call once at startup (or after adding new skills).
         """
         try:
-            from sentence_transformers import SentenceTransformer
-            import faiss
-        except ImportError:
-            # Skip build if sentence-transformers/faiss is not available/needed
-            return
+            if self._embedder is None:
+                from sentence_transformers import SentenceTransformer
+                self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
+            self._names = list(self.skills.keys())
+            descriptions = [f"{n} {self.skills[n].get('description', '')}" for n in self._names]
 
-        self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
-        self._names = list(self.skills.keys())
-        descriptions = [self.skills[n]["description"] for n in self._names]
+            embeddings = self._embedder.encode(descriptions, normalize_embeddings=True)
+            self._embeddings = np.array(embeddings, dtype="float32")
 
-        embeddings = self._embedder.encode(descriptions, normalize_embeddings=True)
-        embeddings = np.array(embeddings, dtype="float32")
-
-        dim = embeddings.shape[1]
-        self._index = faiss.IndexFlatIP(dim)  # inner product = cosine on normalized
-        self._index.add(embeddings)
-
-        logger.info("Indexed %d skills", len(self._names))
+            try:
+                import faiss
+                dim = self._embeddings.shape[1]
+                self._index = faiss.IndexFlatIP(dim)
+                self._index.add(self._embeddings)
+            except ImportError:
+                self._index = None
+            logger.info("Indexed %d skills", len(self._names))
+        except Exception as exc:
+            logger.warning("Skill embedding index build skipped/failed: %s", exc)
+            self._index = None
+            self._embeddings = None
 
     def search(self, query: str, top_k: int = 3) -> list[dict]:
         """
         Find the top-k most relevant skills for a query.
         Returns list of {name, description, score}.
+        Robust fallback: FAISS index -> NumPy cosine similarity -> lexical keyword matching.
         """
-        if self._index is None:
-            raise RuntimeError("Call build_index() before searching.")
+        if not self.skills:
+            return []
 
-        query_vec = self._embedder.encode([query], normalize_embeddings=True)
-        query_vec = np.array(query_vec, dtype="float32")
+        # 1. FAISS acceleration
+        if self._index is not None and self._embedder is not None:
+            query_vec = self._embedder.encode([query], normalize_embeddings=True)
+            query_vec = np.array(query_vec, dtype="float32")
+            scores, indices = self._index.search(query_vec, top_k)
+            results = []
+            for score, idx in zip(scores[0], indices[0]):
+                if idx < len(self._names):
+                    name = self._names[idx]
+                    results.append({
+                        "name": name,
+                        "description": self.skills[name]["description"],
+                        "score": float(score),
+                    })
+            return results
 
-        scores, indices = self._index.search(query_vec, top_k)
-
-        results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < len(self._names):
+        # 2. NumPy Cosine Similarity fallback (if sentence_transformers is available without faiss)
+        if self._embedder is not None and self._embeddings is not None and len(self._names) > 0:
+            query_vec = np.array(self._embedder.encode([query], normalize_embeddings=True)[0], dtype="float32")
+            dot_scores = np.dot(self._embeddings, query_vec)
+            top_indices = np.argsort(-dot_scores)[:top_k]
+            results = []
+            for idx in top_indices:
                 name = self._names[idx]
                 results.append({
                     "name": name,
                     "description": self.skills[name]["description"],
-                    "score": float(score),
+                    "score": float(dot_scores[idx]),
                 })
+            return results
+
+        # 3. Lexical / Keyword fallback (zero external dependencies)
+        q_tokens = set(re.findall(r"\w+", query.lower()))
+        scored = []
+        for name, meta in self.skills.items():
+            desc = meta.get("description", "").lower()
+            tokens = set(re.findall(r"\w+", f"{name} {desc}"))
+            overlap = len(q_tokens & tokens)
+            if overlap > 0:
+                scored.append((overlap / max(len(q_tokens), 1), name, meta.get("description", "")))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        results = [
+            {"name": name, "description": desc, "score": float(score)}
+            for score, name, desc in scored[:top_k]
+        ]
         return results
 
     def get_skill(self, name: str) -> str:

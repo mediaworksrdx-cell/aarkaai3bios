@@ -34,6 +34,31 @@ Output ONLY a JSON block containing the agent names as keys and the confidence f
 }"""
 
 
+_KEYWORD_FALLBACKS = {
+    "coding": ["code", "coding", "python", "javascript", "function", "class", "algorithm", "tree", "avl", "git", "sql", "bug", "syntax", "compile", "script", "balanced"],
+    "debugging": ["debug", "debugging", "traceback", "error", "exception", "failed", "crash", "stack trace", "null pointer", "undefined"],
+    "finance": ["cagr", "irr", "sip", "emi", "portfolio", "balance sheet", "pnl", "valuation", "ratio", "revenue", "ebitda", "financial", "earnings"],
+    "trading": ["trading", "ohlc", "candlestick", "rsi", "macd", "supertrend", "option", "strike", "call", "put", "oi", "vwap", "indicator", "nifty"],
+    "marketing": ["marketing", "campaign", "seo", "branding", "copywriting", "social media", "content strategy", "brand"],
+    "research": ["research", "paper", "literature", "study", "history of", "overview", "survey", "cite", "deep dive"],
+    "customer_support": ["support", "help", "account", "login", "password", "subscription", "contact", "billing"],
+    "screener": ["screener", "screen", "filter stocks", "high roe", "low pe", "undervalued stocks", "quant screen"]
+}
+
+
+def _heuristic_route_query(query: str) -> Dict[str, float]:
+    """Fallback heuristic scoring based on domain keywords."""
+    q_lower = query.lower()
+    scores = {}
+    for agent_name, keywords in _KEYWORD_FALLBACKS.items():
+        match_count = sum(1 for kw in keywords if kw in q_lower)
+        if match_count > 0:
+            scores[agent_name] = min(round(0.45 + (match_count * 0.2), 2), 0.95)
+        else:
+            scores[agent_name] = 0.0
+    return scores
+
+
 def route_query(query: str) -> Dict[str, float]:
     """Scores confidence levels for all agents based on the query."""
     formatted_prompt = aarkaa_engine._build_chatml(SYSTEM_ROUTER_PROMPT, query)
@@ -54,20 +79,12 @@ def route_query(query: str) -> Dict[str, float]:
             for k, v in scores.items():
                 if isinstance(v, (int, float)):
                     normalized[k.lower().strip()] = float(v)
-            return normalized
+            if any(v > 0.0 for v in normalized.values()):
+                return normalized
     except Exception as exc:
-        logger.error("route_query failed to score: %s. Fallback to default.", exc)
-    
-    # Fallback default
-    return {
-        "coding": 0.0,
-        "debugging": 0.0,
-        "finance": 0.0,
-        "trading": 0.0,
-        "marketing": 0.0,
-        "research": 0.0,
-        "customer_support": 0.0
-    }
+        logger.error("route_query failed to score: %s. Fallback to heuristic.", exc)
+
+    return _heuristic_route_query(query)
 
 
 def select_agents(query: str, threshold: float = 0.5) -> List[Tuple[str, float]]:

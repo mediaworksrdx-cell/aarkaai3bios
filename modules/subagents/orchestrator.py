@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # ── Complexity Signals ────────────────────────────────────────────────────────
 
 _COMPARISON_WORDS = {
-    "compare", "versus", "vs", "vs.", "difference between",
+    "compare", "comparison", "versus", "vs", "vs.", "difference between",
     "better", "which is", "pros and cons", "similarities"
 }
 _ANALYSIS_WORDS = {
@@ -32,7 +32,7 @@ _ANALYSIS_WORDS = {
 }
 _MULTI_STEP_WORDS = {
     "and then", "after that", "step by step", "first",
-    "also", "additionally", "furthermore", "moreover"
+    "also", "additionally", "furthermore", "moreover", "multi-step", "multi step"
 }
 _COMPOUND_PATTERNS = [
     r"\b(compare|vs\.?|versus)\b.*\b(and|with|to)\b",
@@ -281,6 +281,19 @@ class CognitiveOrchestrator:
                 return result.output
 
         return None
+
+    def synthesize(self, results: List[SubagentResult], query: str = "") -> str:
+        """Synthesize multiple SubagentResult outputs into a cohesive response."""
+        valid_results = [r for r in results if r.is_valid and r.output]
+        if not valid_results:
+            return ""
+        if len(valid_results) == 1:
+            return valid_results[0].output
+        for r in reversed(valid_results):
+            if r.agent_name.lower() in ("writer", "writeragent") and len(r.output.strip()) > 80:
+                return r.output
+        sections = [f"### [{r.agent_name}]\n{r.output.strip()}" for r in valid_results]
+        return "\n\n".join(sections)
 
     async def orchestrate_stream(self, query: str,
                                  context: Optional[Dict[str, Any]] = None):
