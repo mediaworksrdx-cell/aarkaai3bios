@@ -288,15 +288,16 @@ def test_db_models():
 
 test("Database schema models", test_db_models)
 
-# ─── Summary ─────────────────────────────────────────────────────────────────
-print(f"\n{'='*60}")
-print(f"RESULTS: {passed} passed, {failed} failed out of {passed + failed} tests")
-if errors:
-    print("\nFailed tests:")
-    for e in errors:
-        print(f"  [FAIL] {e}")
-else:
-    print("All tests PASSED! [OK]")
-print(f"{'='*60}")
+if __name__ == "__main__":
+    # ─── Summary ─────────────────────────────────────────────────────────────────
+    print(f"\n{'='*60}")
+    print(f"RESULTS: {passed} passed, {failed} failed out of {passed + failed} tests")
+    if errors:
+        print("\nFailed tests:")
+        for e in errors:
+            print(f"  [FAIL] {e}")
+    else:
+        print("All tests PASSED! [OK]")
+    print(f"{'='*60}")
 
-sys.exit(1 if failed else 0)
+    sys.exit(1 if failed else 0)
