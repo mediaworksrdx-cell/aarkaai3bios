@@ -17,6 +17,8 @@ import {
   Sparkles,
   ChevronDown,
   ChevronUp,
+  Cpu,
+  X,
 } from 'lucide-react';
 import {
   ToolApprovalRequest,
@@ -24,6 +26,8 @@ import {
   ApprovalStatus,
   FinanceStrategyApprovalData,
   CandidateFinanceStrategy,
+  DynamicApprovalOption,
+  ModelPersona,
 } from '@/types';
 import { useChatContext } from '@/context/ChatContext';
 
@@ -84,6 +88,159 @@ function normalizeStatus(s?: string): ApprovalStatus {
   return 'pending';
 }
 
+function synthesizeClientDynamicOptions(
+  request: ToolApprovalRequest
+): DynamicApprovalOption[] {
+  const toolName = request.tool_name;
+  const targetResource = String(request.target_resource || request.arguments?.path || '');
+  const cmd = String(request.arguments?.command || request.command_preview || '');
+  const agent = request.model_persona?.agent_ref || 'the agent';
+
+  if (toolName === 'FileEditTool') {
+    const isPy = targetResource.endsWith('.py');
+    return [
+      {
+        id: 1,
+        action: 'allow_once',
+        label: `Allow & save '${targetResource || 'file'}' to workspace`,
+        detail: 'Write verified code directly into the workspace root.',
+        recommended: true,
+      },
+      {
+        id: 2,
+        action: 'allow_and_run',
+        label: `Save '${targetResource || 'file'}' and execute immediately (${isPy ? `python ${targetResource}` : 'inspect in workspace'})`,
+        detail: 'Atomic disk write followed by automatic sandbox execution.',
+      },
+      {
+        id: 3,
+        action: 'customize',
+        label: `Inspect & customize '${targetResource || 'file'}' code before committing`,
+        detail: 'Review diff lines, modify parameters, or adjust imports.',
+      },
+      {
+        id: 4,
+        action: 'always_allow',
+        label: `Always allow workspace file modifications in this session (Always Allow)`,
+        detail: `Auto-approves future file writes by ${agent} for this session.`,
+      },
+      {
+        id: 5,
+        action: 'deny',
+        label: `No (tell ${agent} what to do instead)`,
+        detail: 'Reject this file write and provide alternate requirements.',
+      },
+    ];
+  }
+
+  if (toolName === 'BashTool') {
+    const cmdShort = cmd.length > 45 ? `${cmd.slice(0, 45)}...` : cmd || 'command';
+    return [
+      {
+        id: 1,
+        action: 'allow_once',
+        label: `Execute '${cmdShort}' in isolated sandbox`,
+        detail: 'Run command safely within workspace execution constraints.',
+        recommended: true,
+      },
+      {
+        id: 2,
+        action: 'allow_and_stream',
+        label: `Execute '${cmdShort}' and stream live terminal output`,
+        detail: 'Stream stdout & stderr chunks directly to chat console.',
+      },
+      {
+        id: 3,
+        action: 'customize',
+        label: 'Edit command parameters before execution',
+        detail: 'Modify flags, arguments, or environment variables.',
+      },
+      {
+        id: 4,
+        action: 'always_allow',
+        label: `Always allow '${cmdShort}' in this session (Always Allow)`,
+        detail: 'Whitelist this command pattern to prevent redundant authorization gates.',
+      },
+      {
+        id: 5,
+        action: 'deny',
+        label: `No (tell ${agent} what to do instead)`,
+        detail: 'Halt command execution and redirect agent workflow.',
+      },
+    ];
+  }
+
+  if (toolName === 'FinanceStrategyMasterSelection') {
+    return [
+      {
+        id: 1,
+        action: 'allow_once',
+        label: 'Execute Master Strategy (Recommended)',
+        detail: 'Optimal risk-adjusted strategy selected by quantitative engine.',
+        recommended: true,
+      },
+      {
+        id: 2,
+        action: 'select_alternative',
+        label: 'Execute Alternative Momentum Breakout Ladder',
+        detail: 'Directional momentum strategy with dynamic trail stop.',
+      },
+      {
+        id: 3,
+        action: 'customize',
+        label: 'Customize strike prices, premium limits & expiry dates',
+        detail: 'Manually tune legs, lots, and risk allocation.',
+      },
+      {
+        id: 4,
+        action: 'always_allow',
+        label: 'Always auto-execute strategies matching risk profile (Always Allow)',
+        detail: 'Authorize automated multi-leg position sizing within risk limit.',
+      },
+      {
+        id: 5,
+        action: 'deny',
+        label: `No (tell ${agent} what to do instead)`,
+        detail: 'Reject strategy recommendation and scan alternative sectors.',
+      },
+    ];
+  }
+
+  return [
+    {
+      id: 1,
+      action: 'allow_once',
+      label: `Allow execution of ${toolName}`,
+      detail: `Authorize single execution of ${toolName} with specified parameters.`,
+      recommended: true,
+    },
+    {
+      id: 2,
+      action: 'allow_in_conversation',
+      label: `Allow ${toolName} for this task in conversation`,
+      detail: 'Permits sequential steps without prompt interruption.',
+    },
+    {
+      id: 3,
+      action: 'customize',
+      label: `Inspect & modify ${toolName} arguments`,
+      detail: 'Review and edit payload parameters before execution.',
+    },
+    {
+      id: 4,
+      action: 'always_allow',
+      label: `Always allow ${toolName} in this session (Always Allow)`,
+      detail: `Auto-approves ${toolName} calls for remainder of session.`,
+    },
+    {
+      id: 5,
+      action: 'deny',
+      label: `No (tell ${agent} what to do instead)`,
+      detail: 'Cancel action and request an alternative solution.',
+    },
+  ];
+}
+
 export function FloatingApprovalDrawer({
   request,
   onResolve,
@@ -134,6 +291,22 @@ export function FloatingApprovalDrawer({
   const risk = RISK_CONFIG[request.mutation_risk] || RISK_CONFIG.medium;
   const RiskIcon = risk.icon;
 
+  // Model persona branding
+  const persona: ModelPersona = request.model_persona || {
+    provider: 'aarka',
+    name: 'Aarka AI',
+    badge: 'Aarka Engine · Autonomous Execution',
+    badge_color: 'border-teal-500/40 bg-teal-500/15 text-teal-400',
+    accent_color: '#14B8A6',
+    agent_ref: 'Aarka',
+  };
+
+  // Dynamic context-aware options (backend or synthesized fallback)
+  const dynamicOptions: DynamicApprovalOption[] =
+    request.dynamic_options && request.dynamic_options.length > 0
+      ? request.dynamic_options
+      : synthesizeClientDynamicOptions(request);
+
   // Synchronize when request.status updates
   useEffect(() => {
     if (request.status) {
@@ -175,7 +348,7 @@ export function FloatingApprovalDrawer({
       setTimeout(() => {
         setIsDismissed(true);
         effectiveDismiss();
-      }, 350);
+      }, 400);
     } catch (err: any) {
       setErrorMessage(err?.message || 'Failed to submit approval decision. Please retry.');
       setIsSubmitting(false);
@@ -186,11 +359,18 @@ export function FloatingApprovalDrawer({
   const handleSubmitOption = async () => {
     if (status !== 'pending' || isSubmitting) return;
 
-    if (selectedOption === 5) {
+    const activeOpt = dynamicOptions.find((o) => o.id === selectedOption);
+    if (selectedOption === 5 || activeOpt?.action === 'deny') {
       await handleDecision('deny', rejectionReason);
-    } else if (selectedOption === 2 || selectedOption === 3 || selectedOption === 4) {
+    } else if (
+      selectedOption === 4 ||
+      activeOpt?.action === 'always_allow' ||
+      activeOpt?.action === 'allow_in_conversation'
+    ) {
       effectiveAlwaysAllow(request.tool_name);
       await handleDecision('approve');
+    } else if (activeOpt?.action === 'customize') {
+      setIsCustomizeOpen(true);
     } else {
       await handleDecision('approve');
     }
@@ -213,17 +393,12 @@ export function FloatingApprovalDrawer({
         return;
       }
 
-      if (e.key === '1') {
-        setSelectedOption(1);
-      } else if (e.key === '2') {
-        setSelectedOption(2);
-      } else if (e.key === '3') {
-        setSelectedOption(3);
-      } else if (e.key === '4') {
-        setSelectedOption(4);
-      } else if (e.key === '5') {
-        setSelectedOption(5);
-      } else if (e.key === 'Enter') {
+      if (e.key === '1') setSelectedOption(1);
+      else if (e.key === '2') setSelectedOption(2);
+      else if (e.key === '3') setSelectedOption(3);
+      else if (e.key === '4') setSelectedOption(4);
+      else if (e.key === '5') setSelectedOption(5);
+      else if (e.key === 'Enter') {
         e.preventDefault();
         handleSubmitOption();
       } else if (e.key === 'Escape') {
@@ -234,25 +409,25 @@ export function FloatingApprovalDrawer({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [status, isSubmitting, selectedOption, rejectionReason, selectedCandidateId]);
+  }, [status, isSubmitting, selectedOption, rejectionReason, selectedCandidateId, dynamicOptions]);
 
   if (isDismissed) {
     return null;
   }
 
-  // Quick feedback confirmation pill upon approval
+  // Quick feedback confirmation modal upon approval
   if (status === 'approved') {
     return (
       <div
-        className={`w-full max-w-4xl mx-auto px-2 sm:px-4 mb-2 z-40 transition-all duration-300 ${className}`}
+        className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 dark:bg-black/60 backdrop-blur-md transition-all duration-300 ${className}`}
         data-testid="floating-approval-drawer"
       >
-        <div className="flex items-center justify-between px-4 py-2.5 rounded-xl border border-emerald-500/40 bg-emerald-950/80 backdrop-blur-xl shadow-lg shadow-emerald-950/40 text-emerald-400 text-xs font-mono animate-in fade-in">
-          <span className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 animate-pulse" />
-            <span>Authorized <strong>{request.tool_name}</strong>. Executing in workspace...</span>
+        <div className="flex items-center justify-between gap-4 px-6 py-4 rounded-2xl border border-emerald-500/40 bg-emerald-950/90 backdrop-blur-2xl shadow-2xl text-emerald-400 text-sm font-mono animate-in fade-in max-w-md w-full">
+          <span className="flex items-center gap-3 min-w-0">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 animate-pulse flex-shrink-0" />
+            <span className="truncate">Authorized <strong>{request.tool_name}</strong>. Executing in workspace...</span>
           </span>
-          <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+          <Loader2 className="w-4 h-4 animate-spin text-emerald-400 flex-shrink-0" />
         </div>
       </div>
     );
@@ -261,12 +436,12 @@ export function FloatingApprovalDrawer({
   if (status === 'rejected') {
     return (
       <div
-        className={`w-full max-w-4xl mx-auto px-2 sm:px-4 mb-2 z-40 transition-all duration-300 ${className}`}
+        className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 dark:bg-black/60 backdrop-blur-md transition-all duration-300 ${className}`}
         data-testid="floating-approval-drawer"
       >
-        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-red-500/40 bg-red-950/80 backdrop-blur-xl shadow-lg text-red-400 text-xs font-mono animate-in fade-in">
-          <ShieldX className="w-4 h-4 text-red-400" />
-          <span>Execution denied by operator.</span>
+        <div className="flex items-center gap-3 px-6 py-4 rounded-2xl border border-red-500/40 bg-red-950/90 backdrop-blur-2xl shadow-2xl text-red-400 text-sm font-mono animate-in fade-in max-w-md w-full">
+          <ShieldX className="w-5 h-5 text-red-400 flex-shrink-0" />
+          <span>Execution denied by operator. Workspace unchanged.</span>
         </div>
       </div>
     );
@@ -290,61 +465,82 @@ export function FloatingApprovalDrawer({
     humanTitle = `Allow ${request.human_summary}?`;
   }
 
-  const options = [
-    { id: 1, label: 'Yes, allow this time' },
-    { id: 2, label: `Yes, and always allow '${actionTarget}' in this conversation` },
-    { id: 3, label: `Yes, and always allow '${actionTarget}' in this project` },
-    { id: 4, label: `Yes, and always allow '${actionTarget}' (Always Allow)` },
-    { id: 5, label: 'No (tell the agent what to do instead)' },
-  ];
-
   return (
     <div
-      className={`w-full max-w-4xl mx-auto px-2 sm:px-4 mb-3 z-40 transition-all duration-300 animate-in slide-in-from-bottom-3 ${className}`}
+      className={`fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 dark:bg-black/70 backdrop-blur-md transition-all duration-200 animate-in fade-in ${className}`}
       data-testid="floating-approval-drawer"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="approval-modal-title"
     >
-      <div className="relative overflow-hidden rounded-2xl border border-[var(--border)]/90 bg-[var(--bg-secondary)]/98 backdrop-blur-2xl shadow-2xl shadow-black/40 ring-1 ring-white/10 p-4 sm:p-5 flex flex-col gap-3.5">
+      <div className="relative w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] shadow-2xl shadow-black/60 ring-1 ring-white/10 p-5 sm:p-6 flex flex-col gap-4">
         
-        {/* Title Header */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] flex items-center justify-center flex-shrink-0 text-[var(--text-secondary)]">
-              {isFinanceStrategy ? (
-                <TrendingUp className="w-4 h-4 text-emerald-400" />
-              ) : request.tool_name === 'BashTool' ? (
-                <Terminal className="w-4 h-4 text-amber-400" />
-              ) : request.tool_name === 'FileEditTool' ? (
-                <FileCode className="w-4 h-4 text-blue-400" />
-              ) : (
-                <RiskIcon className={`w-4 h-4 ${risk.text}`} />
-              )}
-            </div>
-            <h3 className="text-sm sm:text-base font-semibold text-[var(--text-primary)] truncate">
-              {humanTitle}
-            </h3>
-          </div>
+        {/* Top Header: Model Persona & Risk & Countdown */}
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--border)]/60 pb-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${persona.badge_color}`}
+              title={`Active Engine: ${persona.name}`}
+            >
+              <Cpu className="w-3.5 h-3.5 flex-shrink-0" />
+              <span>{persona.badge}</span>
+            </span>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${risk.badgeBg} ${risk.text} ${risk.border}`}>
+            <span className={`text-[10px] font-mono px-2.5 py-1 rounded-full border ${risk.badgeBg} ${risk.text} ${risk.border}`}>
               {risk.label}
             </span>
-            <div className="flex items-center gap-1 text-xs font-mono text-[var(--text-tertiary)]">
+          </div>
+
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <div className="flex items-center gap-1 text-xs font-mono text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] px-2.5 py-1 rounded-lg border border-[var(--border)]">
               <Clock className="w-3.5 h-3.5" />
               <span>{remainingSeconds}s</span>
             </div>
+
+            <button
+              onClick={() => handleDecision('deny')}
+              type="button"
+              className="p-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors cursor-pointer"
+              title="Dismiss dialog (Esc)"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Title & Tool Name */}
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)] flex items-center justify-center flex-shrink-0 text-[var(--text-secondary)] mt-0.5 shadow-sm">
+            {isFinanceStrategy ? (
+              <TrendingUp className="w-5 h-5 text-emerald-400" />
+            ) : request.tool_name === 'BashTool' ? (
+              <Terminal className="w-5 h-5 text-amber-400" />
+            ) : request.tool_name === 'FileEditTool' ? (
+              <FileCode className="w-5 h-5 text-blue-400" />
+            ) : (
+              <RiskIcon className={`w-5 h-5 ${risk.text}`} />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-mono text-[var(--text-tertiary)] uppercase tracking-wider mb-0.5">
+              Operation Authorization Gate
+            </div>
+            <h3 id="approval-modal-title" className="text-base sm:text-lg font-semibold text-[var(--text-primary)] leading-tight">
+              {humanTitle}
+            </h3>
           </div>
         </div>
 
         {/* Error Notification */}
         {errorMessage && (
-          <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 flex items-center gap-2">
+          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 flex items-center gap-2 animate-in fade-in">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
             <span>{errorMessage}</span>
           </div>
         )}
 
         {/* Command / Resource Box */}
-        <div className="rounded-xl bg-[var(--bg-primary)]/90 border border-[var(--border)] p-2.5 sm:p-3 font-mono text-xs text-[var(--text-primary)] break-all select-all flex flex-col gap-1.5 shadow-inner">
+        <div className="rounded-xl bg-[var(--bg-primary)] border border-[var(--border)] p-3 font-mono text-xs text-[var(--text-primary)] break-all select-all flex flex-col gap-2 shadow-inner">
           <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--text-tertiary)] select-none">
             <span className="font-semibold text-[var(--text-secondary)]">{request.tool_name}</span>
             {request.diff_preview && (
@@ -358,11 +554,11 @@ export function FloatingApprovalDrawer({
               </button>
             )}
           </div>
-          <div className="text-[var(--text-primary)]">
+          <div className="text-[var(--text-primary)] font-mono text-xs leading-relaxed bg-[var(--bg-secondary)]/60 p-2 rounded-lg border border-[var(--border)]/60">
             {actionTarget}
           </div>
           {showCodePreview && request.diff_preview && (
-            <pre className="mt-2 p-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] font-mono text-[11px] text-[var(--text-secondary)] max-h-36 overflow-y-auto whitespace-pre-wrap">
+            <pre className="mt-1 p-2.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] font-mono text-[11px] text-[var(--text-secondary)] max-h-40 overflow-y-auto whitespace-pre-wrap">
               {request.diff_preview}
             </pre>
           )}
@@ -389,7 +585,7 @@ export function FloatingApprovalDrawer({
                   <div
                     key={cand.candidate_id}
                     onClick={() => status === 'pending' && setSelectedCandidateId(cand.candidate_id)}
-                    className={`p-2.5 rounded-xl border transition-all cursor-pointer text-left relative ${
+                    className={`p-3 rounded-xl border transition-all cursor-pointer text-left relative ${
                       isSelected
                         ? 'bg-emerald-500/10 border-emerald-500/50 shadow-md ring-1 ring-emerald-500/30'
                         : 'bg-[var(--bg-primary)]/60 border-[var(--border)] hover:border-[var(--border-hover)]'
@@ -417,36 +613,61 @@ export function FloatingApprovalDrawer({
           </div>
         )}
 
-        {/* 5 Numbered Claude Options List */}
-        <div className="flex flex-col gap-1.5">
-          {options.map((opt) => {
-            const isSelected = selectedOption === opt.id;
-            return (
-              <div
-                key={opt.id}
-                onClick={() => setSelectedOption(opt.id)}
-                className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs sm:text-sm cursor-pointer transition-all ${
-                  isSelected
-                    ? 'bg-[var(--accent-muted)] border border-[var(--border-accent)] font-medium text-[var(--text-primary)] shadow-sm ring-1 ring-[var(--border-accent)]/40'
-                    : 'hover:bg-[var(--bg-tertiary)]/70 text-[var(--text-secondary)] border border-transparent'
-                }`}
-              >
-                <span
-                  className={`w-5 h-5 rounded-md flex items-center justify-center text-xs font-mono font-bold flex-shrink-0 transition-colors ${
+        {/* Dynamic Contextual Options List */}
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium text-[var(--text-tertiary)] px-1 flex items-center justify-between">
+            <span>Select Action (press 1–5 or click):</span>
+            <span className="text-[11px] font-mono opacity-70">Enter to confirm</span>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            {dynamicOptions.map((opt) => {
+              const isSelected = selectedOption === opt.id;
+              return (
+                <div
+                  key={opt.id}
+                  onClick={() => setSelectedOption(opt.id)}
+                  className={`flex items-start gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${
                     isSelected
-                      ? 'bg-[var(--accent-primary)] text-white shadow-sm'
-                      : 'bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]'
+                      ? 'bg-[var(--accent-muted)] border border-[var(--border-accent)] font-medium text-[var(--text-primary)] shadow-sm ring-1 ring-[var(--border-accent)]/30'
+                      : 'hover:bg-[var(--bg-tertiary)]/70 text-[var(--text-secondary)] border border-transparent bg-[var(--bg-primary)]/40'
                   }`}
                 >
-                  {opt.id}
-                </span>
-                <span className="flex-1 truncate">{opt.label}</span>
-                {isSelected && (
-                  <Check className="w-3.5 h-3.5 text-[var(--accent-primary)] flex-shrink-0" />
-                )}
-              </div>
-            );
-          })}
+                  <span
+                    className={`w-5 h-5 rounded-md flex items-center justify-center text-xs font-mono font-bold flex-shrink-0 mt-0.5 transition-colors ${
+                      isSelected
+                        ? 'bg-[var(--accent-primary)] text-white shadow-sm'
+                        : 'bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] border border-[var(--border)]'
+                    }`}
+                  >
+                    {opt.id}
+                  </span>
+
+                  <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs sm:text-sm font-semibold truncate text-[var(--text-primary)]">
+                        {opt.label}
+                      </span>
+                      {opt.recommended && (
+                        <span className="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex-shrink-0">
+                          RECOMMENDED
+                        </span>
+                      )}
+                    </div>
+                    {opt.detail && (
+                      <span className="text-[11px] text-[var(--text-tertiary)] leading-tight line-clamp-1">
+                        {opt.detail}
+                      </span>
+                    )}
+                  </div>
+
+                  {isSelected && (
+                    <Check className="w-4 h-4 text-[var(--accent-primary)] flex-shrink-0 mt-0.5" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* Option 5: Expandable Rejection Reason Input */}
@@ -463,35 +684,37 @@ export function FloatingApprovalDrawer({
           </div>
         )}
 
-        {/* Inline Argument Customizer (Optional) */}
+        {/* Inline Argument Customizer */}
         {isCustomizeOpen && status === 'pending' && (
-          <div className="p-2.5 rounded-xl bg-[var(--bg-primary)] border border-amber-500/30 space-y-2">
+          <div className="p-3 rounded-xl bg-[var(--bg-primary)] border border-amber-500/30 space-y-2 animate-in fade-in">
             <div className="flex items-center justify-between text-xs text-amber-400 font-semibold">
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1.5">
                 <Sliders className="w-3.5 h-3.5" /> Parameter Customization:
               </span>
-              <span className="text-[10px] text-[var(--text-tertiary)]">Read-only preview</span>
+              <span className="text-[10px] text-[var(--text-tertiary)]">Editable preview</span>
             </div>
             <textarea
               value={customArgsText}
               onChange={(e) => setCustomArgsText(e.target.value)}
-              className="w-full h-20 p-2 text-xs font-mono bg-[var(--bg-secondary)] border border-[var(--border)] rounded-md text-[var(--text-primary)] outline-none resize-none focus:border-amber-500/50"
+              className="w-full h-24 p-2 text-xs font-mono bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] outline-none resize-none focus:border-amber-500/50"
               placeholder="Modify arguments..."
             />
           </div>
         )}
 
         {/* Bottom Actions Bar */}
-        <div className="flex items-center justify-between gap-3 pt-2 border-t border-[var(--border)]/60 mt-0.5">
+        <div className="flex items-center justify-between gap-3 pt-3 border-t border-[var(--border)]/60 mt-1">
           {/* Left: Customization and Always Allow Quick Button */}
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsCustomizeOpen(!isCustomizeOpen)}
               type="button"
-              className="text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] flex items-center gap-1 cursor-pointer transition-colors"
+              name="Customize"
+              aria-label="Customize"
+              className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors"
               title="Customize arguments"
             >
-              <Sliders className="w-3 h-3" />
+              <Sliders className="w-3.5 h-3.5" />
               <span>Customize</span>
             </button>
 
@@ -502,14 +725,16 @@ export function FloatingApprovalDrawer({
                 handleDecision('approve');
               }}
               type="button"
-              className="hidden sm:flex text-[11px] text-amber-400/80 hover:text-amber-400 items-center gap-1 cursor-pointer transition-colors"
+              name="Always Allow"
+              aria-label="Always Allow"
+              className="text-xs text-amber-400/80 hover:text-amber-400 flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-amber-500/10 cursor-pointer transition-colors"
               title="Always allow this tool"
             >
               <span>Always Allow</span>
             </button>
           </div>
 
-          {/* Right: Skip and Submit Buttons (matching Claude style in screenshot) */}
+          {/* Right: Skip and Submit Buttons */}
           <div className="flex items-center gap-2.5">
             <button
               onClick={() => handleDecision('deny')}
@@ -517,7 +742,7 @@ export function FloatingApprovalDrawer({
               type="button"
               name="Deny"
               aria-label="Deny"
-              className="px-3.5 py-1.5 text-xs font-medium text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] rounded-xl transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+              className="px-4 py-2 text-xs font-medium text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] rounded-xl transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
             >
               Skip
             </button>
@@ -528,7 +753,7 @@ export function FloatingApprovalDrawer({
               type="button"
               name="Approve"
               aria-label="Approve"
-              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white shadow-md shadow-blue-600/25 transition-all disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white shadow-md shadow-blue-600/25 transition-all disabled:opacity-50 cursor-pointer"
             >
               {isSubmitting ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />

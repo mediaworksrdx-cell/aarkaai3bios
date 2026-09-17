@@ -65,6 +65,23 @@ export type RiskLevel = 'read_only' | 'low' | 'medium' | 'high' | 'critical';
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'timeout' | 'expired';
 
+export interface ModelPersona {
+  provider: 'aarka' | 'gemini' | 'claude' | string;
+  name: string;
+  badge: string;
+  badge_color: string;
+  accent_color: string;
+  agent_ref: string;
+}
+
+export interface DynamicApprovalOption {
+  id: number;
+  action: 'allow_once' | 'allow_and_run' | 'allow_and_stream' | 'allow_in_conversation' | 'customize' | 'always_allow' | 'dry_run' | 'select_alternative' | 'deny' | string;
+  label: string;
+  detail: string;
+  recommended?: boolean;
+}
+
 export interface ToolApprovalRequest {
   approval_id: string;
   tool_name: string;
@@ -82,6 +99,8 @@ export interface ToolApprovalRequest {
   target_resource?: string;
   diff_preview?: string;
   command_preview?: string;
+  model_persona?: ModelPersona;
+  dynamic_options?: DynamicApprovalOption[];
 }
 
 export interface ToolApprovalDecision {

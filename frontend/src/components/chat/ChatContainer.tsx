@@ -367,7 +367,7 @@ export function ChatContainer({
       <ChatInput
         onSend={handleSend}
         onStop={stopGeneration}
-        isStreaming={isStreaming}
+        isStreaming={isStreaming && !activeApprovalRequest}
         selectedModel={selectedModel}
         onModelChange={setSelectedModel}
         reasoningEffort={reasoningEffort}

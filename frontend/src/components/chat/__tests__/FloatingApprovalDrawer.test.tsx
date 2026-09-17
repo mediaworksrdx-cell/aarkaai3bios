@@ -27,6 +27,84 @@ const mockBashRequest: ToolApprovalRequest = {
   status: 'pending',
 };
 
+const mockClaudeFileRequest: ToolApprovalRequest = {
+  approval_id: 'gate-claude-4455',
+  tool_name: 'FileEditTool',
+  arguments: {
+    path: 'healthcheck.py',
+    content: 'import os\nprint("Disk check")',
+  },
+  mutation_risk: 'high',
+  action_hash: '99bf86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a',
+  human_summary: 'Modify file: healthcheck.py',
+  timeout_seconds: 120,
+  created_at: Date.now(),
+  status: 'pending',
+  model_persona: {
+    provider: 'claude',
+    name: 'Claude Sonnet',
+    badge: 'Claude · Constitutional Safety',
+    badge_color: 'border-[#D97706]/40 bg-[#D97706]/15 text-[#F59E0B]',
+    accent_color: '#D97706',
+    agent_ref: 'Claude',
+  },
+  dynamic_options: [
+    {
+      id: 1,
+      action: 'allow_once',
+      label: "Allow & save 'healthcheck.py' to workspace",
+      detail: 'Write verified disk health monitor script directly into workspace.',
+      recommended: true,
+    },
+    {
+      id: 2,
+      action: 'allow_and_run',
+      label: "Save 'healthcheck.py' and execute immediately (python healthcheck.py)",
+      detail: 'Atomic disk write followed by automatic sandbox execution.',
+    },
+    {
+      id: 3,
+      action: 'customize',
+      label: "Inspect & customize 'healthcheck.py' code before committing",
+      detail: 'Review diff lines, modify parameters, or adjust imports.',
+    },
+    {
+      id: 4,
+      action: 'always_allow',
+      label: 'Always allow workspace file modifications in this session (Always Allow)',
+      detail: 'Auto-approves future file writes by Claude for this session.',
+    },
+    {
+      id: 5,
+      action: 'deny',
+      label: 'No (tell Claude what to do instead)',
+      detail: 'Reject this file write and provide alternate requirements.',
+    },
+  ],
+};
+
+const mockGeminiRequest: ToolApprovalRequest = {
+  approval_id: 'gate-gemini-7788',
+  tool_name: 'BashTool',
+  arguments: {
+    command: 'pytest tests/unit',
+  },
+  mutation_risk: 'medium',
+  action_hash: '77bf86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a',
+  human_summary: 'Execute shell command: pytest tests/unit',
+  timeout_seconds: 120,
+  created_at: Date.now(),
+  status: 'pending',
+  model_persona: {
+    provider: 'gemini',
+    name: 'Gemini Pro',
+    badge: 'Gemini · Multimodal Verification',
+    badge_color: 'border-indigo-500/40 bg-indigo-500/15 text-indigo-400',
+    accent_color: '#6366F1',
+    agent_ref: 'Gemini',
+  },
+};
+
 const mockFinanceRequest: ToolApprovalRequest = {
   approval_id: 'gate-fin-99881',
   tool_name: 'FinanceStrategyMasterSelection',
@@ -146,5 +224,21 @@ describe('FloatingApprovalDrawer Component', () => {
     fireEvent.click(customizeBtn);
 
     expect(screen.getByPlaceholderText('Modify arguments...')).toBeInTheDocument();
+  });
+
+  it('renders Claude model persona branding and dynamic contextual options', () => {
+    render(<FloatingApprovalDrawer request={mockClaudeFileRequest} />);
+
+    expect(screen.getByText('Claude · Constitutional Safety')).toBeInTheDocument();
+    expect(screen.getByText("Allow & save 'healthcheck.py' to workspace")).toBeInTheDocument();
+    expect(screen.getByText("Save 'healthcheck.py' and execute immediately (python healthcheck.py)")).toBeInTheDocument();
+    expect(screen.getByText("No (tell Claude what to do instead)")).toBeInTheDocument();
+  });
+
+  it('renders Gemini model persona branding and synthesized options', () => {
+    render(<FloatingApprovalDrawer request={mockGeminiRequest} />);
+
+    expect(screen.getByText('Gemini · Multimodal Verification')).toBeInTheDocument();
+    expect(screen.getByText("Execute 'pytest tests/unit' in isolated sandbox")).toBeInTheDocument();
   });
 });

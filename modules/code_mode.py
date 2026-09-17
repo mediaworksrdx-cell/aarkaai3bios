@@ -247,9 +247,23 @@ class CodeModeExecutor:
             emitter = self.approval_context.get("event_emitter")
             if callable(emitter):
                 try:
+                    record_dict = record.to_dict()
+                    try:
+                        from modules.approval_options import generate_dynamic_approval_options, detect_model_persona
+                        m_name = self.approval_context.get("model_name", "aarka")
+                        record_dict["model_persona"] = detect_model_persona(m_name)
+                        record_dict["dynamic_options"] = generate_dynamic_approval_options(
+                            query=self.approval_context.get("query", ""),
+                            tool_name=tool_name,
+                            args=kwargs,
+                            model_name=m_name
+                        )
+                    except Exception as opt_err:
+                        logger.warning("Dynamic options formulation failed in code_mode: %s", opt_err)
+
                     emitter({
                         "type": "approval_request",
-                        "payload": record.to_dict()
+                        "payload": record_dict
                     })
                 except Exception as emit_err:
                     logger.warning("Failed emitting approval_request event: %s", emit_err)

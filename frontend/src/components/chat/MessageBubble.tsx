@@ -349,10 +349,10 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
                           <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
                         </span>
                         <span className="text-[var(--text-primary)] font-medium">
-                          Awaiting authorization for <code className="text-amber-400 font-bold">{message.approvalRequest.tool_name}</code>
+                          Authorization Required for <code className="text-amber-400 font-bold">{message.approvalRequest.tool_name}</code>
                         </span>
-                        <span className="text-[var(--text-tertiary)] text-[11px] hidden sm:inline">
-                          — See action tray below
+                        <span className="text-amber-400/90 text-[11px] hidden sm:inline-flex items-center px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 font-mono">
+                          Review action in modal dialog
                         </span>
                       </>
                     )}

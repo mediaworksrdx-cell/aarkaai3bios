@@ -2598,6 +2598,17 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
 
     # If a finance strategy approval gate was generated, emit it immediately to the client
     if finance_strategy_req:
+        try:
+            from modules.approval_options import generate_dynamic_approval_options, detect_model_persona
+            finance_strategy_req["model_persona"] = detect_model_persona(model_override or "aarka")
+            finance_strategy_req["dynamic_options"] = generate_dynamic_approval_options(
+                query=query,
+                tool_name="FinanceStrategyMasterSelection",
+                args=finance_strategy_req.get("arguments", finance_strategy_req.get("args", {})),
+                model_name=model_override or "aarka"
+            )
+        except Exception as opt_err:
+            logger.warning("Failed injecting dynamic options to finance gate: %s", opt_err)
         yield {
             "type": "approval_request",
             "payload": finance_strategy_req
@@ -2714,7 +2725,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         final_answer = ""
         async for event in _stream_in_thread(
             coordinator.stream_task,
-            query, agent_ctx, user_id=user_id, session_id=session_id
+            query, agent_ctx, user_id=user_id, session_id=session_id, model_name=model_override or "aarka"
         ):
             event_type, data = event
             if event_type == "status":

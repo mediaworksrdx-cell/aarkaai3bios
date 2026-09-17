@@ -169,7 +169,7 @@ def _extract_python_code(text: str) -> str | None:
         return text.strip()
     return None
 
-def stream_task(query: str, context: str = "", user_id: str = "default", session_id: str = "default"):
+def stream_task(query: str, context: str = "", user_id: str = "default", session_id: str = "default", model_name: str = "aarka"):
     """Run an agent loop until completion or max iterations, yielding status updates."""
     # 1. Build tool descriptions
     tool_descs = []
@@ -518,8 +518,22 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
                 timeout_seconds=120.0
             )
 
+            # Generate dynamic context-aware options and model persona branding
+            record_dict = record.to_dict()
+            try:
+                from modules.approval_options import generate_dynamic_approval_options, detect_model_persona
+                record_dict["model_persona"] = detect_model_persona(model_name)
+                record_dict["dynamic_options"] = generate_dynamic_approval_options(
+                    query=query,
+                    tool_name=action_name,
+                    args=params,
+                    model_name=model_name
+                )
+            except Exception as opt_err:
+                logger.warning(f"Error formulating dynamic options: {opt_err}")
+
             # Yield approval_request event directly to client's SSE stream!
-            yield "approval_request", record.to_dict()
+            yield "approval_request", record_dict
             yield "status", f"Waiting for operator approval for {action_name}..."
 
             # Await resolution from human operator
