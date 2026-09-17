@@ -465,7 +465,9 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
             const toolRes = chunk.payload || chunk;
             const obs = typeof toolRes.observation === 'string' ? toolRes.observation.trim() : '';
             if (obs) {
-              accumulated += `\n\n\`\`\`bash\n# [${toolRes.tool_name || 'Tool'} Output]\n${obs}\n\`\`\`\n\n`;
+              if (toolRes.tool_name === 'BashTool' || obs.startsWith('Error') || obs.startsWith('Write blocked')) {
+                accumulated += `\n\n\`\`\`bash\n# [${toolRes.tool_name || 'Tool'} Output]\n${obs}\n\`\`\`\n\n`;
+              }
               setConversations(prev =>
                 prev.map(c => {
                   if (c.id === convId) {

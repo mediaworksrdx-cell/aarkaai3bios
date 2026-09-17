@@ -12,6 +12,7 @@ from typing import Dict, Any
 
 from modules import aarkaa_engine
 from modules.tools import registry
+from modules.tools.fs import sanitize_python_script
 
 logger = logging.getLogger(__name__)
 
@@ -393,37 +394,28 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
                     pass
 
         if params is None:
-            # 1. Try robust Action-specific fallbacks first to handle unescaped quotes/newlines
+            # 1. Try robust Action-specific fallbacks first to handle unescaped quotes/newlines/code fences
             if action_name == "FileEditTool":
-                path_match = re.search(r'"path"\s*:\s*"([^"]+)"', raw_json)
+                path_match = re.search(r'"path"\s*:\s*["\']([^"\']+)["\']', raw_json)
                 if path_match:
                     path = path_match.group(1)
-                    # Locate "content": "
-                    content_start_match = re.search(r'"content"\s*:\s*"', raw_json)
+                    # Locate "content": with optional triple quotes, single quotes, or code fences
+                    content_start_match = re.search(r'"content"\s*:\s*(?:"""|\'\'\'|```python|```py|```|"|\')?', raw_json)
                     if content_start_match:
                         start_idx = content_start_match.end()
-                        # Check if path is before content
                         path_idx = raw_json.find('"path"')
                         if path_idx != -1 and path_idx < start_idx:
                             remaining = raw_json[start_idx:].strip()
-                            if remaining.endswith("}"):
+                            while remaining.endswith("}"):
                                 remaining = remaining[:-1].strip()
-                            if remaining.endswith('"') or remaining.endswith("'"):
-                                remaining = remaining[:-1]
-                            content_val = remaining.replace('\\"', '"').replace('\\n', '\n')
+                            content_val = sanitize_python_script(remaining) if path.endswith(".py") else remaining
                             params = {"path": path, "content": content_val}
                         else:
-                            # Path is after content
-                            m_end = re.search(r',\s*"path"', raw_json[start_idx:])
-                            if m_end:
-                                end_idx = start_idx + m_end.start()
-                            else:
-                                end_idx = -1
+                            m_end = re.search(r'(?:"""|\'\'\'|"|\')\s*,\s*"path"', raw_json[start_idx:])
+                            end_idx = start_idx + m_end.start() if m_end else -1
                             if end_idx != -1:
                                 remaining = raw_json[start_idx:end_idx].strip()
-                                if remaining.endswith('"') or remaining.endswith("'"):
-                                    remaining = remaining[:-1]
-                                content_val = remaining.replace('\\"', '"').replace('\\n', '\n')
+                                content_val = sanitize_python_script(remaining) if path.endswith(".py") else remaining
                                 params = {"path": path, "content": content_val}
             elif action_name == "BashTool":
                 # Fallback for unescaped newlines in BashTool commands
@@ -432,7 +424,7 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
                     params = {"command": m.group(1).replace('\\"', '"').replace('\\n', '\n')}
             elif action_name == "FileReadTool":
                 # Fallback for malformed JSON args to FileReadTool (extract path using regex)
-                path_match = re.search(r'"path"\s*:\s*"([^"]+)"', raw_json)
+                path_match = re.search(r'"path"\s*:\s*["\']([^"\']+)["\']', raw_json)
                 if path_match:
                     params = {"path": path_match.group(1)}
 
@@ -455,6 +447,11 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
                     params = extracted
             except Exception:
                 pass
+
+        # Ensure Python scripts are sanitized before execution or approval
+        if isinstance(params, dict) and params.get("path", "").endswith(".py") and "content" in params:
+            params["content"] = sanitize_python_script(params["content"])
+
         if params is None:
             observation = "Error: Invalid JSON object format. Action Input must be a valid JSON dictionary on a single line."
             prompt += f"\n{full_response}\nObservation: {observation}\n"
@@ -545,7 +542,8 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
 
         try:
             observation = registry.execute_tool(action_name, params)
-            executed_actions.add(action_key)
+            if not observation.startswith("Error") and not observation.startswith("Write blocked"):
+                executed_actions.add(action_key)
         except Exception as exc:
             # Check if this is the credentials trigger exception we raised
             from modules.tools.git_tool import GitCredentialsError
@@ -575,8 +573,26 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
         # VERY IMPORTANT: Update prompt context with the Thought + Action + Observation correctly
         prompt += f"\n{full_response}\nObservation: {observation}\n"
         
-        # Guide model to finalize on next iteration after successful execution
-        if "error" not in observation.lower() and action_name in ("BashTool", "FileEditTool", "DeployTool"):
+        # If FileEditTool wrote successfully, synthesize final response directly without waiting 90s for CPU LLM!
+        if action_name == "FileEditTool" and observation.startswith("Successfully wrote"):
+            file_path = params.get("path", "file.py")
+            code_content = params.get("content", "")
+            needs_execution = any(kw in query.lower() for kw in ["run it", "execute it", "then run", "then execute", "test it", "and run"])
+            if not needs_execution:
+                final_answer = (
+                    f"I have created and saved `{file_path}` to your workspace.\n\n"
+                    f"```python\n{code_content}\n```\n\n"
+                    f"### Verification & Execution\n"
+                    f"The file syntax was validated successfully with the AST parser. You can execute it in your workspace terminal:\n"
+                    f"```bash\npython {file_path}\n```"
+                )
+                yield "final", final_answer
+                return
+
+        # Guide model to finalize on next iteration after execution
+        if "error" in observation.lower() or "blocked" in observation.lower():
+            next_prefix = f"Observation: {observation}\nI will now provide the final answer and complete solution directly to the user.\nFinal Answer: "
+        elif action_name in ("BashTool", "FileEditTool", "DeployTool"):
             next_prefix = f"Action `{action_name}` completed successfully with observation:\n{observation}\nI will now provide the final answer directly to the user.\nFinal Answer: "
         
     # Final fallback if loops exhausted

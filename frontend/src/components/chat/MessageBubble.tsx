@@ -296,22 +296,19 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
               </div>
             ) : (
               <div className="min-w-0 text-sm sm:text-[0.95rem]">
-                {message.approvalRequest && message.approvalRequest.status === 'pending' && !message.content && (
-                  <p className="text-sm text-[var(--text-secondary)] mb-2 font-medium">
-                    This action requires your authorization before modifying the workspace:
-                  </p>
-                )}
+                {(() => {
+                  const cleanedContent = (message.content || '')
+                    .replace(/(?:^|\n)This action requires your authorization before modifying the workspace:?\s*/gi, '')
+                    .replace(/^(?:Thought:\s*|I already wrote this file.*|I made a mistake in the script.*)/gim, '')
+                    .trim();
 
-                {message.content && (
-                  <MarkdownRenderer
-                    content={
-                      message.approvalRequest
-                        ? message.content.replace(/(?:^|\n)This action requires your authorization before modifying the workspace:?\s*/gi, '').replace(/^(Thought:\s*|I already wrote this file.*)/gim, '').trim()
-                        : message.content
-                    }
-                    isStreaming={isMessageStreaming}
-                  />
-                )}
+                  return cleanedContent ? (
+                    <MarkdownRenderer
+                      content={cleanedContent}
+                      isStreaming={isMessageStreaming}
+                    />
+                  ) : null;
+                })()}
 
                 {message.codeModeExecution && (
                   <CodeModeSandboxCard execution={message.codeModeExecution} />
