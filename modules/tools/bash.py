@@ -1,13 +1,14 @@
 """
 AARKAAI – BashTool (Allowlist Architecture)
 
-Executes shell commands inside a sandboxed workspace directory.
+Executes non-scripting shell commands inside a sandboxed workspace directory.
 Uses an allowlist of permitted base commands instead of a blocklist.
 
 Security layers:
-1. Allowlist: Only explicitly permitted commands can run
-2. Dangerous pattern regex: Blocks shell injection patterns regardless of allowlist
-3. Python AST check: Validates referenced Python scripts (via execution_engine)
+1. Allowlist: Only explicitly permitted utility commands can run (Node, git, inspection tools)
+2. Dangerous pattern regex: Blocks shell injection patterns, subshells, and privilege escalation
+3. Container sandbox enforcement: Raw python/pip execution on the host is strictly prohibited.
+   All script and Python execution must route exclusively through CodeModeExecutor inside containerized boundaries (Docker/gVisor).
 4. Workspace isolation: Commands run inside SAFE_WORK_DIR only
 5. Timeout: Hard 30-second default timeout on all executions
 """
@@ -73,6 +74,7 @@ ALWAYS_BLOCKED_PATTERNS = [
     r'/etc/(?:passwd|shadow|sudoers)',            # sensitive system files
     r'\bwget\b.*-O\s*-\s*\|',                  # wget pipe to shell
     r'\bcurl\b.*\|\s*(?:bash|sh)',              # curl pipe to shell
+    r'\b(?:python|python3|pip|pip3)(?:\.\d+)?\b', # raw host python/pip execution prohibited
 ]
 
 
@@ -115,7 +117,11 @@ def _validate_command(command: str) -> Tuple[bool, str]:
     """
     if not command or not command.strip():
         return False, "Empty command"
-    
+
+    # Step 0: Reject raw host Python and package manager execution (SEC-03)
+    if re.search(r'\b(?:python|python3|pip|pip3)(?:\.\d+)?\b', command, re.IGNORECASE):
+        return False, "Blocked: raw python/pip execution is prohibited on the host for security. Enforce all scripting via CodeModeExecutor inside containerized boundaries."
+
     # Step 1: Check dangerous patterns (always blocked)
     for pattern in ALWAYS_BLOCKED_PATTERNS:
         if re.search(pattern, command, re.IGNORECASE):
@@ -196,23 +202,16 @@ class BashTool(Tool):
         work_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            # Normalize python/pip paths to current interpreter
-            py_exe = sys.executable
-            cmd_normalized = re.sub(r'^python3?\b(?!-)', lambda m: py_exe, cmd)
-            cmd_normalized = re.sub(r'(?<=[&|; ])python3?\b(?!-)', lambda m: py_exe, cmd_normalized)
+            cmd_normalized = cmd.strip()
 
-            bin_dir = os.path.dirname(py_exe)
-            pip_exe = os.path.join(bin_dir, "pip")
-            if not os.path.exists(pip_exe):
-                pip_exe = os.path.join(bin_dir, "pip3")
-            if not os.path.exists(pip_exe):
-                pip_exe = os.path.join(bin_dir, "Scripts", "pip.exe")
-            if not os.path.exists(pip_exe):
-                pip_exe = os.path.join(bin_dir, "Scripts", "pip3.exe")
-
-            if os.path.exists(pip_exe):
-                cmd_normalized = re.sub(r'^pip3?\b(?!-)', lambda m: pip_exe, cmd_normalized)
-                cmd_normalized = re.sub(r'(?<=[&|; ])pip3?\b(?!-)', lambda m: pip_exe, cmd_normalized)
+            # SEC-03 Defense-in-Depth: Absolute rejection of host Python/pip invocations
+            if re.search(r'\b(?:python|python3|pip|pip3)(?:\.\d+)?\b', cmd_normalized, re.IGNORECASE):
+                logger.error("CRITICAL: Python/pip host execution attempt intercepted in execute(): %s", cmd_normalized[:120])
+                return (
+                    "Error: This command is not allowed for security reasons. "
+                    "Blocked: raw python/pip execution is prohibited on the host for security. "
+                    "Enforce all scripting via CodeModeExecutor inside containerized boundaries."
+                )
 
             sub_env = os.environ.copy()
             sub_env["PYTHONPATH"] = str(work_dir.parent)
