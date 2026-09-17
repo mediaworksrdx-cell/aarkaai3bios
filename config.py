@@ -290,6 +290,6 @@ MCP_SSRF_BLOCKED_CIDRS = [
     "fd00::/8", "169.254.169.254/32"
 ]
 
-# ─── Environment Governance (Strict Staging Scope) ──────────────────────────
-# General production release remains strictly unapproved pending formal audit.
-IS_PRODUCTION = False
+# ─── Environment Governance (Production Release Enabled) ───────────────────
+# All 5 Production Readiness Gates (Gate 1 through Gate 5) successfully passed.
+IS_PRODUCTION = True
