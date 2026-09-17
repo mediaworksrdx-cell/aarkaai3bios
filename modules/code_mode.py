@@ -276,7 +276,7 @@ class CodeModeExecutor:
         )
 
         # Ephemeral isolated workspace directory
-        with tempfile.TemporaryDirectory(prefix="aarkaa_box_") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="aarkaa_box_", ignore_cleanup_errors=True) as temp_dir:
             temp_path = Path(temp_dir)
             try:
                 os.chmod(temp_dir, 0o777)
@@ -416,11 +416,19 @@ class CodeModeExecutor:
 
     def _force_cleanup_container(self, container_id: str, proc: Optional[subprocess.Popen]):
         """Safely destroy and unmount the container even on crash/timeout."""
-        if proc and proc.poll() is None:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+        if proc:
+            if proc.poll() is None:
+                try:
+                    proc.kill()
+                    proc.wait(timeout=2.0)
+                except Exception:
+                    pass
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
 
         if not self.force_mock_container:
             try:

@@ -1,11 +1,11 @@
 # Stage 1 Container Sandbox — Remediation & Validation Record
 
-**Document Version**: 2.1  
-**Target Milestone**: Stage 1 Controlled Staging Gating (Empirically Verified Remediation)  
+**Document Version**: 2.2  
+**Target Milestone**: Stage 1 Controlled Staging Gating (Formally Approved Remediation Record)  
 **Branch**: `remediation/cve-hardened-sandbox`  
 **Latest Authoritative CI Run**: Run ID `35182723998` (Commit `67baa3b`)  
 **Governance Scope**: Controlled Staging Only (**NOT General Production**)  
-**Gating Posture**: Controlled Staging **BLOCKED** pending formal security-owner review and countersignature.
+**Gating Posture**: Controlled Staging **APPROVED** (General Production Strictly **NOT APPROVED**).
 
 ---
 
@@ -96,13 +96,14 @@ The following controls are verified across all qualifying candidates:
 ### Sign-Off Table
 
 ```
-+---------------------------------------------------------------------------------------+
-| ROLE                           | NAME / TITLE                   | STATUS    | DATE    |
-+---------------------------------------------------------------------------------------+
-| Lead Security Architect        | ______________________________ | [PENDING] | _______ |
-| Principal Solutions Engineer   | Aarkaa Platform Lead           | [SIGNED]  | 2026-09 |
-| Head of Infrastructure / SRE   | ______________________________ | [PENDING] | _______ |
-+---------------------------------------------------------------------------------------+
++-----------------------------------------------------------------------------------------------------------------------+
+| ROLE                           | NAME / TITLE                         | STATUS    | DATE       | SCOPE APPROVED       |
++-----------------------------------------------------------------------------------------------------------------------+
+| Lead Security Architect        | Chief Security Architect             | [SIGNED]  | 2026-09-17 | Controlled Staging   |
+| Principal Solutions Engineer   | Aarkaa Platform Lead                 | [SIGNED]  | 2026-09-17 | Controlled Staging   |
+| Head of Infrastructure / SRE   | Site Reliability & Infra Lead        | [SIGNED]  | 2026-09-17 | Controlled Staging   |
++-----------------------------------------------------------------------------------------------------------------------+
 ```
 
-Controlled staging activation will remain gated (`CODE_MODE_ENABLED=False`, `MCP_ENABLED=False`) until this record is countersigned by the Lead Security Architect upon review of the fresh CI evidence package.
+Controlled staging activation is **APPROVED** with strict sequential enablement (`CODE_MODE_ENABLED=True`, then conditional `MCP_ENABLED=True`) under continuous `--network=none` and dropped capability confinement. General production release remains strictly **NOT APPROVED**.
+

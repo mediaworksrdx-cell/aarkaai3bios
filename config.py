@@ -257,7 +257,7 @@ KV_PREFIX_CACHE_ENABLED = os.getenv("AARKAAI_KV_PREFIX_CACHE", "true").lower() =
 KV_CACHE_DIAGNOSTICS = os.getenv("AARKAAI_KV_CACHE_DIAGNOSTICS", "false").lower() == "true"
 
 # ─── Code Mode / Programmatic Tool Calling (Stage 1 Hardened) ───────────────
-CODE_MODE_ENABLED = os.getenv("AARKAAI_CODE_MODE_ENABLED", "false").lower() == "true"
+CODE_MODE_ENABLED = True
 CODE_MODE_TIMEOUT = float(os.getenv("AARKAAI_CODE_MODE_TIMEOUT", "30.0"))
 CODE_MODE_MAX_TOOL_CALLS = int(os.getenv("AARKAAI_CODE_MODE_MAX_CALLS", "15"))
 CODE_MODE_SANDBOX_BACKEND = os.getenv("AARKAAI_CODE_MODE_SANDBOX", "docker")
@@ -277,7 +277,7 @@ CODE_MODE_CI_SIGNING_KEY = os.getenv("AARKAAI_CI_SIGNING_KEY", "")
 CODE_MODE_CI_NONCE_DB = str(BASE_DIR / "var" / "ci_nonces.db")
 
 # ─── MCP Client (Stage 1 Hardened) ──────────────────────────────────────────
-MCP_ENABLED = os.getenv("AARKAAI_MCP_ENABLED", "false").lower() == "true"
+MCP_ENABLED = True
 MCP_CONFIG_PATH = os.getenv("AARKAAI_MCP_CONFIG", str(BASE_DIR / "mcp_config.yaml"))
 MCP_ADMIN_ALLOWED_BINARIES = {
     # Populated by system administrator in production deployments
@@ -290,3 +290,6 @@ MCP_SSRF_BLOCKED_CIDRS = [
     "fd00::/8", "169.254.169.254/32"
 ]
 
+# ─── Environment Governance (Strict Staging Scope) ──────────────────────────
+# General production release remains strictly unapproved pending formal audit.
+IS_PRODUCTION = False

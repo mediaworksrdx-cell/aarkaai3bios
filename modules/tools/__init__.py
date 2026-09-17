@@ -135,12 +135,23 @@ registry.register(NotificationTool())
 registry.register(AuthPermissionTool())
 
 # ─── MCP Client (Quarantine-First) ───────────────────────────────────────────
-mcp_client = None
-try:
-    import config
-    if config.MCP_ENABLED:
-        from modules.mcp_client import MCPClient
-        mcp_client = MCPClient(config.MCP_CONFIG_PATH, registry)
-except Exception as _mcp_err:
-    import logging
-    logging.getLogger(__name__).warning("MCP client init skipped: %s", _mcp_err)
+_mcp_client_instance = None
+
+def get_mcp_client():
+    global _mcp_client_instance
+    if _mcp_client_instance is None:
+        try:
+            import config
+            if config.MCP_ENABLED:
+                from modules.mcp_client import MCPClient
+                _mcp_client_instance = MCPClient(config.MCP_CONFIG_PATH, registry)
+        except Exception as _mcp_err:
+            import logging
+            logging.getLogger(__name__).warning("MCP client init skipped: %s", _mcp_err)
+    return _mcp_client_instance
+
+def __getattr__(name: str):
+    if name == "mcp_client":
+        return get_mcp_client()
+    raise AttributeError(f"module {__name__} has no attribute '{name}'")
+
