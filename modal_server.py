@@ -57,40 +57,78 @@ class AarkaaGPU:
         print("Mounted volume contents:", os.listdir("/models"))
         
         # Pre-load 7B model directly into VRAM (priority 1)
-        path_7b = "/models/aarkaa-7b-q8.gguf"
-        if os.path.exists(path_7b):
-            print(f"Loading {path_7b} with n_gpu_layers=99, n_ctx=16384...")
+        candidates_7b = [
+            "/models/aarkaa-7b-f16.gguf",
+            "/models/aarkaa-7b-q16.gguf",
+            "/models/aarkaa-7b-q8.gguf",
+        ]
+        path_7b = None
+        for cand in candidates_7b:
+            if os.path.exists(cand):
+                path_7b = cand
+                break
+
+        if path_7b:
+            print(f"Loading primary 7B model {path_7b} with n_gpu_layers=99, n_ctx=8192...")
             self.models["7b"] = Llama(
                 model_path=path_7b,
                 n_gpu_layers=99,
-                n_ctx=16384,
+                n_ctx=8192,
                 verbose=False
             )
-            print("Aarkaa 7B Q8 model successfully loaded to GPU VRAM.")
+            print(f"Aarkaa 7B ({os.path.basename(path_7b)}) successfully loaded to GPU VRAM.")
 
     def _get_model(self, model_name: str):
         import os
+        import gc
         from llama_cpp import Llama
         
-        model_key = "7b" if "7" in model_name else ("coder" if "code" in model_name else "3b")
-        if model_key in self.models:
+        m_lower = (model_name or "7b").lower()
+        if "code" in m_lower:
+            model_key = "coder"
+        elif "3" in m_lower:
+            model_key = "3b"
+        elif "7" in m_lower:
+            model_key = "7b"
+        else:
+            model_key = "7b"
+
+        if model_key in self.models and self.models[model_key] is not None:
             return self.models[model_key]
 
-        # Dynamically load secondary model if requested
-        path_map = {
-            "3b": "/models/aarkaa-3b-q8.gguf",
-            "coder": "/models/aarkaa-coder-3b-q8.gguf"
+        # If switching between secondary models (coder vs 3b), release the other to guarantee VRAM headroom
+        other_key = "3b" if model_key == "coder" else ("coder" if model_key == "3b" else None)
+        if other_key and other_key in self.models:
+            print(f"Releasing {other_key} from VRAM to make room for {model_key}...")
+            del self.models[other_key]
+            gc.collect()
+
+        path_candidates_map = {
+            "3b": ["/models/aarkaa-3b-f16.gguf", "/models/aarkaa-3b-q16.gguf", "/models/aarkaa-3b-q8.gguf"],
+            "coder": ["/models/aarkaa-coder-3b-f16.gguf", "/models/aarkaa-coder-3b-q16.gguf", "/models/aarkaa-coder-3b-q8.gguf"],
+            "7b": ["/models/aarkaa-7b-f16.gguf", "/models/aarkaa-7b-q16.gguf", "/models/aarkaa-7b-q8.gguf"]
         }
-        target_path = path_map.get(model_key)
-        if target_path and os.path.exists(target_path):
-            print(f"Dynamically loading {target_path} to GPU...")
-            self.models[model_key] = Llama(
-                model_path=target_path,
-                n_gpu_layers=99,
-                n_ctx=16384,
-                verbose=False
-            )
-            return self.models[model_key]
+        candidates = path_candidates_map.get(model_key, [])
+        for target_path in candidates:
+            if os.path.exists(target_path):
+                print(f"Dynamically loading {target_path} into GPU VRAM...")
+                try:
+                    self.models[model_key] = Llama(
+                        model_path=target_path,
+                        n_gpu_layers=99,
+                        n_ctx=8192,
+                        verbose=False
+                    )
+                    return self.models[model_key]
+                except Exception as load_err:
+                    print(f"Notice: load with n_ctx=8192 returned {load_err}, retrying with n_ctx=4096...")
+                    self.models[model_key] = Llama(
+                        model_path=target_path,
+                        n_gpu_layers=99,
+                        n_ctx=4096,
+                        verbose=False
+                    )
+                    return self.models[model_key]
 
         # Fallback to 7B if available
         return self.models.get("7b")
