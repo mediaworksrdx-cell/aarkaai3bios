@@ -84,6 +84,13 @@ export function ToolApprovalCard({ request, onResolve, className = '' }: ToolApp
   const risk = RISK_CONFIG[request.mutation_risk] || RISK_CONFIG.medium;
   const RiskIcon = risk.icon;
 
+  // Synchronize when parent updates request.status (e.g. via approval_resolved SSE event)
+  useEffect(() => {
+    if (request.status && request.status !== status) {
+      setStatus(request.status);
+    }
+  }, [request.status]);
+
   // Countdown timer for pending approvals
   useEffect(() => {
     if (status !== 'pending' || remainingSeconds <= 0) return;

@@ -55,6 +55,13 @@ export function FinanceStrategyApprovalCard({
   const [copiedHash, setCopiedHash] = useState<boolean>(false);
   const [showDetails, setShowDetails] = useState<boolean>(true);
 
+  // Synchronize when parent updates request.status (e.g. via approval_resolved SSE event)
+  useEffect(() => {
+    if (request.status && request.status !== status) {
+      setStatus(request.status);
+    }
+  }, [request.status]);
+
   // 120s countdown timer
   useEffect(() => {
     if (status !== 'pending' || remainingSeconds <= 0) return;

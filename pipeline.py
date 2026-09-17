@@ -2712,7 +2712,11 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         agent_ctx = _build_agent_ctx(chat_ctx, context_parts, sources)
         
         final_answer = ""
-        for event_type, data in coordinator.stream_task(query, agent_ctx, user_id=user_id, session_id=session_id):
+        async for event in _stream_in_thread(
+            coordinator.stream_task,
+            query, agent_ctx, user_id=user_id, session_id=session_id
+        ):
+            event_type, data = event
             if event_type == "status":
                 yield {"type": "status", "status": data}
             elif event_type == "approval_request":

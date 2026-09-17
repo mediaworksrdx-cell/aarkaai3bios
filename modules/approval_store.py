@@ -304,7 +304,8 @@ class SQLiteApprovalStore(ApprovalStoreInterface):
                 return ApprovalResponse(approval_id, "invalid", "Approval request not found")
 
             # Ownership check: allow same user, or default/guest user session, or admin
-            if row["user_id"] != user_id and row["user_id"] != "default" and user_id != "admin":
+            is_guest = row["user_id"] in ("default", "guest_visitor", "") and user_id in ("default", "guest_visitor", "")
+            if row["user_id"] != user_id and not is_guest and user_id != "admin":
                 conn.rollback()
                 audit_event("approval.unauthorized_access", approval_id=approval_id, attempted_by=user_id, owner=row["user_id"])
                 return ApprovalResponse(approval_id, "unauthorized", "User does not own this approval request")
