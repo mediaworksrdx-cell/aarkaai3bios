@@ -1,69 +1,93 @@
-# Stage 1 Container Sandbox — Security Assessment & CVE Risk Waiver
+# Stage 1 Container Sandbox — Remediation & Validation Record
 
-**Document Version**: 1.1  
-**Target Milestone**: Stage 1 Controlled Staging Gating  
-**Artifact Evaluated**: `aarkaa-sandbox:3.11.8-hardened` (CI Run ID `35168199406`, Commit `2228f58`)  
-**Base Image**: `python:3.11.8-slim@sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bfbf263656654dc9b`  
-**Governance Scope**: Controlled Staging Only (**NOT General Production**)
-
----
-
-## 1. Executive Summary & Gating Posture
-
-> [!CAUTION]
-> **CVE Status is NOT Empirically Cleared**:
-> Vulnerability scanning on the hardened image (`aarkaa-sandbox:3.11.8-hardened`) confirms that all fixable CVEs have been remediated, but **5 CRITICAL** and **59 HIGH** vulnerabilities remain unpatched in upstream Debian packages (`Fixed: None`). The strict prerequisite of 0 HIGH and 0 CRITICAL vulnerabilities **has not been met**.
-> 
-> This document details the technical isolation rationale for risk acceptance, but **does not constitute formal acceptance**. Controlled staging enablement remains **blocked** pending countersignature by the security owner. General production deployment remains **not approved**.
+**Document Version**: 2.0  
+**Target Milestone**: Stage 1 Controlled Staging Gating (Experimental Remediation)  
+**Branch**: `remediation/cve-hardened-sandbox`  
+**Governance Scope**: Controlled Staging Only (**NOT General Production**)  
+**Gating Posture**: Controlled Staging **BLOCKED** pending empirical comparison evidence and formal security-owner sign-off.
 
 ---
 
-## 2. Empirical Scan Findings (`ci/artifacts/trivy_report.json`)
+## 1. Executive Summary & Governance Posture
 
-* **Artifact Name**: `aarkaa-sandbox:3.11.8-hardened` (debian 12.15)
-* **Python Language Packages**: **0 Vulnerabilities** (`setuptools`, `wheel`, and `pip` purged).
-* **Debian OS Packages**:
-  * **CRITICAL**: **5** (All unfixable upstream: `libsqlite3-0`, `perl-base`, `zlib1g`).
-  * **HIGH**: **59** (All unfixable upstream: `bsdutils`, `coreutils`, `tar`).
-  * **MEDIUM / LOW**: 0.
-
----
-
-## 3. Technical Exploitability Analysis & Compensating Controls
-
-| Package & Remaining CVEs | Inherent Risk | Compensating Kernel Isolation Control | Residual Exploitability |
-| :--- | :--- | :--- | :--- |
-| **`libsqlite3-0`** (CVE-2025-7458) | Memory corruption via crafted SQLite database file | SQLite databases accessed in sandbox are ephemeral and created locally; container runs as non-root (`10001:10001`) with `--cap-drop=ALL` and memory cap (512 MB). | **Negligible** |
-| **`perl-base`** (CVE-2026-13221, CVE-2026-42496, CVE-2026-8376) | Code execution via malformed Perl script execution | Code Mode executes Python scripts only via `/usr/local/bin/python`; Perl interpreter is never invoked. | **Non-Invoked / Inert** |
-| **`zlib1g`** (CVE-2023-45853) | Buffer overflow via crafted compressed stream | Container has `--network=none` (no external streams can be ingested); memory watchdog aborts at 512 MB. | **Zero External Ingress** |
-| **`bsdutils`, `coreutils`, `tar`** (Multiple HIGH CVEs) | Privilege escalation / file system manipulation | Root filesystem is mounted `--read-only`. All Linux capabilities dropped (`--cap-drop=ALL`). `--user 10001:10001` enforced. Device and host filesystems are unmounted. | **Non-Exploitable** (System files cannot be modified). |
+> [!IMPORTANT]
+> **Mandatory Governance Posture Statement**:
+> **“Security-hardened by design and pending empirical validation; production readiness remains unverified pending empirical security and reliability evidence.”**
+>
+> * **Staging Activation**: Strictly **BLOCKED**. Both feature flags remain disabled:
+>   `CODE_MODE_ENABLED = False`  
+>   `MCP_ENABLED = False`  
+> * **Remediation Method**: Automated, one-pass empirical comparison across candidate base images (Debian 12 slim baseline, Wolfi/Chainguard minimal Python, Distroless Python 3, and Ubuntu 24.04 minimal).
+> * **Selection Principle**: The winning base image is selected strictly through a defined 5-gate elimination algorithm based on empirical evidence, not base-image labels.
+> * **Certification Timing**: This document serves strictly as a **Remediation & Validation Record**. No hardening certification will be issued until all required integration tests pass, raw scan results are reviewed, residual risks are documented, and the Lead Security Architect countersigns.
 
 ---
 
-## 4. Defense-in-Depth Empirical Verification Matrix
+## 2. Strict 5-Gate Selection Hierarchy
 
-The following controls were empirically verified on an Ubuntu 24.04 LTS host with Docker 28.0.4 in GitHub Actions run `35168199406`:
+Candidates are evaluated through a strict hierarchical elimination order:
+
+1. **Gate 1 — Functional & Isolation Integrity**:
+   - Must achieve 15/15 passed executable Docker adversarial tests (0 failures allowed).
+   - Test reporting must state exactly: `15 passed, 1 skipped — gVisor unavailable/unverified on host, 0 failed`.
+   - Any failure in executable tests results in immediate disqualification.
+2. **Gate 2 — Dynamic Linkage & Native Dependency Compatibility**:
+   - Must cleanly load and execute: `zlib`, `pyexpat`, `sqlite3`, `ctypes`, `uuid`, `hashlib`.
+   - Missing SQLite constitutes an incompatibility failure unless the application is explicitly proven not to require it.
+   - Verified non-root UID/GID `10001:10001` permissions in `/workspace` and `/tmp`.
+3. **Gate 3 — Security & Vulnerability Threshold**:
+   - Evaluated under three unambiguous states:
+     - `PASS`: Exactly 0 High and 0 Critical findings.
+     - `WAIVER_REQUIRED`: Findings remain with `FixedVersion: None`; requires documented security-owner waiver.
+     - `FAIL`: Unapproved Critical findings, scanner failure, or masked/suppressed findings.
+4. **Gate 4 — Supply Chain Evidence Completeness**:
+   - Authentic Syft SPDX 2.3 JSON and CycloneDX 1.7 JSON generated.
+   - Cryptographic Cosign attestation and SLSA Level 2 provenance generated and bound to exact image digest.
+5. **Gate 5 — Operational & Metric Ranking**:
+   - Ranking order: Trivy Status (`PASS` > `WAIVER_REQUIRED`) → Lowest residual CVE count → Smallest container attack surface (image size & package count) → Startup latency benchmark.
+   - *Core Rule*: A candidate with fewer CVEs **cannot win** if it fails Gate 1 or Gate 2.
+
+---
+
+## 3. Empirical Candidate Evaluation Matrix
+
+Automated comparison results are recorded in [`ci/artifacts/candidate_comparison_scorecard.json`](file:///c:/Users/daarv/.gemini/antigravity/scratch/aarkaai3b/ci/artifacts/candidate_comparison_scorecard.json):
+
+| Candidate ID | Name | Target Reference / Resolved Digest | Gate 1 (Isolation) | Gate 2 (Linkage) | Gate 3 (Trivy) | Image Size | Packages | Selection Status |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| `candidate_a_debian_slim` | **Debian 12 Slim (Baseline)** | `python:3.11.8-slim@sha256:90f87955...` | 15P, 1S, 0F | PASS | WAIVER_REQ (5C / 59H) | 148 MB | 108 | Baseline Control |
+| `candidate_b_wolfi_python` | **Chainguard / Wolfi Python** | `cgr.dev/chainguard/python@sha256:<resolved>` | Pending CI | Pending CI | Pending CI | TBD | TBD | Candidate Under Eval |
+| `candidate_c_distroless_python` | **Distroless Python 3** | `gcr.io/distroless/python3-debian12@sha256:<resolved>` | Pending CI | Pending CI | Pending CI | TBD | TBD | Candidate Under Eval |
+| `candidate_d_ubuntu_minimal` | **Ubuntu 24.04 Minimal** | `ubuntu:24.04@sha256:<resolved>` | Pending CI | Pending CI | Pending CI | TBD | TBD | Candidate Under Eval |
+
+---
+
+## 4. Adversarial Isolation & Defense-in-Depth Matrix
+
+The following controls are verified across all qualifying candidates:
 
 - [x] **Zero Host Fallback**: `SandboxUnavailableError` raised when Docker is unreachable; execution never falls back to host.
-- [x] **PID Containment**: Fork bomb stopped at 32 processes (`pids-limit=32`).
-- [x] **Socket Denial**: Raw and TCP/UDP sockets raise `[Errno 101] Network is unreachable`.
+- [x] **PID Containment**: Fork bomb stopped at 32 processes (`--pids-limit=32`).
+- [x] **Socket Denial**: Raw and TCP/UDP sockets raise `[Errno 101] Network is unreachable` (`--network=none`).
 - [x] **Read-Only Root**: Writes outside `/workspace` raise `[Errno 30] Read-only file system` or `[Errno 13] Permission denied`.
 - [x] **Storage Quotas**: 10 MB tmpfs cap strictly enforced (`[Errno 28] No space left on device`).
 - [x] **Early Abort**: Dynamic `statvfs` early abort triggers before kernel exhaustion.
-- [x] **Symlink Traversal**: Escape outside `/workspace` strictly blocked.
+- [x] **Symlink Traversal**: Escape outside `/workspace` strictly trapped inside read-only container root namespace.
 - [x] **Non-Root Context**: Enforces UID/GID `10001:10001` with `no-new-privileges:true`.
+- [x] **Output Flood Protection**: Truncates stream at maximum configured byte limit.
+- [ ] **gVisor System Call Virtualization**: Recorded as **UNVERIFIED / SKIPPED** on hosts lacking `runsc`.
 
 ---
 
-## 5. Formal Security-Owner Waiver Sign-Off Template
+## 5. Formal Security-Owner Review & Sign-Off Template
 
-### A. Mandatory Waiver Constraints
-1. **Environment Restriction**: Valid strictly for **Controlled Staging**. Invalid for production.
-2. **Network Lock**: `--network=none` must remain enforced at all times.
-3. **Safe Fallback**: Coordinator must fall back strictly to `SAFE_FALLBACK_TOOLS = {"FileReadTool", "SearchTool", "ASTTool", "LSPTool"}`.
-4. **Distroless Re-baselining**: Platform team must evaluate distroless or scratch-based containerization before production review.
+### Mandatory Constraints for Staging Enablement
+1. **Scope Restriction**: Approval is strictly limited to **Controlled Staging**. General production release remains **NOT APPROVED**.
+2. **Network Lock**: Container `--network=none` must remain enforced at all times.
+3. **Safe Fallback**: Coordinator fallback is strictly confined to `SAFE_FALLBACK_TOOLS = {"FileReadTool", "SearchTool", "ASTTool", "LSPTool"}`.
+4. **Digest Binding**: Sign-off binds strictly and exclusively to the final selected and independently scanned image digest.
 
-### B. Formal Sign-Off Table
+### Sign-Off Table
 
 ```
 +---------------------------------------------------------------------------------------+
@@ -75,4 +99,4 @@ The following controls were empirically verified on an Ubuntu 24.04 LTS host wit
 +---------------------------------------------------------------------------------------+
 ```
 
-Controlled staging activation will remain gated (`CODE_MODE_ENABLED=False`, `MCP_ENABLED=False`) until this waiver is countersigned by the Lead Security Architect.
+Controlled staging activation will remain gated (`CODE_MODE_ENABLED=False`, `MCP_ENABLED=False`) until this record is countersigned by the Lead Security Architect upon review of the fresh CI evidence package.

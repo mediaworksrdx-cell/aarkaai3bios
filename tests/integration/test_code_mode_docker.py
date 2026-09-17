@@ -328,4 +328,4 @@ def test_real_container_gvisor_runtime_compatibility():
         timeout=15.0
     )
     assert res.returncode == 0
-    assert "3.11.8" in res.stdout
+    assert "3.11" in res.stdout

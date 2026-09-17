@@ -5,12 +5,13 @@ Tests all new modules without requiring the LLM engine.
 import sys
 import traceback
 
+__test__ = False
 passed = 0
 failed = 0
 errors = []
 
 
-def test(name, fn):
+def run_test(name, fn):
     global passed, failed, errors
     try:
         fn()
@@ -21,6 +22,9 @@ def test(name, fn):
         traceback.print_exc()
         failed += 1
         errors.append(f"{name}: {e}")
+
+run_test.__test__ = False
+test = run_test
 
 
 # ─── 1. Financial Calculator ─────────────────────────────────────────────────

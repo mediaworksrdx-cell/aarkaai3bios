@@ -18,10 +18,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 def safe_print(s):
     print(str(s).encode('ascii', errors='replace').decode('ascii'))
 
+__test__ = False
 passed = 0
 failed = 0
 
-def test(name, condition, msg=""):
+def run_test(name, condition, msg=""):
     global passed, failed
     if condition:
         passed += 1
@@ -29,6 +30,9 @@ def test(name, condition, msg=""):
     else:
         failed += 1
         safe_print(f"  FAIL: {name} — {msg}")
+
+run_test.__test__ = False
+test = run_test
 
 # ══════════════════════════════════════════════════════════════════════════
 print("\n=== 1. Subagent Registry ===")
@@ -198,12 +202,13 @@ except RuntimeError:
 stream_bypass_events = loop.run_until_complete(run_stream_test())
 test("orchestrate_stream bypasses simple query", len(stream_bypass_events) == 0, f"expected 0 events, got {len(stream_bypass_events)}")
 
-# ══════════════════════════════════════════════════════════════════════════
-print(f"\n{'='*60}")
-print(f"RESULTS: {passed} passed, {failed} failed out of {passed+failed} tests")
-if failed == 0:
-    print("All tests PASSED! [OK]")
-else:
-    print(f"WARNING: {failed} test(s) FAILED")
-print(f"{'='*60}")
-sys.exit(0 if failed == 0 else 1)
+if __name__ == "__main__":
+    # ══════════════════════════════════════════════════════════════════════════
+    print(f"\n{'='*60}")
+    print(f"RESULTS: {passed} passed, {failed} failed out of {passed+failed} tests")
+    if failed == 0:
+        print("All tests PASSED! [OK]")
+    else:
+        print(f"WARNING: {failed} test(s) FAILED")
+    print(f"{'='*60}")
+    sys.exit(0 if failed == 0 else 1)

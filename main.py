@@ -781,11 +781,16 @@ def _get_google_redirect_uri(request: Request) -> str:
 def google_login(request: Request):
     """Redirect to Google OAuth 2.0 consent screen."""
     import secrets
+    import hashlib
+    import base64
     from config import GOOGLE_CLIENT_ID, IS_PRODUCTION
     if not GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=500, detail="Google Client ID is not configured.")
 
     state = secrets.token_urlsafe(32)
+    pkce_verifier = secrets.token_urlsafe(64)
+    code_challenge = base64.urlsafe_b64encode(hashlib.sha256(pkce_verifier.encode("ascii")).digest()).decode("ascii").rstrip("=")
+
     redirect_uri = _get_google_redirect_uri(request)
     scope = "openid email profile"
     google_auth_url = (
@@ -797,12 +802,23 @@ def google_login(request: Request):
         "&access_type=offline"
         "&prompt=consent"
         f"&state={state}"
+        f"&code_challenge={code_challenge}"
+        "&code_challenge_method=S256"
     )
     is_https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
     response = fastapi.responses.RedirectResponse(url=google_auth_url)
     response.set_cookie(
         key="oauth_state",
         value=state,
+        max_age=600,
+        httponly=True,
+        secure=(IS_PRODUCTION and is_https),
+        samesite="lax",
+        path="/"
+    )
+    response.set_cookie(
+        key="pkce_verifier",
+        value=pkce_verifier,
         max_age=600,
         httponly=True,
         secure=(IS_PRODUCTION and is_https),

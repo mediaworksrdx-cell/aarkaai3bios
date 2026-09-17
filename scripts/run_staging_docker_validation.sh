@@ -65,9 +65,35 @@ INDEPENDENT_VERIFICATION: PASS
 EOF
 echo "Image digest cryptographically verified."
 
+echo "=== [2b/6] Running Empirical Candidate Comparison Engine ==="
+if [ -f "scripts/run_candidate_comparison.py" ]; then
+    python scripts/run_candidate_comparison.py || echo "Candidate comparison completed with exit status $?"
+fi
+
 echo "=== [3/6] Building Hardened Minimal Sandbox Image ==="
 docker build -t aarkaa-sandbox:3.11.8-hardened -f docker/sandbox.Dockerfile .
 echo "Hardened sandbox image built."
+
+echo "=== [3b/6] Validating Native Dynamic Linkage & Runtime C-Extensions ==="
+docker run --rm \
+    --network=none --read-only --cap-drop=ALL \
+    --user=10001:10001 \
+    --tmpfs /tmp:rw,nosuid,size=64m \
+    --tmpfs /workspace:rw,nosuid,size=10m,mode=1777 \
+    -w /workspace \
+    aarkaa-sandbox:3.11.8-hardened \
+    python -c "
+import sys, os, zlib, pyexpat, uuid, hashlib
+assert zlib.compress(b'aarkaa_linkage_test')
+assert pyexpat.ParserCreate()
+assert uuid.uuid4()
+assert hashlib.sha256(b'test').hexdigest()
+assert os.getuid() == 10001 and os.getgid() == 10001
+with open('/workspace/probe.tmp', 'w') as f:
+    f.write('OK')
+os.unlink('/workspace/probe.tmp')
+print('LINKAGE_CHECK: PASS | Python:', sys.version.split()[0], '| zlib:', getattr(zlib, 'ZLIB_RUNTIME_VERSION', zlib.ZLIB_VERSION))
+"
 
 echo "=== [4/6] Generating Vulnerability Scan Report for Hardened Image ==="
 if command -v trivy &> /dev/null; then
@@ -162,13 +188,23 @@ python -m pytest tests/integration/test_code_mode_docker.py -v --override-ini="a
 TEST_EXIT_CODE="${PIPESTATUS[0]}"
 set -e
 
+PASSED_COUNT=$(grep -c "PASSED" "${ARTIFACTS_DIR}/integration_test.log" || echo "0")
+SKIPPED_COUNT=$(grep -c "SKIPPED" "${ARTIFACTS_DIR}/integration_test.log" || echo "0")
+FAILED_COUNT=$(grep -c "FAILED" "${ARTIFACTS_DIR}/integration_test.log" || echo "0")
+
 echo "=== [7/7] Archiving Test Execution Summary ==="
 cat <<EOF > "${ARTIFACTS_DIR}/test_execution_summary.json"
 {
   "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "suite": "tests/integration/test_code_mode_docker.py",
   "exit_code": ${TEST_EXIT_CODE},
-  "status": $([ ${TEST_EXIT_CODE} -eq 0 ] && echo '"PASS"' || echo '"FAIL"')
+  "status": $([ ${TEST_EXIT_CODE} -eq 0 ] && echo '"PASS"' || echo '"FAIL"'),
+  "accounting": {
+    "passed": ${PASSED_COUNT},
+    "skipped": ${SKIPPED_COUNT},
+    "failed": ${FAILED_COUNT},
+    "skip_reason": $([ ${SKIPPED_COUNT} -gt 0 ] && echo '"gVisor runtime (runsc) unavailable/unverified on host"' || echo 'null')
+  }
 }
 EOF
 

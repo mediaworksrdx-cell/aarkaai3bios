@@ -3,7 +3,7 @@ name: Stage 1 Hardening & Real Docker Validation
 on:
   workflow_dispatch:
   push:
-    branches: [ main, harness-integration-v2 ]
+    branches: [ main, harness-integration-v2, remediation/cve-hardened-sandbox ]
     paths:
       - '.github/workflows/stage1-container-hardening.yml'
       - 'scripts/**'
