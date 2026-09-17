@@ -215,7 +215,7 @@ ARCHITECTURE_DOCUMENTS = [
         "content": (
             "AARKAA-3B is a custom fine-tuned Qwen2.5-3B-Instruct model served via llama-cpp-python "
             "in GGUF format (F16 quantization, ~5.8GB). The engine supports both CPU and GPU inference. "
-            "Model selection follows a priority cascade: F32 → F16 → Q8 GGUF files. "
+            "Model selection follows a priority cascade: F16 / Q16 full-precision GGUF files. "
             "During daytime IST hours, the model is pre-warmed on GPU for instant responses. "
             "During nighttime (1-7 AM IST), it uses CPU-only inference to reduce power consumption. "
             "The engine provides: generate_raw() for direct text generation with configurable "

@@ -60,7 +60,6 @@ class AarkaaGPU:
         candidates_7b = [
             "/models/aarkaa-7b-f16.gguf",
             "/models/aarkaa-7b-q16.gguf",
-            "/models/aarkaa-7b-q8.gguf",
         ]
         path_7b = None
         for cand in candidates_7b:
@@ -104,9 +103,9 @@ class AarkaaGPU:
             gc.collect()
 
         path_candidates_map = {
-            "3b": ["/models/aarkaa-3b-f16.gguf", "/models/aarkaa-3b-q16.gguf", "/models/aarkaa-3b-q8.gguf"],
-            "coder": ["/models/aarkaa-coder-3b-f16.gguf", "/models/aarkaa-coder-3b-q16.gguf", "/models/aarkaa-coder-3b-q8.gguf"],
-            "7b": ["/models/aarkaa-7b-f16.gguf", "/models/aarkaa-7b-q16.gguf", "/models/aarkaa-7b-q8.gguf"]
+            "3b": ["/models/aarkaa-3b-f16.gguf", "/models/aarkaa-3b-q16.gguf"],
+            "coder": ["/models/aarkaa-coder-3b-f16.gguf", "/models/aarkaa-coder-3b-q16.gguf"],
+            "7b": ["/models/aarkaa-7b-f16.gguf", "/models/aarkaa-7b-q16.gguf"]
         }
         candidates = path_candidates_map.get(model_key, [])
         for target_path in candidates:

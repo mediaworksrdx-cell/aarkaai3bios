@@ -30,10 +30,10 @@ _idle_timeout = int(os.getenv("AARKAAI_IDLE_TIMEOUT", "300"))  # 5 minutes defau
 _gguf_file_path = None
 _gguf_coder_path = None  # resolved dynamically at init
 _gguf_coder_candidates = [
-    Path(MODEL_PATH).parent / "aarkaa-coder-3b-q8.gguf",
     Path(MODEL_PATH).parent / "aarkaa-coder-3b-f16.gguf",
-    Path(MODEL_PATH) / "aarkaa-coder-3b-q8.gguf",
+    Path(MODEL_PATH).parent / "aarkaa-coder-3b-q16.gguf",
     Path(MODEL_PATH) / "aarkaa-coder-3b-f16.gguf",
+    Path(MODEL_PATH) / "aarkaa-coder-3b-q16.gguf",
 ]
 _n_threads = 4
 
@@ -227,16 +227,16 @@ _LANG_NAMES = {
 
 _GGUF_CANDIDATES = [
     # 7B Model (Highest Reasoning Quality) -- priority 1
-    Path(MODEL_PATH).parent / "aarkaa-7b-q8.gguf",
     Path(MODEL_PATH).parent / "aarkaa-7b-f16.gguf",
-    Path(MODEL_PATH) / "aarkaa-7b-q8.gguf",
+    Path(MODEL_PATH).parent / "aarkaa-7b-q16.gguf",
     Path(MODEL_PATH) / "aarkaa-7b-f16.gguf",
-    # 3B Fallbacks -- priority 2
-    Path(MODEL_PATH).parent / "aarkaa-3b-q8.gguf",
+    Path(MODEL_PATH) / "aarkaa-7b-q16.gguf",
+    # 3B Models -- priority 2
     Path(MODEL_PATH).parent / "aarkaa-3b-f16.gguf",
+    Path(MODEL_PATH).parent / "aarkaa-3b-q16.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-f32.gguf",
-    Path(MODEL_PATH) / "aarkaa-3b-q8.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-f16.gguf",
+    Path(MODEL_PATH) / "aarkaa-3b-q16.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-f32.gguf",
 ]
 
