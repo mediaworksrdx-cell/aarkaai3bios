@@ -2,11 +2,18 @@
 # Pinned official base digest for reproducible, verifiable builds
 FROM python:3.11.8-slim@sha256:90f8795536170fd08236d2ceb74fe7065dbf74f738d8b84bfbf263656654dc9b AS base
 
+# Update Debian security packages to patch base OS vulnerabilities
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
 # Create dedicated non-root user and group (UID/GID 10001)
 RUN groupadd -g 10001 appgroup && \
     useradd -u 10001 -g appgroup -s /sbin/nologin -M -d /workspace appuser
 
-# Remove unnecessary pip, wheel, and setuptools to eliminate CVE-2025-47273 and CVE-2026-24049
+# Remove unnecessary pip, wheel, and setuptools to eliminate Python CVEs
 RUN rm -rf /usr/local/lib/python3.11/site-packages/setuptools* \
            /usr/local/lib/python3.11/site-packages/wheel* \
            /usr/local/lib/python3.11/site-packages/pip* \

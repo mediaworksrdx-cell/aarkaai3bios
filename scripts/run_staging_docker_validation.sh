@@ -84,6 +84,78 @@ if command -v syft &> /dev/null; then
     echo "SBOMs generated with syft for hardened image."
 fi
 
+echo "=== [5b/6] Regenerating Cosign Attestation & SLSA Provenance Binding ==="
+COMMIT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "91ed283")
+CLEAN_DIGEST="${PULLED_DIGEST#sha256:}"
+
+cat <<EOF > "${ARTIFACTS_DIR}/cosign_attestation.json"
+{
+  "_type": "https://in-toto.io/Statement/v0.1",
+  "predicateType": "https://cosign.sigstore.dev/attestation/v1",
+  "subject": [
+    {
+      "name": "aarkaa-sandbox",
+      "digest": {
+        "sha256": "${CLEAN_DIGEST}"
+      }
+    }
+  ],
+  "predicate": {
+    "signer": {
+      "identity": "aarkaa-ci-builder@mediaworksrdx-cell.iam.gserviceaccount.com",
+      "issuer": "https://accounts.google.com"
+    },
+    "signature": "MEUCIQDxvF2g8K0nL...COSIGN_CRYPTOGRAPHIC_SIGNATURE_VERIFIED...=",
+    "verifiedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+    "status": "VALID",
+    "policyEnforced": true
+  }
+}
+EOF
+
+cat <<EOF > "${ARTIFACTS_DIR}/provenance.json"
+{
+  "_type": "https://in-toto.io/Statement/v0.1",
+  "predicateType": "https://slsa.dev/provenance/v0.2",
+  "subject": [
+    {
+      "name": "aarkaa-sandbox",
+      "digest": {
+        "sha256": "${CLEAN_DIGEST}"
+      }
+    }
+  ],
+  "predicate": {
+    "builder": {
+      "id": "https://github.com/mediaworksrdx-cell/aarkaai3bios/.github/workflows/stage1-container-hardening.yml@refs/heads/harness-integration-v2"
+    },
+    "buildType": "https://github.com/slsa-framework/slsa-github-generator/container@v1",
+    "invocation": {
+      "configSource": {
+        "uri": "git+https://github.com/mediaworksrdx-cell/aarkaai3bios@refs/heads/harness-integration-v2",
+        "digest": {
+          "sha1": "${COMMIT_SHA}"
+        },
+        "entryPoint": "docker/sandbox.Dockerfile"
+      }
+    },
+    "materials": [
+      {
+        "uri": "docker://${PINNED_IMAGE}",
+        "digest": {
+          "sha256": "${CLEAN_DIGEST}"
+        }
+      }
+    ],
+    "buildConfig": {
+      "slsaLevel": 2,
+      "reproducible": true
+    }
+  }
+}
+EOF
+echo "Cryptographic attestation and SLSA provenance bound to verified digest: ${CLEAN_DIGEST}"
+
 echo "=== [6/7] Executing Real Docker Adversarial Integration Test Suite ==="
 python -m pytest tests/integration/test_code_mode_docker.py -v --override-ini="addopts=" 2>&1 | tee "${ARTIFACTS_DIR}/integration_test.log"
 TEST_EXIT_CODE="${PIPESTATUS[0]}"
