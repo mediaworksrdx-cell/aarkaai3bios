@@ -125,7 +125,7 @@ class CodeModeExecutor:
         max_script_bytes: int = 65536,
         max_workspace_bytes: int = 104857600,  # 100 MB
         max_workspace_files: int = 1000,
-        docker_image: str = "ubuntu:24.04@sha256:69cecf4bbf72d2d44a9eef1b71fb98c7fb973d78af11399deccef19beb008ad9",
+        docker_image: str = "aarkaa-sandbox:3.11.8-hardened",
         approval_context: Optional[Dict[str, Any]] = None,
         force_mock_container: bool = False  # For unit testing without Docker daemon
     ):

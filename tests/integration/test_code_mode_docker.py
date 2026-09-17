@@ -249,7 +249,8 @@ def test_real_container_timeout_watchdog_cleanup(tmp_path):
     executor = CodeModeExecutor(
         tool_registry=None,
         workspace_dir=str(tmp_path),
-        timeout=1.0
+        timeout=1.0,
+        docker_image=PINNED_IMAGE
     )
     res = executor.execute_code_block("x = 0\nwhile True:\n    x += 1", {}, "user", "session")
     assert not res.success
@@ -280,13 +281,14 @@ def test_real_container_stdout_flooding_truncated(tmp_path):
     executor = CodeModeExecutor(
         tool_registry=None,
         workspace_dir=str(tmp_path),
-        max_output_bytes=1024
+        max_output_bytes=1024,
+        docker_image=PINNED_IMAGE
     )
     code = "for _ in range(200):\n    print('A' * 50)"
     res = executor.execute_code_block(code, {}, "user", "session")
-    if res.success:
-        assert len(res.output) <= 1200
-        assert "[output truncated]" in res.output
+    assert res.success
+    assert len(res.output) <= 1200
+    assert "[output truncated]" in res.output
 
 
 @requires_docker
