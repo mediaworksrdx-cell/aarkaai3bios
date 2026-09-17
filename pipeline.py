@@ -2723,6 +2723,8 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
                 yield {"type": "approval_request", "payload": data}
             elif event_type == "approval_resolved":
                 yield {"type": "approval_resolved", "payload": data}
+            elif event_type == "tool_result":
+                yield {"type": "tool_result", "payload": data}
             elif event_type == "error":
                 yield {"type": "error", "detail": data}
                 return

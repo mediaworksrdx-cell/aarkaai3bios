@@ -78,6 +78,10 @@ export interface ToolApprovalRequest {
   resolved_by?: string;
   resolved_at?: number;
   rejection_reason?: string;
+  human_summary?: string;
+  target_resource?: string;
+  diff_preview?: string;
+  command_preview?: string;
 }
 
 export interface ToolApprovalDecision {

@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { WelcomeScreen } from './WelcomeScreen';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
+import { FloatingApprovalDrawer } from './FloatingApprovalDrawer';
 import { useChatContext } from '@/context/ChatContext';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
 import { Menu, Plus, Download, FileText, FileDown, Share2, ArrowDown } from 'lucide-react';
@@ -31,6 +32,7 @@ export function ChatContainer({
     setReasoningEffort,
     createConversation,
     activeConversation,
+    activeApprovalRequest,
   } = useChatContext();
 
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -352,6 +354,13 @@ export function ChatContainer({
             )}
           </button>
         </div>
+      )}
+
+      {/* Floating Interactive Approval Drawer (Pop-up docked from text input area) */}
+      {activeApprovalRequest && (
+        <FloatingApprovalDrawer
+          request={activeApprovalRequest}
+        />
       )}
 
       {/* Chat Input Bar */}

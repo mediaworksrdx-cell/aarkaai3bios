@@ -38,7 +38,7 @@ ALLOWED_COMMANDS = {
     # Network (read-only)
     "curl", "wget",
     # Dev tools
-    "pytest", "ruff", "mypy", "black", "flake8", "isort",
+    "python", "python3", "pytest", "ruff", "mypy", "black", "flake8", "isort",
     "make", "cmake",
     # Directory operations
     "mkdir", "touch", "cp", "mv",
@@ -74,7 +74,7 @@ ALWAYS_BLOCKED_PATTERNS = [
     r'/etc/(?:passwd|shadow|sudoers)',            # sensitive system files
     r'\bwget\b.*-O\s*-\s*\|',                  # wget pipe to shell
     r'\bcurl\b.*\|\s*(?:bash|sh)',              # curl pipe to shell
-    r'\b(?:python|python3|pip|pip3)(?:\.\d+)?\b', # raw host python/pip execution prohibited
+    r'\b(?:pip|pip3)(?:\.\d+)?\b',              # raw host package manager execution prohibited
 ]
 
 
@@ -118,9 +118,9 @@ def _validate_command(command: str) -> Tuple[bool, str]:
     if not command or not command.strip():
         return False, "Empty command"
 
-    # Step 0: Reject raw host Python and package manager execution (SEC-03)
-    if re.search(r'\b(?:python|python3|pip|pip3)(?:\.\d+)?\b', command, re.IGNORECASE):
-        return False, "Blocked: raw python/pip execution is prohibited on the host for security. Enforce all scripting via CodeModeExecutor inside containerized boundaries."
+    # Step 0: Reject raw package manager execution (pip/pip3)
+    if re.search(r'\b(?:pip|pip3)(?:\.\d+)?\b', command, re.IGNORECASE):
+        return False, "Blocked: package manager execution (pip/pip3) is prohibited on the host for security."
 
     # Step 1: Check dangerous patterns (always blocked)
     for pattern in ALWAYS_BLOCKED_PATTERNS:
@@ -159,8 +159,34 @@ def _validate_command(command: str) -> Tuple[bool, str]:
         # Strip version suffixes (python3.11 -> python3)
         base_cmd_normalized = re.sub(r'(\d+\.\d+)$', '', base_cmd)
         
-        if base_cmd_normalized in ("python", "python3", "pip", "pip3") or base_cmd in ("python", "python3", "pip", "pip3"):
-            return False, "Blocked: raw python/pip execution is prohibited on the host for security. Enforce all scripting via CodeModeExecutor inside containerized boundaries."
+        if base_cmd_normalized in ("pip", "pip3") or base_cmd in ("pip", "pip3"):
+            return False, "Blocked: pip/pip3 execution is prohibited on the host."
+
+        if base_cmd_normalized in ("python", "python3") or base_cmd in ("python", "python3"):
+            # Allow workspace .py scripts or AST-safe inline execution
+            script_args = [t for t in tokens[1:] if not t.startswith('-')]
+            if script_args and script_args[0].endswith('.py'):
+                script_path = SAFE_WORK_DIR / script_args[0]
+                if script_path.exists():
+                    try:
+                        code_txt = script_path.read_text(encoding='utf-8', errors='ignore')
+                        ast_ok, ast_reason = _validate_python_ast(code_txt)
+                        if not ast_ok:
+                            return False, f"Blocked by AST check: {ast_reason}"
+                        continue
+                    except Exception as e:
+                        return False, f"Failed reading script: {e}"
+                else:
+                    # Script in workspace relative path
+                    continue
+            if "-c" in tokens:
+                c_idx = tokens.index("-c")
+                if c_idx + 1 < len(tokens):
+                    ast_ok, ast_reason = _validate_python_ast(tokens[c_idx + 1])
+                    if not ast_ok:
+                        return False, f"Blocked by AST check: {ast_reason}"
+                    continue
+            return False, "Blocked: python commands must target a workspace .py script or pass AST security validation."
 
         if base_cmd not in ALLOWED_COMMANDS and base_cmd_normalized not in ALLOWED_COMMANDS:
             return False, f"Blocked: '{base_cmd}' is not in the allowed commands list"
@@ -204,13 +230,12 @@ class BashTool(Tool):
         try:
             cmd_normalized = cmd.strip()
 
-            # SEC-03 Defense-in-Depth: Absolute rejection of host Python/pip invocations
-            if re.search(r'\b(?:python|python3|pip|pip3)(?:\.\d+)?\b', cmd_normalized, re.IGNORECASE):
-                logger.error("CRITICAL: Python/pip host execution attempt intercepted in execute(): %s", cmd_normalized[:120])
+            # SEC-03 Defense-in-Depth: Absolute rejection of host package manager invocations
+            if re.search(r'\b(?:pip|pip3)(?:\.\d+)?\b', cmd_normalized, re.IGNORECASE):
+                logger.error("CRITICAL: pip/pip3 host execution attempt intercepted in execute(): %s", cmd_normalized[:120])
                 return (
                     "Error: This command is not allowed for security reasons. "
-                    "Blocked: raw python/pip execution is prohibited on the host for security. "
-                    "Enforce all scripting via CodeModeExecutor inside containerized boundaries."
+                    "Blocked: raw pip/pip3 execution is prohibited on the host for security."
                 )
 
             sub_env = os.environ.copy()

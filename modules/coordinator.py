@@ -556,6 +556,14 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
             observation = f"Error: {exc}"
         logger.info(f"Observation length: {len(observation)}")
         
+        # Stream live tool execution result so frontend immediately moves to next stage
+        yield "tool_result", {
+            "tool_name": action_name,
+            "params": params,
+            "observation": observation
+        }
+        yield "status", f"Executed {action_name}. Synthesizing completion..."
+        
         if action_name == "HumanInput":
             # Yield interactive request signature so the client handles input prompt
             yield "input_request", params.get("prompt", "Please provide input:")
@@ -566,6 +574,10 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
             
         # VERY IMPORTANT: Update prompt context with the Thought + Action + Observation correctly
         prompt += f"\n{full_response}\nObservation: {observation}\n"
+        
+        # Guide model to finalize on next iteration after successful execution
+        if "error" not in observation.lower() and action_name in ("BashTool", "FileEditTool", "DeployTool"):
+            next_prefix = f"Action `{action_name}` completed successfully with observation:\n{observation}\nI will now provide the final answer directly to the user.\nFinal Answer: "
         
     # Final fallback if loops exhausted
     clean_ans = full_response.replace("Thought:", "").strip()

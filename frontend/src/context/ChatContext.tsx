@@ -48,7 +48,11 @@ interface ChatContextType {
   sendMessage: (content: string, model?: string, effort?: EffortLevel) => Promise<void>;
   regenerateResponse: (assistantMessageId: string) => Promise<void>;
   submitFeedback: (messageId: string, rating: 1 | -1, correction?: string) => Promise<void>;
-  resolveApproval: (approvalId: string, decision: 'approve' | 'deny', reason?: string) => Promise<void>;
+  resolveApproval: (approvalId: string, decision: 'approve' | 'deny', reason?: string, selectedMasterStrategy?: string) => Promise<void>;
+  activeApprovalRequest: ToolApprovalRequest | null;
+  alwaysAllowedTools: string[];
+  alwaysAllowTool: (toolName: string) => void;
+  dismissActiveApproval: () => void;
   stopGeneration: () => void;
   clearError: () => void;
   clearAllHistory: () => void;
@@ -65,8 +69,15 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
   const [selectedModel, setSelectedModelState] = useState<string>('aarka-2.0');
   const [reasoningEffort, setReasoningEffortState] = useState<EffortLevel>('high');
   const [isMounted, setIsMounted] = useState<boolean>(false);
+  const [activeApprovalRequest, setActiveApprovalRequest] = useState<ToolApprovalRequest | null>(null);
+  const [alwaysAllowedTools, setAlwaysAllowedTools] = useState<string[]>([]);
+  const alwaysAllowedToolsRef = useRef<string[]>([]);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    alwaysAllowedToolsRef.current = alwaysAllowedTools;
+  }, [alwaysAllowedTools]);
 
   const currentStorageKey = user && user.email
     ? `aarka-conv-v3-${user.email.toLowerCase()}`
@@ -416,8 +427,18 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
                 return c;
               })
             );
+
+            // If user previously allowed this tool for this session, auto-approve immediately
+            if (alwaysAllowedToolsRef.current.includes(approvalReq.tool_name)) {
+              submitToolApproval(approvalReq.approval_id, 'approve').catch(err => {
+                console.error('Auto-approval submission error:', err);
+              });
+            } else {
+              setActiveApprovalRequest(approvalReq);
+            }
           } else if (chunk.type === 'approval_resolved') {
             const resolved = chunk.payload || chunk;
+            setActiveApprovalRequest(prev => (prev?.approval_id === resolved.approval_id ? null : prev));
             setConversations(prev =>
               prev.map(c => {
                 if (c.id === convId) {
@@ -440,6 +461,23 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
                 return c;
               })
             );
+          } else if (chunk.type === 'tool_result') {
+            const toolRes = chunk.payload || chunk;
+            const obs = typeof toolRes.observation === 'string' ? toolRes.observation.trim() : '';
+            if (obs) {
+              accumulated += `\n\n\`\`\`bash\n# [${toolRes.tool_name || 'Tool'} Output]\n${obs}\n\`\`\`\n\n`;
+              setConversations(prev =>
+                prev.map(c => {
+                  if (c.id === convId) {
+                    const msgs = c.messages.map(m =>
+                      m.id === assistantMsgId ? { ...m, content: accumulated } : m
+                    );
+                    return { ...c, messages: msgs };
+                  }
+                  return c;
+                })
+              );
+            }
           } else if (chunk.type === 'codemode_execution') {
             const execution: CodeModeExecution = chunk.payload || chunk;
             setConversations(prev =>
@@ -571,8 +609,9 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
   );
 
   const resolveApproval = useCallback(
-    async (approvalId: string, decision: 'approve' | 'deny', reason?: string) => {
-      await submitToolApproval(approvalId, decision, reason);
+    async (approvalId: string, decision: 'approve' | 'deny', reason?: string, selectedMasterStrategy?: string) => {
+      setActiveApprovalRequest(prev => (prev?.approval_id === approvalId ? null : prev));
+      await submitToolApproval(approvalId, decision, reason, selectedMasterStrategy);
       setConversations(prev =>
         prev.map(c => {
           const msgs = c.messages.map(m => {
@@ -584,6 +623,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
                   status: decision === 'approve' ? ('approved' as const) : ('rejected' as const),
                   resolved_at: Date.now(),
                   rejection_reason: reason,
+                  selected_master_strategy: selectedMasterStrategy,
                 },
               };
             }
@@ -595,6 +635,19 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
     },
     []
   );
+
+  const alwaysAllowTool = useCallback((toolName: string) => {
+    setAlwaysAllowedTools(prev => {
+      if (prev.includes(toolName)) return prev;
+      const updated = [...prev, toolName];
+      alwaysAllowedToolsRef.current = updated;
+      return updated;
+    });
+  }, []);
+
+  const dismissActiveApproval = useCallback(() => {
+    setActiveApprovalRequest(null);
+  }, []);
 
   const regenerateResponse = useCallback(
     async (assistantMessageId: string) => {
@@ -688,6 +741,10 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
         regenerateResponse,
         submitFeedback,
         resolveApproval,
+        activeApprovalRequest,
+        alwaysAllowedTools,
+        alwaysAllowTool,
+        dismissActiveApproval,
         stopGeneration,
         clearError,
         clearAllHistory,
@@ -721,6 +778,10 @@ export function useChatContext(): ChatContextType {
       regenerateResponse: async () => {},
       submitFeedback: async () => {},
       resolveApproval: async () => {},
+      activeApprovalRequest: null,
+      alwaysAllowedTools: [],
+      alwaysAllowTool: () => {},
+      dismissActiveApproval: () => {},
       stopGeneration: () => {},
       clearError: () => {},
       clearAllHistory: () => {},
