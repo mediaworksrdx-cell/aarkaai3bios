@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Network Security Configuration for AARKAAI.
-  Production uses HTTPS (aarka-ai.com) — no cleartext exceptions needed.
+  Production uses HTTPS (synthetixanalytics.com) — no cleartext exceptions needed.
   Only emulator loopback (10.0.2.2) allowed over HTTP for local dev.
 -->
 <network-security-config>

@@ -11,7 +11,7 @@ object RetrofitClient {
 
     // URL is injected from gradle.properties → BuildConfig at compile time.
     // Emulator fallback: http://10.0.2.2:5000/
-    // Production:        https://aarka-ai.com/
+    // Production:        https://synthetixanalytics.com/
     private const val BASE_URL = BuildConfig.BASE_URL
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {

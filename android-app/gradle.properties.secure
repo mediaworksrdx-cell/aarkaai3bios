@@ -14,5 +14,5 @@ RELEASE_KEY_PASSWORD=${RELEASE_KEY_PASSWORD}
 
 # ─── Backend URL ───
 # Emulator:   http://10.0.2.2:5000/
-# Production: https://aarka-ai.com/
-AARKAAI_BASE_URL=https://aarka-ai.com/
+# Production: https://synthetixanalytics.com/
+AARKAAI_BASE_URL=https://synthetixanalytics.com/

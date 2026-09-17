@@ -569,8 +569,10 @@ def _get_github_redirect_uri(request: Request) -> str:
     elif clean_host in {"localhost", "127.0.0.1"} or clean_host.startswith("192.168.") or clean_host.startswith("10.") or clean_host.startswith("136.85."):
         scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
         return f"{scheme}://{forwarded_host}/auth/github/callback"
-    else:
+    elif "aarka-ai.com" in clean_host:
         return "https://aarka-ai.com/auth/github/callback"
+    else:
+        return "https://synthetixanalytics.com/aarkaai/oauthcallback"
 
 
 @app.get("/auth/github/login", tags=["auth"])
@@ -679,12 +681,12 @@ async def github_callback(code: str, state: str, request: Request):
             # The token is delivered exclusively via HTTP-only secure cookie below.
             from urllib.parse import quote
             safe_name = quote(name, safe="")
-            host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "aarka-ai.com"
+            host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "synthetixanalytics.com"
             scheme = request.headers.get("x-forwarded-proto", "https")
-            if "aarka-ai.com" in host:
-                target_url = f"{scheme}://{host}/?auth=success&name={safe_name}"
-            elif "synthetixanalytics.com" in host:
+            if "synthetixanalytics.com" in host:
                 target_url = f"{scheme}://{host}/aarkaai?auth=success&name={safe_name}"
+            elif "aarka-ai.com" in host:
+                target_url = f"{scheme}://{host}/?auth=success&name={safe_name}"
             else:
                 target_url = f"{OAUTH_REDIRECT_BASE_URL}/?auth=success&name={safe_name}"
 
@@ -728,12 +730,12 @@ async def github_callback(code: str, state: str, request: Request):
             # SEC-C3 FIX: Do NOT pass JWT token, email, or name in URL query parameters.
             from urllib.parse import quote
             safe_name = quote(name, safe="")
-            host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "aarka-ai.com"
+            host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "synthetixanalytics.com"
             scheme = request.headers.get("x-forwarded-proto", "https")
-            if "aarka-ai.com" in host:
-                target_url = f"{scheme}://{host}/?auth=success&name={safe_name}"
-            elif "synthetixanalytics.com" in host:
+            if "synthetixanalytics.com" in host:
                 target_url = f"{scheme}://{host}/aarkaai?auth=success&name={safe_name}"
+            elif "aarka-ai.com" in host:
+                target_url = f"{scheme}://{host}/?auth=success&name={safe_name}"
             else:
                 target_url = f"{OAUTH_REDIRECT_BASE_URL}/?auth=success&name={safe_name}"
 
@@ -773,8 +775,10 @@ def _get_google_redirect_uri(request: Request) -> str:
     elif clean_host in {"localhost", "127.0.0.1"} or clean_host.startswith("192.168.") or clean_host.startswith("10.") or clean_host.startswith("136.85."):
         scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
         return f"{scheme}://{forwarded_host}/auth/google/callback"
-    else:
+    elif "aarka-ai.com" in clean_host:
         return "https://aarka-ai.com/auth/google/callback"
+    else:
+        return "https://synthetixanalytics.com/aarkaai/oauthcallback"
 
 
 @app.get("/auth/google/login", tags=["auth"])
@@ -914,12 +918,12 @@ async def google_callback(code: str, state: str, request: Request):
             # SEC-C3 FIX: Do NOT pass JWT token, email, or name in URL query parameters.
             from urllib.parse import quote
             safe_name = quote(name, safe="")
-            host = request.headers.get("host", "aarka-ai.com")
+            host = request.headers.get("host", "synthetixanalytics.com")
             scheme = request.headers.get("x-forwarded-proto", "https")
-            if "aarka-ai.com" in host:
-                target_url = f"{scheme}://{host}/?auth=success&name={safe_name}"
-            elif "synthetixanalytics.com" in host:
+            if "synthetixanalytics.com" in host:
                 target_url = f"{scheme}://{host}/aarkaai?auth=success&name={safe_name}"
+            elif "aarka-ai.com" in host:
+                target_url = f"{scheme}://{host}/?auth=success&name={safe_name}"
             else:
                 target_url = f"{OAUTH_REDIRECT_BASE_URL}/?auth=success&name={safe_name}"
 

@@ -202,13 +202,13 @@ def verify_deployment():
     import urllib.request
     try:
         req = urllib.request.Request(
-            "https://aarka-ai.com/health",
+            "https://synthetixanalytics.com/health",
             headers={"User-Agent": "AARKAAI-Deploy/1.0"}
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             body = resp.read().decode("utf-8")
             if resp.status == 200 and '"status":"healthy"' in body:
-                print("  [PASS] Public gateway health (https://aarka-ai.com/health): 200 OK")
+                print("  [PASS] Public gateway health (https://synthetixanalytics.com/health): 200 OK")
             else:
                 print(f"  [WARN] Public endpoint status: {resp.status}, body: {body[:200]}")
     except Exception as e:
