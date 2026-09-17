@@ -1,5 +1,5 @@
 # Stage 1 Container Sandbox — Empirical Candidate Comparison Scorecard
-**Evaluation Timestamp**: 2026-09-17T01:59:24.253171+00:00  
+**Evaluation Timestamp**: 2026-09-17T04:42:07.366109+00:00  
 **Host Docker Available**: `True`  
 **Selected Winner**: `candidate_d_ubuntu_minimal`  
 

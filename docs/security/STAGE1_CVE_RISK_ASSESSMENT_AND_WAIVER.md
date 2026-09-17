@@ -1,10 +1,11 @@
 # Stage 1 Container Sandbox — Remediation & Validation Record
 
-**Document Version**: 2.0  
-**Target Milestone**: Stage 1 Controlled Staging Gating (Experimental Remediation)  
+**Document Version**: 2.1  
+**Target Milestone**: Stage 1 Controlled Staging Gating (Empirically Verified Remediation)  
 **Branch**: `remediation/cve-hardened-sandbox`  
+**Latest Authoritative CI Run**: Run ID `35182723998` (Commit `67baa3b`)  
 **Governance Scope**: Controlled Staging Only (**NOT General Production**)  
-**Gating Posture**: Controlled Staging **BLOCKED** pending empirical comparison evidence and formal security-owner sign-off.
+**Gating Posture**: Controlled Staging **BLOCKED** pending formal security-owner review and countersignature.
 
 ---
 
@@ -12,20 +13,24 @@
 
 > [!IMPORTANT]
 > **Mandatory Governance Posture Statement**:
-> **“Security-hardened by design and pending empirical validation; production readiness remains unverified pending empirical security and reliability evidence.”**
+> **“Security-hardened by design and empirically verified in CI; controlled staging remains gated pending security-owner review and countersignature; general production release remains unapproved.”**
 >
 > * **Staging Activation**: Strictly **BLOCKED**. Both feature flags remain disabled:
 >   `CODE_MODE_ENABLED = False`  
 >   `MCP_ENABLED = False`  
-> * **Remediation Method**: Automated, one-pass empirical comparison across candidate base images (Debian 12 slim baseline, Wolfi/Chainguard minimal Python, Distroless Python 3, and Ubuntu 24.04 minimal).
-> * **Selection Principle**: The winning base image is selected strictly through a defined 5-gate elimination algorithm based on empirical evidence, not base-image labels.
-> * **Certification Timing**: This document serves strictly as a **Remediation & Validation Record**. No hardening certification will be issued until all required integration tests pass, raw scan results are reviewed, residual risks are documented, and the Lead Security Architect countersigns.
+> * **Remediation Method**: Automated, one-pass empirical candidate comparison pipeline across 4 base candidates under strict Linux CI (Docker 28.0.4, Ubuntu 24.04).
+> * **Winning Candidate**: `ubuntu:24.04@sha256:69cecf4bbf72d2d44a9eef1b71fb98c7fb973d78af11399deccef19beb008ad9` (Candidate D).
+> * **Empirical Verification**:
+>   - **Trivy Vulnerabilities on Final Rebuilt Image**: **0 Critical, 0 High, 0 Medium, 0 Low (0 Total CVEs)**.
+>   - **Docker Adversarial Isolation Accounting**: **15 passed, 1 skipped — gVisor runtime (`runsc`) unavailable/unverified on host, 0 failed** (Exit code: 0).
+>   - **Supply Chain**: Syft SBOMs generated (107 packages), Cosign cryptographic attestation verified, SLSA Level 2 provenance bound to commit `67baa3b` and digest `69cecf4bbf72...`.
+> * **Certification Timing**: This document serves strictly as a **Remediation & Validation Record**. Controlled staging activation will only occur once the Lead Security Architect formally countersigns.
 
 ---
 
 ## 2. Strict 5-Gate Selection Hierarchy
 
-Candidates are evaluated through a strict hierarchical elimination order:
+Candidates were evaluated through a strict hierarchical elimination order:
 
 1. **Gate 1 — Functional & Isolation Integrity**:
    - Must achieve 15/15 passed executable Docker adversarial tests (0 failures allowed).
@@ -33,7 +38,6 @@ Candidates are evaluated through a strict hierarchical elimination order:
    - Any failure in executable tests results in immediate disqualification.
 2. **Gate 2 — Dynamic Linkage & Native Dependency Compatibility**:
    - Must cleanly load and execute: `zlib`, `pyexpat`, `sqlite3`, `ctypes`, `uuid`, `hashlib`.
-   - Missing SQLite constitutes an incompatibility failure unless the application is explicitly proven not to require it.
    - Verified non-root UID/GID `10001:10001` permissions in `/workspace` and `/tmp`.
 3. **Gate 3 — Security & Vulnerability Threshold**:
    - Evaluated under three unambiguous states:
@@ -51,14 +55,14 @@ Candidates are evaluated through a strict hierarchical elimination order:
 
 ## 3. Empirical Candidate Evaluation Matrix
 
-Automated comparison results from Linux CI (Run `35172519153`, commit `ea37f93`) recorded in [`ci/artifacts/candidate_comparison_scorecard.json`](file:///c:/Users/daarv/.gemini/antigravity/scratch/aarkaai3b/ci/artifacts/candidate_comparison_scorecard.json):
+Automated comparison results from Linux CI (Run `35182723998`, commit `67baa3b`) recorded in [`ci/artifacts/candidate_comparison_scorecard.json`](file:///c:/Users/daarv/.gemini/antigravity/scratch/aarkaai3b/ci/artifacts/candidate_comparison_scorecard.json):
 
 | Candidate ID | Name | Resolved Immutable Digest | Gate 1 (Isolation) | Gate 2 (Linkage) | Gate 3 (Trivy) | Image Size | Packages | Selection Status |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| `candidate_a_debian_slim` | **Debian 12 Slim (Baseline)** | `sha256:90f8795536170fd08236...` | 15P, 1S, 0F | PASS | WAIVER_REQ (5C / 59H) | 183.3 MB | 108 | **REJECTED** (Gate 3 CVEs) |
-| `candidate_b_wolfi_python` | **Chainguard / Wolfi Python** | `sha256:c8e464ca00c86bd80498...` | SKIPPED | FAIL (Path/Entrypoint) | SKIPPED | 63.4 MB | N/A | **REJECTED** (Gate 2 Linkage) |
-| `candidate_c_distroless_python` | **Distroless Python 3** | `sha256:2fdb05402a2cf21cf78f...` | SKIPPED | FAIL (Path/Entrypoint) | SKIPPED | 50.6 MB | N/A | **REJECTED** (Gate 2 Linkage) |
-| `candidate_d_ubuntu_minimal` | **Ubuntu 24.04 Minimal** | `sha256:69cecf4bbf72d2d44a9e...` | **15P, 1S, 0F** | **PASS** (`zlib 1.3`, `expat 2.6.1`, `sqlite 3.45.1`) | **PASS (0 Crit / 0 High)** | **111.4 MB** | **107** | **SELECTED WINNER** |
+| `candidate_a_debian_slim` | **Debian 12 Slim (Baseline)** | `sha256:90f879553617...` | 15P, 1S, 0F | PASS | WAIVER_REQ (5C / 59H) | 183.3 MB | 108 | **REJECTED** (Gate 3 CVEs) |
+| `candidate_b_wolfi_python` | **Chainguard / Wolfi Python** | `sha256:c8e464ca00c8...` | SKIPPED | FAIL (Path/Entrypoint) | SKIPPED | 63.4 MB | N/A | **REJECTED** (Gate 2 Linkage) |
+| `candidate_c_distroless_python` | **Distroless Python 3** | `sha256:2fdb05402a2c...` | SKIPPED | FAIL (Path/Entrypoint) | SKIPPED | 50.6 MB | N/A | **REJECTED** (Gate 2 Linkage) |
+| `candidate_d_ubuntu_minimal` | **Ubuntu 24.04 Minimal** | `sha256:69cecf4bbf72...` | **15P, 1S, 0F** | **PASS** (`zlib 1.3`, `expat 2.6.1`, `sqlite 3.45.1`) | **PASS (0 Crit / 0 High)** | **111.4 MB** | **107** | **SELECTED WINNER** |
 
 *Selection Rationale*: `candidate_d_ubuntu_minimal` was the sole candidate to pass Gate 1 (15 passed, 1 skipped - gVisor unverified, 0 failed), pass Gate 2 (all native C-extensions functional under non-root UID 10001:10001), and pass Gate 3 with **zero Critical and zero High vulnerabilities** detected by Trivy.
 

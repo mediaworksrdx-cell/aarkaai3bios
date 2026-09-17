@@ -31,7 +31,7 @@ Server:
   Network: bridge host ipvlan macvlan null overlay
   Log: awslogs fluentd gcplogs gelf journald json-file local splunk syslog
  Swarm: inactive
- Runtimes: runc io.containerd.runc.v2
+ Runtimes: io.containerd.runc.v2 runc
  Default Runtime: runc
  Init Binary: docker-init
  containerd version: db8809540e1a7a9da5d518876894933ff55692ab
