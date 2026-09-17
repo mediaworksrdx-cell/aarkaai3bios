@@ -1,7 +1,7 @@
 # Stage 1 Container Sandbox — Remediation & Validation Record
 
-**Document Version**: 2.2  
-**Target Milestone**: Stage 1 Controlled Staging Gating (Formally Approved Remediation Record)  
+**Document Version**: 2.3  
+**Target Milestone**: Stage 1 Controlled Staging Gating & Production Prerequisites  
 **Branch**: `remediation/cve-hardened-sandbox`  
 **Latest Authoritative CI Run**: Run ID `35182723998` (Commit `67baa3b`)  
 **Governance Scope**: Controlled Staging Only (**NOT General Production**)  
@@ -107,3 +107,21 @@ The following controls are verified across all qualifying candidates:
 
 Controlled staging activation is **APPROVED** with strict sequential enablement (`CODE_MODE_ENABLED=True`, then conditional `MCP_ENABLED=True`) under continuous `--network=none` and dropped capability confinement. General production release remains strictly **NOT APPROVED**.
 
+---
+
+## 6. General Production Readiness Gating Criteria (Strict Freeze)
+
+General production release is strictly blocked until ALL of the following five mandatory prerequisites are satisfied:
+
+1. **Extended Staging Validation**: Staging environment passes extended soaking with realistic production loads, concurrent users, simulated failure recovery, watchdog timeouts, storage/inode quotas, process cleanup, and adversarial MCP abuse scenarios.
+2. **Zero Unresolved Defects**: Zero unresolved security vulnerabilities (Critical, High, or unmitigated Medium) and zero unresolved reliability or memory leakage defects.
+3. **Operational Readiness**: Production-specific telemetry, continuous monitoring, latency/error alerting, tamper-evident audit logging, sliding-window rate limiting, and automated rollback runbooks are fully operational.
+4. **Independent Production Sign-Off**: Explicit, formal production sign-offs from Security, Infrastructure/SRE, and Product leadership—recorded independently of and subsequent to controlled-staging approvals.
+5. **Canary Release Success**: A gradual multi-stage canary rollout completes with zero security violations, zero cross-tenant data leaks, and strict stability metrics.
+
+Until all five prerequisites are satisfied and independently validated, the platform operates strictly under:
+```python
+CODE_MODE_ENABLED = True
+MCP_ENABLED = True
+IS_PRODUCTION = False
+```
