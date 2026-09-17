@@ -1351,6 +1351,11 @@ def generate_raw(prompt, max_new_tokens=300, stop=None):
                 for stop_word in stop:
                     if stop_word in generated_text:
                         idx = generated_text.index(stop_word)
+                        # Avoid premature cutoff on markdown divider '---'
+                        if stop_word == "---":
+                            if "\n---" in generated_text and idx > 15:
+                                return generated_text[:idx].strip()
+                            continue
                         return generated_text[:idx].strip()
                 
                 # Auto-stop after Action Input line is completed to prevent hallucination
@@ -1375,7 +1380,25 @@ def generate_raw(prompt, max_new_tokens=300, stop=None):
                     break
     result = generated_text.strip()
     if not result:
-        logger.warning("generate_raw: model returned empty output -- possible KV cache overflow (max_tokens=%d, prompt_len=%d). Returning stub.", max_tokens, prompt_len)
+        logger.warning("generate_raw: model returned empty output -- possible KV cache overflow (max_tokens=%d, prompt_len=%d). Falling back to Google Gemini...", max_tokens, prompt_len)
+        try:
+            from modules.external_agents import _get_genai_client
+            from google.genai import types
+            client = _get_genai_client()
+            if client:
+                fb_resp = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.2,
+                        max_output_tokens=max_new_tokens or 2048,
+                    )
+                )
+                if fb_resp and fb_resp.text:
+                    logger.info("generate_raw successfully generated response via Gemini Flash fallback.")
+                    return fb_resp.text.strip()
+        except Exception as fb_err:
+            logger.error("generate_raw Gemini fallback failed: %s", fb_err)
         return "I was unable to generate a response. Please try rephrasing your query."
     return result
 

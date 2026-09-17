@@ -278,3 +278,54 @@ def test_interactive_approval_gate_flow(mock_registry, tmp_path):
     assert emitted_events[0]["type"] == "approval_request"
     assert emitted_events[0]["payload"]["tool_name"] == "BashTool"
 
+
+def test_coordinator_rejection_stops_execution_without_proceeding(monkeypatch):
+    """Verify coordinator terminates immediately upon rejection and does not pretend work was done."""
+    import threading
+    from modules import coordinator, aarkaa_engine
+    from modules.approval_store import get_approval_store
+
+    store = get_approval_store()
+
+    # Mock aarkaa_engine.generate_raw to emit a FileEditTool call
+    step = 0
+    def mock_generate_raw(*args, **kwargs):
+        nonlocal step
+        step += 1
+        return 'Thought: I need to edit the file.\nAction: FileEditTool\nAction Input: {"path": "test_script.py", "content": "print(1)"}'
+
+    monkeypatch.setattr(aarkaa_engine, "generate_raw", mock_generate_raw)
+
+    events = []
+    def auto_reject_worker():
+        import time
+        for _ in range(500):
+            time.sleep(0.02)
+            for ev_type, ev_data in list(events):
+                if ev_type == "approval_request":
+                    appr_id = ev_data["approval_id"]
+                    store.resolve_request(appr_id, "u_test", "REJECTED")
+                    return
+
+    t = threading.Thread(target=auto_reject_worker)
+    t.start()
+
+    for ev_type, ev_data in coordinator.stream_task("Write a script", user_id="u_test", session_id="s_test"):
+        events.append((ev_type, ev_data))
+
+    t.join()
+
+    event_types = [e[0] for e in events]
+    assert "approval_request" in event_types
+    assert "approval_resolved" in event_types
+
+    # Find final answer
+    final_events = [e[1] for e in events if e[0] == "final"]
+    assert len(final_events) == 1
+    final_text = final_events[0]
+    assert "Operation cancelled" in final_text
+    assert "was not approved" in final_text
+    assert "I already wrote this file" not in final_text
+    assert "I will now run it using BashTool" not in final_text
+
+

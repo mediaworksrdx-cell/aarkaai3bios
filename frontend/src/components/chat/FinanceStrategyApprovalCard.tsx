@@ -45,7 +45,9 @@ export function FinanceStrategyApprovalCard({
 
   const [status, setStatus] = useState<ApprovalStatus>(request.status || 'pending');
   const [remainingSeconds, setRemainingSeconds] = useState<number>(() => {
-    const elapsed = Math.floor((Date.now() - request.created_at) / 1000);
+    const rawCreatedAt = request.created_at || Date.now();
+    const createdAtMs = rawCreatedAt < 1e11 ? rawCreatedAt * 1000 : rawCreatedAt;
+    const elapsed = Math.floor((Date.now() - createdAtMs) / 1000);
     return Math.max(0, (request.timeout_seconds || 120) - elapsed);
   });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);

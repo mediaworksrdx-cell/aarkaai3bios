@@ -83,7 +83,14 @@ class ToolApprovalRecord:
     resolved_by: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        if d.get("created_at") and d["created_at"] < 1e11:
+            d["created_at"] = int(d["created_at"] * 1000)
+        if d.get("expires_at") and d["expires_at"] < 1e11:
+            d["expires_at"] = int(d["expires_at"] * 1000)
+        if d.get("resolved_at") and d["resolved_at"] < 1e11:
+            d["resolved_at"] = int(d["resolved_at"] * 1000)
+        return d
 
 
 @dataclass
