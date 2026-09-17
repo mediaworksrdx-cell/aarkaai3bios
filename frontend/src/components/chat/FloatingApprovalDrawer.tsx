@@ -116,6 +116,7 @@ export function FloatingApprovalDrawer({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedHash, setCopiedHash] = useState<boolean>(false);
+  const [isDismissed, setIsDismissed] = useState<boolean>(false);
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [isCustomizeOpen, setIsCustomizeOpen] = useState<boolean>(false);
   const [customArgsText, setCustomArgsText] = useState<string>(() => {
@@ -205,16 +206,16 @@ export function FloatingApprovalDrawer({
 
     try {
       const chosenStrategy = isFinanceStrategy ? selectedCandidateId : undefined;
-      await effectiveResolve(request.approval_id, decision, rejectionReason || undefined, chosenStrategy);
       setStatus(decision === 'approve' ? 'approved' : 'rejected');
-      if (decision === 'approve') {
-        setTimeout(() => {
-          effectiveDismiss();
-        }, 1200);
-      }
+      await effectiveResolve(request.approval_id, decision, rejectionReason || undefined, chosenStrategy);
+      setTimeout(() => {
+        setIsDismissed(true);
+        effectiveDismiss();
+      }, 350);
     } catch (err: any) {
       setErrorMessage(err?.message || 'Failed to submit approval decision. Please retry.');
       setIsSubmitting(false);
+      setStatus('pending');
     }
   };
 
@@ -236,8 +237,43 @@ export function FloatingApprovalDrawer({
   const isUrgent = remainingSeconds <= 20 && remainingSeconds > 0;
   const gateShortId = (request.approval_id || '').slice(-6).toUpperCase();
 
-  // If already resolved and dismissed, return null
-  if (status !== 'pending' && !isSubmitting && remainingSeconds <= 0) {
+  if (isDismissed) {
+    return null;
+  }
+
+  // Quick feedback confirmation pill upon approval
+  if (status === 'approved') {
+    return (
+      <div
+        className={`w-full max-w-4xl mx-auto px-2 sm:px-4 mb-2 z-40 transition-all duration-300 ${className}`}
+        data-testid="floating-approval-drawer"
+      >
+        <div className="flex items-center justify-between px-4 py-2.5 rounded-xl border border-emerald-500/40 bg-emerald-950/80 backdrop-blur-xl shadow-lg shadow-emerald-950/40 text-emerald-400 text-xs font-mono animate-in fade-in">
+          <span className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 animate-pulse" />
+            <span>Authorized <strong>{request.tool_name}</strong>. Executing in workspace...</span>
+          </span>
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+        </div>
+      </div>
+    );
+  }
+
+  if (status === 'rejected') {
+    return (
+      <div
+        className={`w-full max-w-4xl mx-auto px-2 sm:px-4 mb-2 z-40 transition-all duration-300 ${className}`}
+        data-testid="floating-approval-drawer"
+      >
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-red-500/40 bg-red-950/80 backdrop-blur-xl shadow-lg text-red-400 text-xs font-mono animate-in fade-in">
+          <ShieldX className="w-4 h-4 text-red-400" />
+          <span>Execution denied by operator.</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (status !== 'pending' && !isSubmitting) {
     return null;
   }
 
@@ -296,30 +332,17 @@ export function FloatingApprovalDrawer({
 
           {/* Right Header: Timer & Collapse */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {status === 'pending' ? (
-              <div
-                className={`flex items-center gap-1 text-xs font-mono px-2 py-1 rounded-md border ${
-                  isUrgent
-                    ? 'bg-red-500/10 border-red-500/40 text-red-400 animate-pulse'
-                    : 'bg-[var(--bg-primary)] border-[var(--border)] text-[var(--text-secondary)]'
-                }`}
-                title="Auto-timeout countdown"
-              >
-                <Clock className="w-3.5 h-3.5" />
-                <span>{remainingSeconds}s</span>
-              </div>
-            ) : (
-              <div
-                className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md border ${
-                  status === 'approved'
-                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-                    : 'bg-red-500/15 border-red-500/30 text-red-400'
-                }`}
-              >
-                {status === 'approved' ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
-                <span className="capitalize">{status}</span>
-              </div>
-            )}
+            <div
+              className={`flex items-center gap-1 text-xs font-mono px-2 py-1 rounded-md border ${
+                isUrgent
+                  ? 'bg-red-500/10 border-red-500/40 text-red-400 animate-pulse'
+                  : 'bg-[var(--bg-primary)] border-[var(--border)] text-[var(--text-secondary)]'
+              }`}
+              title="Auto-timeout countdown"
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>{remainingSeconds}s</span>
+            </div>
 
             {/* Collapse/Expand Toggle */}
             <button

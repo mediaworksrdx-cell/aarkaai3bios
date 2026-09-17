@@ -305,8 +305,8 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
                 {message.content && (
                   <MarkdownRenderer
                     content={
-                      message.approvalRequest && message.approvalRequest.status === 'pending'
-                        ? message.content.replace(/^(Thought:\s*|I already wrote this file.*)/gim, '').trim()
+                      message.approvalRequest
+                        ? message.content.replace(/(?:^|\n)This action requires your authorization before modifying the workspace:?\s*/gi, '').replace(/^(Thought:\s*|I already wrote this file.*)/gim, '').trim()
                         : message.content
                     }
                     isStreaming={isMessageStreaming}
@@ -318,11 +318,48 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
                 )}
 
                 {message.approvalRequest && (
-                  message.approvalRequest.tool_name === 'FinanceStrategyMasterSelection' ? (
-                    <FinanceStrategyApprovalCard request={message.approvalRequest} onResolve={resolveApproval} />
-                  ) : (
-                    <ToolApprovalCard request={message.approvalRequest} onResolve={resolveApproval} />
-                  )
+                  <div className="my-2.5 flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[var(--bg-tertiary)]/70 border border-[var(--border)] text-xs text-[var(--text-secondary)] font-mono">
+                    {message.approvalRequest.status === 'approved' ? (
+                      <>
+                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400">
+                          <Check className="w-3 h-3 stroke-[2.5]" />
+                        </span>
+                        <span className="text-[var(--text-primary)] font-semibold">
+                          Authorized: {message.approvalRequest.tool_name}
+                        </span>
+                        <span className="text-[var(--text-tertiary)] text-[11px] truncate">
+                          ({message.approvalRequest.human_summary || message.approvalRequest.description})
+                        </span>
+                      </>
+                    ) : message.approvalRequest.status === 'rejected' ? (
+                      <>
+                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-red-500/20 text-red-400">
+                          <AlertCircle className="w-3 h-3" />
+                        </span>
+                        <span className="text-[var(--text-primary)] font-semibold">
+                          Denied: {message.approvalRequest.tool_name}
+                        </span>
+                        {message.approvalRequest.rejection_reason && (
+                          <span className="text-red-400/80 text-[11px] truncate">
+                            ({message.approvalRequest.rejection_reason})
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <span className="relative flex h-2 w-2 mr-0.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                        </span>
+                        <span className="text-[var(--text-primary)] font-medium">
+                          Awaiting authorization for <code className="text-amber-400 font-bold">{message.approvalRequest.tool_name}</code>
+                        </span>
+                        <span className="text-[var(--text-tertiary)] text-[11px] hidden sm:inline">
+                          — See action tray below
+                        </span>
+                      </>
+                    )}
+                  </div>
                 )}
 
                 {isMessageStreaming && !message.content && !message.codeModeExecution && !message.approvalRequest && (

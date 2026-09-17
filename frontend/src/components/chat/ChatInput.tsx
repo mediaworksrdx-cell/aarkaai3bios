@@ -213,11 +213,11 @@ export function ChatInput({
               }
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Ask Aarka anything... (Enter to send, Shift+Enter for new line)"
-            disabled={isStreaming}
+            placeholder={isStreaming ? "Type your next message or instructions..." : "Ask Aarka anything... (Enter to send, Shift+Enter for new line)"}
+            disabled={false}
             rows={1}
             style={{ overflowY: 'hidden' }}
-            className="w-full max-h-[220px] min-h-[48px] bg-transparent text-[var(--text-primary)] placeholder-[var(--text-tertiary)] resize-none outline-none py-2 px-2 text-sm sm:text-base leading-relaxed disabled:opacity-50 overflow-y-hidden scrollbar-none"
+            className="w-full max-h-[220px] min-h-[48px] bg-transparent text-[var(--text-primary)] placeholder-[var(--text-tertiary)] resize-none outline-none py-2 px-2 text-sm sm:text-base leading-relaxed overflow-y-hidden scrollbar-none"
           />
 
           {/* Bottom Toolbar */}
