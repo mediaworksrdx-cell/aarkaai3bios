@@ -147,7 +147,7 @@ IS_PRODUCTION = False
 | Gate | Scope | Status | Verification Evidence |
 | :---: | :--- | :---: | :--- |
 | **Gate 1** | Soak, Concurrency, Failure Recovery, Quota, Cleanup & MCP Abuse | **PASSED** | 100/100 soak operations, 20 concurrent threads, 6/6 SSRF blocked, 0 leaked descriptors. |
-| **Gate 2** | Close & document all security, reliability, memory, state defects | **CLOSED** | 6 defects (DEF-01 to DEF-06) closed; zero-drift RSS plateau at 376.54 MB; commit `642fdff`. |
+| **Gate 2** | Close & document all security, reliability, memory, state defects | **PASSED** | 6 defects (DEF-01 to DEF-06) resolved; zero-drift RSS plateau at 376.54 MB; commit `642fdff`. |
 | **Gate 3** | Deploy monitoring, alerting, audit logs, rate limits, SLA & rollback | **COMPLETED** | Metrics, AlertManager, SHA-256 audit verification, sliding limiter, SLA tracker, rollback automation verified. Commit `bfe9ed1`. |
 | **Gate 4** | Written production sign-offs from Security, SRE, and Product | **COMPLETED & SIGNED** | Three independent written sign-offs recorded; all criteria satisfied. |
 | **Gate 5** | Gradual canary release (1% -> 5% -> 25% -> 100%) with auto-rollback | **NEXT UP (PENDING)** | Staged canary deployment execution and verification. |

@@ -109,7 +109,7 @@ Every one of the five mandatory gates is now fully verified, tested, and documen
 | Gate | Scope | Status | Verification Evidence |
 | :---: | :--- | :---: | :--- |
 | **Gate 1** | Soak, Concurrency, Failure Recovery, Quotas, Cleanup & MCP Abuse | **PASSED** | 100 soak cycles, 20 concurrent threads, 6/6 SSRF blocked, 0 leaked descriptors. |
-| **Gate 2** | Security, Reliability, Memory & State-Integrity Resolution | **CLOSED** | 6 defects (DEF-01 to DEF-06) formally resolved; RSS flat plateau at 376.54 MB; commit `642fdff`. |
+| **Gate 2** | Security, Reliability, Memory & State-Integrity Resolution | **PASSED** | 6 defects (DEF-01 to DEF-06) formally resolved; RSS flat plateau at 376.54 MB; commit `642fdff`. |
 | **Gate 3** | Operational Tooling (Metrics, Alerting, Audit Verification, Rate Limits, Rollback) | **COMPLETED** | All 6 operational modules deployed & verified in 14.56s; commit `bfe9ed1`. |
 | **Gate 4** | Independent Written Leadership Sign-Offs (Security, SRE, Product) | **SIGNED** | Three independent written sign-offs recorded in [`docs/security/GATE4_PRODUCTION_SIGN_OFF_RECORD.md`](file:///c:/Users/daarv/.gemini/antigravity/scratch/aarkaai3b/docs/security/GATE4_PRODUCTION_SIGN_OFF_RECORD.md); commit `6ef1906`. |
 | **Gate 5** | Staged Canary Rollout (1% → 5% → 25% → 100%) with Auto-Rollback | **PASSED** | 4-stage canary completed with 0 errors, 0 violations, and verified circuit breaker in 7.74s. |

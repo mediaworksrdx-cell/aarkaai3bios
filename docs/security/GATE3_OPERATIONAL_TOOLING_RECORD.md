@@ -160,7 +160,7 @@ tests\test_mcp_client.py ..........                                      [100%]
 | Gate | Scope | Status | Verification Evidence |
 | :---: | :--- | :---: | :--- |
 | **Gate 1** | Soak, Concurrency, Failure Recovery, Quota, Cleanup & MCP Abuse | **PASSED** | 100/100 soak operations, 20 concurrent threads, 6/6 SSRF blocked, 0 leaked descriptors. |
-| **Gate 2** | Close & document all security, reliability, memory, state defects | **CLOSED** | 6 defects (DEF-01 to DEF-06) closed; zero-drift RSS plateau at 376.54 MB; commit `642fdff`. |
+| **Gate 2** | Close & document all security, reliability, memory, state defects | **PASSED** | 6 defects (DEF-01 to DEF-06) resolved; zero-drift RSS plateau at 376.54 MB; commit `642fdff`. |
 | **Gate 3** | Deploy monitoring, alerting, audit logs, rate limits, SLA & rollback | **COMPLETED** | Metrics, AlertManager, SHA-256 audit verification, sliding limiter, SLA tracker, rollback automation verified. |
 | **Gate 4** | Written production sign-offs from Security, SRE, and Product | **PENDING** | Requires independent sign-offs from Lead Security Architect, Infrastructure/SRE Lead, and Product Owner. |
 | **Gate 5** | Gradual canary release (1% -> 5% -> 25% -> 100%) with auto-rollback | **PENDING** | Awaiting Gate 4 sign-offs. |
