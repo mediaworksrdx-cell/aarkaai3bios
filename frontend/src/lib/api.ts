@@ -1,4 +1,4 @@
-import { StreamChunk, EffortLevel } from '@/types';
+import { StreamChunk, EffortLevel, ToolApprovalRequest, McpServerInfo } from '@/types';
 
 const API_BASE = '/api';
 
@@ -135,6 +135,9 @@ export async function* streamChat(
           if (dataStr === '[DONE]') continue;
           try {
             const parsed: StreamChunk = JSON.parse(dataStr);
+            if (!parsed.type && (parsed as any).event_type) {
+              parsed.type = (parsed as any).event_type;
+            }
             yield parsed;
           } catch (err) {
             console.warn('Non-JSON SSE chunk received:', dataStr);
@@ -836,6 +839,88 @@ export async function updateSettingsApi(settings: Record<string, any>): Promise<
   if (!res.ok) {
     const errorBody = await res.text().catch(() => 'Unknown error');
     throw new Error(`Failed to save settings (${res.status}): ${errorBody}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Submit interactive approval or rejection decision for a pending tool mutation
+ */
+export async function submitToolApproval(
+  approvalId: string,
+  decision: 'approve' | 'deny',
+  reason?: string
+): Promise<{ status: string; approval_id: string; resolution: string; message?: string }> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...getAuthHeaders(),
+  };
+
+  const res = await fetch('/codemode/approve', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      approval_id: approvalId,
+      decision,
+      reason,
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new Error(`Approval submission failed (${res.status}): ${errText}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Fetch connected MCP servers, tool manifests, permissions, and status
+ */
+export async function fetchMcpServers(): Promise<{ status: string; servers: McpServerInfo[] }> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...getAuthHeaders(),
+  };
+
+  const res = await fetch('/mcp/servers', {
+    method: 'GET',
+    headers,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new Error(`Failed to fetch MCP servers (${res.status}): ${errText}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Toggle an MCP server (enable/disable) with active execution lock protection
+ */
+export async function toggleMcpServer(
+  serverId: string,
+  enabled: boolean
+): Promise<{ status: string; server: McpServerInfo }> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...getAuthHeaders(),
+  };
+
+  const res = await fetch('/mcp/toggle', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      server_id: serverId,
+      enabled,
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new Error(`Failed to toggle MCP server (${res.status}): ${errText}`);
   }
 
   return res.json();

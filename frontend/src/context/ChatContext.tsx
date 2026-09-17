@@ -1,8 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { Conversation, Message, EffortLevel } from '@/types';
-import { streamChat, submitFeedbackApi } from '@/lib/api';
+import { Conversation, Message, EffortLevel, ToolApprovalRequest, CodeModeExecution, CodeModeExecutionStep } from '@/types';
+import { streamChat, submitFeedbackApi, submitToolApproval } from '@/lib/api';
 
 const STORAGE_KEY = 'aarka-conversations-v3';
 const SESSION_ACTIVE_KEY = 'aarka-active-conv-id';
@@ -48,6 +48,7 @@ interface ChatContextType {
   sendMessage: (content: string, model?: string, effort?: EffortLevel) => Promise<void>;
   regenerateResponse: (assistantMessageId: string) => Promise<void>;
   submitFeedback: (messageId: string, rating: 1 | -1, correction?: string) => Promise<void>;
+  resolveApproval: (approvalId: string, decision: 'approve' | 'deny', reason?: string) => Promise<void>;
   stopGeneration: () => void;
   clearError: () => void;
   clearAllHistory: () => void;
@@ -402,6 +403,84 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
                 return c;
               })
             );
+          } else if (chunk.type === 'approval_request') {
+            const approvalReq: ToolApprovalRequest = chunk.payload || chunk;
+            setConversations(prev =>
+              prev.map(c => {
+                if (c.id === convId) {
+                  const msgs = c.messages.map(m =>
+                    m.id === assistantMsgId ? { ...m, approvalRequest: approvalReq } : m
+                  );
+                  return { ...c, messages: msgs };
+                }
+                return c;
+              })
+            );
+          } else if (chunk.type === 'approval_resolved') {
+            const resolved = chunk.payload || chunk;
+            setConversations(prev =>
+              prev.map(c => {
+                if (c.id === convId) {
+                  const msgs = c.messages.map(m => {
+                    if (m.id === assistantMsgId && m.approvalRequest) {
+                      return {
+                        ...m,
+                        approvalRequest: {
+                          ...m.approvalRequest,
+                          status: resolved.status || (resolved.decision === 'approve' ? 'approved' : 'rejected'),
+                          resolved_at: resolved.resolved_at || Date.now(),
+                          resolved_by: resolved.resolved_by,
+                        },
+                      };
+                    }
+                    return m;
+                  });
+                  return { ...c, messages: msgs };
+                }
+                return c;
+              })
+            );
+          } else if (chunk.type === 'codemode_execution') {
+            const execution: CodeModeExecution = chunk.payload || chunk;
+            setConversations(prev =>
+              prev.map(c => {
+                if (c.id === convId) {
+                  const msgs = c.messages.map(m =>
+                    m.id === assistantMsgId ? { ...m, codeModeExecution: execution } : m
+                  );
+                  return { ...c, messages: msgs };
+                }
+                return c;
+              })
+            );
+          } else if (chunk.type === 'codemode_step') {
+            const step: CodeModeExecutionStep = chunk.payload || chunk;
+            setConversations(prev =>
+              prev.map(c => {
+                if (c.id === convId) {
+                  const msgs = c.messages.map(m => {
+                    if (m.id === assistantMsgId && m.codeModeExecution) {
+                      const existingSteps = m.codeModeExecution.steps || [];
+                      const stepIdx = existingSteps.findIndex(s => s.step_id === step.step_id);
+                      let newSteps;
+                      if (stepIdx >= 0) {
+                        newSteps = [...existingSteps];
+                        newSteps[stepIdx] = { ...newSteps[stepIdx], ...step };
+                      } else {
+                        newSteps = [...existingSteps, step];
+                      }
+                      return {
+                        ...m,
+                        codeModeExecution: { ...m.codeModeExecution, steps: newSteps },
+                      };
+                    }
+                    return m;
+                  });
+                  return { ...c, messages: msgs };
+                }
+                return c;
+              })
+            );
           } else if (chunk.type === 'final' || chunk.type === 'final_response') {
             if (chunk.content) accumulated = chunk.content;
             if (chunk.response) accumulated = chunk.response;
@@ -489,6 +568,32 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
       await submitFeedbackApi(rating, activeConversationId, correction);
     },
     [activeConversationId]
+  );
+
+  const resolveApproval = useCallback(
+    async (approvalId: string, decision: 'approve' | 'deny', reason?: string) => {
+      await submitToolApproval(approvalId, decision, reason);
+      setConversations(prev =>
+        prev.map(c => {
+          const msgs = c.messages.map(m => {
+            if (m.approvalRequest && m.approvalRequest.approval_id === approvalId) {
+              return {
+                ...m,
+                approvalRequest: {
+                  ...m.approvalRequest,
+                  status: decision === 'approve' ? ('approved' as const) : ('rejected' as const),
+                  resolved_at: Date.now(),
+                  rejection_reason: reason,
+                },
+              };
+            }
+            return m;
+          });
+          return { ...c, messages: msgs };
+        })
+      );
+    },
+    []
   );
 
   const regenerateResponse = useCallback(
@@ -582,6 +687,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
         sendMessage,
         regenerateResponse,
         submitFeedback,
+        resolveApproval,
         stopGeneration,
         clearError,
         clearAllHistory,
@@ -614,6 +720,7 @@ export function useChatContext(): ChatContextType {
       sendMessage: async () => {},
       regenerateResponse: async () => {},
       submitFeedback: async () => {},
+      resolveApproval: async () => {},
       stopGeneration: () => {},
       clearError: () => {},
       clearAllHistory: () => {},

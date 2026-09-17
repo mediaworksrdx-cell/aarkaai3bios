@@ -5,12 +5,20 @@ trust:
   default_timeout_seconds: 10.0
 
 servers:
-  # All servers disabled by default — user must explicitly enable
-  # filesystem:
-  #   transport: stdio
-  #   command: "npx @modelcontextprotocol/server-filesystem /workspace"
-  #   enabled: false
-  #   trust_level: workspace_read
-  #   allowed_tools: ["read_file", "list_directory"]
-  #   rate_limit_rpm: 60
-  #   timeout_seconds: 5.0
+  filesystem:
+    transport: stdio
+    command: "npx @modelcontextprotocol/server-filesystem /workspace"
+    enabled: false
+    trust_level: workspace_read
+    allowed_tools: ["read_file", "list_directory"]
+    rate_limit_rpm: 60
+    timeout_seconds: 5.0
+
+  postgres:
+    transport: stdio
+    command: "npx @modelcontextprotocol/server-postgres postgresql://localhost/aarkaai"
+    enabled: false
+    trust_level: read_only_query
+    allowed_tools: ["query", "describe_table"]
+    rate_limit_rpm: 30
+    timeout_seconds: 5.0

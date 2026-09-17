@@ -206,6 +206,68 @@ class CodeModeExecutor:
                 audit_event("approval.decided", tool=tool_name, outcome="rejected", reason=reason)
                 raise OperationNotPermittedError(f"CI approval token verification failed: {reason}")
 
+        # 3. Dynamic Human Approval Gate via ApprovalStore
+        if self.approval_context.get("interactive_approval", False):
+            from modules.approval_store import get_approval_store
+            store = get_approval_store()
+            user_id = self.approval_context.get("user_id", "default")
+            session_id = self.approval_context.get("session_id", "default")
+            workspace_id = self.approval_context.get("workspace_id", "default")
+            
+            cmd_preview = args.get("command", args.get("cmd", ""))
+            diff_preview = args.get("diff", args.get("content", ""))
+            target_res = args.get("path", args.get("target", ""))
+            
+            if tool_name == "BashTool":
+                summary = f"Execute shell command: {cmd_preview[:80]}"
+            elif tool_name == "FileEditTool":
+                summary = f"Modify file: {target_res}"
+            elif tool_name == "DeployTool":
+                summary = f"Deploy application to: {target_res}"
+            else:
+                summary = f"Execute mutating tool: {tool_name}"
+
+            risk = "CRITICAL" if tool_name in ["DeployTool", "DeleteSkillTool"] else "HIGH"
+
+            record = store.create_request(
+                user_id=user_id,
+                session_id=session_id,
+                tool_name=tool_name,
+                args=args,
+                risk_level=risk,
+                human_summary=summary,
+                workspace_id=workspace_id,
+                target_resource=target_res,
+                diff_preview=diff_preview if diff_preview else None,
+                command_preview=cmd_preview if cmd_preview else None,
+                timeout_seconds=float(self.approval_context.get("approval_timeout", 60.0))
+            )
+
+            # Emit event to client if event emitter callback is present
+            emitter = self.approval_context.get("event_emitter")
+            if callable(emitter):
+                try:
+                    emitter({
+                        "type": "approval_request",
+                        "payload": record.to_dict()
+                    })
+                except Exception as emit_err:
+                    logger.warning("Failed emitting approval_request event: %s", emit_err)
+
+            # Await resolution
+            approved, resolution_reason = store.await_resolution(
+                approval_id=record.approval_id,
+                expected_action_hash=record.action_hash,
+                timeout_seconds=float(self.approval_context.get("approval_timeout", 60.0))
+            )
+
+            if approved:
+                audit_event("approval.decided", tool=tool_name, outcome="approved", type="human_ui", approval_id=record.approval_id)
+                return
+            else:
+                audit_event("approval.decided", tool=tool_name, outcome="rejected", reason=resolution_reason, approval_id=record.approval_id)
+                raise OperationNotPermittedError(f"Mutating tool '{tool_name}' was not approved: {resolution_reason}")
+
         audit_event("operation.denied", tool=tool_name, reason="missing_operator_approval")
         raise OperationNotPermittedError(
             f"Mutating tool '{tool_name}' requires explicit operator confirmation or valid CI token."

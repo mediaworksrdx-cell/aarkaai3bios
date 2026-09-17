@@ -21,6 +21,8 @@ import remarkGfm from 'remark-gfm';
 import { MODEL_OPTIONS } from '@/styles/theme';
 import { useChatContext } from '@/context/ChatContext';
 import { exportToPdf, exportToWord, exportToMarkdown, PdfTemplateId } from '@/lib/api';
+import { ToolApprovalCard } from './ToolApprovalCard';
+import { CodeModeSandboxCard } from './CodeModeSandboxCard';
 
 interface MessageBubbleProps {
   message: Message;
@@ -142,7 +144,7 @@ function MarkdownRenderer({ content, className = '', isStreaming = false }: { co
 }
 
 export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
-  const { regenerateResponse, submitFeedback, isStreaming } = useChatContext();
+  const { regenerateResponse, submitFeedback, isStreaming, resolveApproval } = useChatContext();
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(message.feedback || null);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -295,7 +297,15 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
               <div className="min-w-0 text-sm sm:text-[0.95rem]">
                 <MarkdownRenderer content={message.content} isStreaming={isMessageStreaming} />
 
-                {isMessageStreaming && !message.content && (
+                {message.codeModeExecution && (
+                  <CodeModeSandboxCard execution={message.codeModeExecution} />
+                )}
+
+                {message.approvalRequest && (
+                  <ToolApprovalCard request={message.approvalRequest} onResolve={resolveApproval} />
+                )}
+
+                {isMessageStreaming && !message.content && !message.codeModeExecution && !message.approvalRequest && (
                   <div className="flex items-center gap-1.5 py-2">
                     <span className="w-2 h-2 rounded-full bg-[var(--accent-primary)] pulsing-dot" style={{ animationDelay: '0ms' }} />
                     <span className="w-2 h-2 rounded-full bg-[var(--accent-primary)] pulsing-dot" style={{ animationDelay: '200ms' }} />

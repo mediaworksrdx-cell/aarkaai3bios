@@ -13,9 +13,11 @@ import {
   Bell,
   CheckCircle2,
   Sun,
+  Server,
 } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
 import { fetchSettingsApi, updateSettingsApi } from '@/lib/api';
+import { McpSettingsTab } from './McpSettingsTab';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -27,6 +29,7 @@ type TabId =
   | 'general'
   | 'chat'
   | 'models'
+  | 'mcp'
   | 'web'
   | 'security'
   | 'notifications';
@@ -35,6 +38,7 @@ const SETTINGS_TABS: { id: TabId; label: string; icon: React.ComponentType<{ cla
   { id: 'general', label: 'General', icon: Sliders },
   { id: 'chat', label: 'Chat & Conversation', icon: MessageSquare },
   { id: 'models', label: 'Models & Reasoning', icon: Cpu },
+  { id: 'mcp', label: 'MCP Servers', icon: Server },
   { id: 'web', label: 'Web & Research', icon: Globe },
   { id: 'security', label: 'Security', icon: Shield },
   { id: 'notifications', label: 'Notifications', icon: Bell },
@@ -465,6 +469,9 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
                 </div>
               </div>
             )}
+
+            {/* MCP MANAGEMENT TAB */}
+            {activeTab === 'mcp' && <McpSettingsTab />}
 
             {/* 4. WEB & RESEARCH TAB */}
             {activeTab === 'web' && (

@@ -10,6 +10,9 @@ export interface Message {
   isStreaming?: boolean;
   error?: string;
   feedback?: 'up' | 'down';
+  approvalRequest?: ToolApprovalRequest;
+  codeModeExecution?: CodeModeExecution;
+  mcpEvents?: McpEvent[];
 }
 
 export interface Conversation {
@@ -53,3 +56,127 @@ export interface User {
   name: string;
   picture?: string;
 }
+
+// ==========================================
+// AARKAAI Approval Gates & Risk Levels
+// ==========================================
+
+export type RiskLevel = 'read_only' | 'low' | 'medium' | 'high' | 'critical';
+
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'timeout' | 'expired';
+
+export interface ToolApprovalRequest {
+  approval_id: string;
+  tool_name: string;
+  arguments: Record<string, any>;
+  mutation_risk: RiskLevel;
+  action_hash: string;
+  description: string;
+  timeout_seconds: number;
+  created_at: number;
+  status: ApprovalStatus;
+  resolved_by?: string;
+  resolved_at?: number;
+  rejection_reason?: string;
+}
+
+export interface ToolApprovalDecision {
+  decision: 'approve' | 'deny';
+  reason?: string;
+}
+
+// ==========================================
+// CodeMode Sandbox Execution
+// ==========================================
+
+export interface CodeModeExecutionStep {
+  step_id: string;
+  tool_name: string;
+  arguments?: Record<string, any>;
+  status: 'running' | 'completed' | 'failed' | 'blocked';
+  duration_ms?: number;
+  output?: string;
+  error?: string;
+}
+
+export interface CodeModeSecurityBoundaries {
+  network_access: boolean;
+  file_system_scope: string;
+  max_execution_time_sec: number;
+  mutation_allowed: boolean;
+}
+
+export interface CodeModeExecution {
+  execution_id: string;
+  script: string;
+  status: 'initializing' | 'running' | 'completed' | 'failed' | 'paused';
+  steps: CodeModeExecutionStep[];
+  console_output: string[];
+  security_boundaries: CodeModeSecurityBoundaries;
+  created_at: number;
+  completed_at?: number;
+}
+
+// ==========================================
+// Model Context Protocol (MCP) Management
+// ==========================================
+
+export interface McpToolPermissions {
+  network: boolean;
+  filesystem: boolean;
+  shell: boolean;
+  mutating: boolean;
+}
+
+export interface McpTool {
+  name: string;
+  description: string;
+  input_schema?: Record<string, any>;
+  mutation_risk: RiskLevel;
+  permissions: McpToolPermissions;
+  enabled: boolean;
+}
+
+export interface McpServerInfo {
+  id: string;
+  name: string;
+  description?: string;
+  transport: 'stdio' | 'sse' | 'websocket' | 'http';
+  status: 'connected' | 'disconnected' | 'error' | 'disabled';
+  enabled: boolean;
+  ping_ms?: number;
+  error_message?: string;
+  tools: McpTool[];
+  total_calls?: number;
+}
+
+export interface McpEvent {
+  event_type: 'call_start' | 'call_success' | 'call_error';
+  server_id: string;
+  tool_name: string;
+  timestamp: number;
+  duration_ms?: number;
+  arguments?: Record<string, any>;
+  error?: string;
+}
+
+// ==========================================
+// SSE Typed Stream Envelope
+// ==========================================
+
+export interface StreamEvent {
+  event_id: string;
+  sequence: number;
+  event_type:
+    | 'text_chunk'
+    | 'approval_request'
+    | 'approval_resolved'
+    | 'codemode_execution'
+    | 'codemode_step'
+    | 'mcp_event'
+    | 'final_response'
+    | 'error';
+  timestamp: number;
+  payload: any;
+}
+

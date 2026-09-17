@@ -1720,6 +1720,79 @@ async def get_screener_provenance(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ─── Code Mode & Human Approval Gates ─────────────────────────────────────────
+import pydantic
+
+class ApprovalActionRequest(pydantic.BaseModel):
+    approval_id: str
+    decision: str  # "APPROVED" | "REJECTED"
+
+
+@app.post("/codemode/approve", tags=["codemode"])
+async def codemode_approve(
+    req: ApprovalActionRequest,
+    current_user=fastapi.Depends(modules.auth.get_optional_user)
+):
+    """
+    Resolves an in-flight tool approval gate (Approve or Reject).
+    Atomic Compare-And-Swap resolution across multi-worker deployments.
+    """
+    from modules.approval_store import get_approval_store
+    store = get_approval_store()
+    user_id = getattr(current_user, "id", "default") if current_user else "default"
+    clean_decision = req.decision.upper()
+    if clean_decision in ("APPROVE", "APPROVED"):
+        normalized = "APPROVED"
+    elif clean_decision in ("DENY", "DENIED", "REJECT", "REJECTED"):
+        normalized = "REJECTED"
+    else:
+        normalized = req.decision
+    resp = store.resolve_request(req.approval_id, user_id=user_id, decision=normalized)
+    if resp.status == "unauthorized":
+        raise HTTPException(status_code=403, detail=resp.message)
+    if resp.status == "invalid":
+        raise HTTPException(status_code=400, detail=resp.message)
+    return {
+        "approval_id": resp.approval_id,
+        "status": resp.status,
+        "message": resp.message,
+        "action_hash": resp.action_hash
+    }
+
+
+# ─── Model Context Protocol (MCP) Management ──────────────────────────────────
+
+class McpToggleRequest(pydantic.BaseModel):
+    server_id: str
+    enabled: bool
+
+
+@app.get("/mcp/servers", tags=["mcp"])
+async def get_mcp_servers(
+    current_user=fastapi.Depends(modules.auth.get_optional_user)
+):
+    """Returns active MCP server registry, connection statuses, and tool permissions."""
+    from modules.mcp_client import get_mcp_client
+    client = get_mcp_client()
+    return {"servers": client.get_server_manifests()}
+
+
+@app.post("/mcp/toggle", tags=["mcp"])
+async def toggle_mcp_server(
+    req: McpToggleRequest,
+    current_user=fastapi.Depends(modules.auth.get_optional_user)
+):
+    """Dynamically enables or disables an MCP server with RBAC and active execution locks."""
+    from modules.mcp_client import get_mcp_client
+    client = get_mcp_client()
+    success, msg = client.toggle_server(req.server_id, req.enabled)
+    if not success:
+        if "active execution" in msg.lower():
+            raise HTTPException(status_code=409, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    return {"success": success, "message": msg, "server_id": req.server_id, "enabled": req.enabled}
+
+
 if __name__ == "__main__":
     import uvicorn
 

@@ -242,3 +242,39 @@ def test_safe_fallback_tools_containment():
 
     for mutating in MUTATING_TOOLS:
         assert mutating not in SAFE_FALLBACK_TOOLS
+
+
+def test_interactive_approval_gate_flow(mock_registry, tmp_path):
+    """Test interactive approval gate with ApprovalStore: approved vs rejected."""
+    import threading
+    from modules.approval_store import get_approval_store
+
+    store = get_approval_store()
+    emitted_events = []
+
+    def mock_emitter(event):
+        emitted_events.append(event)
+        # Automatically approve in background thread
+        appr_id = event["payload"]["approval_id"]
+        t = threading.Thread(target=lambda: store.resolve_request(appr_id, "test_user", "APPROVED"))
+        t.start()
+
+    executor = CodeModeExecutor(
+        tool_registry=mock_registry,
+        workspace_dir=str(tmp_path),
+        approval_context={
+            "interactive_approval": True,
+            "user_id": "test_user",
+            "session_id": "test_sess",
+            "approval_timeout": 5.0,
+            "event_emitter": mock_emitter
+        }
+    )
+
+    namespace = executor.build_tool_namespace(["BashTool"])
+    res = namespace["BashTool"](cmd="ls -la")
+    assert res == "Tool execution output"
+    assert len(emitted_events) == 1
+    assert emitted_events[0]["type"] == "approval_request"
+    assert emitted_events[0]["payload"]["tool_name"] == "BashTool"
+

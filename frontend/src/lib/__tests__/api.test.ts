@@ -5,6 +5,9 @@ import {
   clearToken,
   fetchVisitorToken,
   streamChat,
+  submitToolApproval,
+  fetchMcpServers,
+  toggleMcpServer,
 } from '../api';
 
 describe('Frontend Auth Token Persistence', () => {
@@ -112,3 +115,58 @@ describe('streamChat SSE Parser', () => {
     await expect(streamGen.next()).rejects.toThrow('Server returned status 500: Internal Server Error');
   });
 });
+
+describe('Tool Approval & MCP API Clients', () => {
+  beforeEach(() => {
+    storeToken('mock-auth-jwt');
+  });
+
+  it('submitToolApproval sends approval decision payload and returns response', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: 'ok', approval_id: 'appr-123', resolution: 'approve' }),
+    });
+
+    const res = await submitToolApproval('appr-123', 'approve');
+    expect(res.status).toBe('ok');
+    expect(res.resolution).toBe('approve');
+    expect(global.fetch).toHaveBeenCalledWith('/codemode/approve', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ approval_id: 'appr-123', decision: 'approve' }),
+    }));
+  });
+
+  it('fetchMcpServers retrieves servers manifest', async () => {
+    const mockManifest = { status: 'ok', servers: [{ id: 'filesystem', name: 'FS', enabled: true, tools: [] }] };
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockManifest,
+    });
+
+    const res = await fetchMcpServers();
+    expect(res.servers.length).toBe(1);
+    expect(res.servers[0].id).toBe('filesystem');
+    expect(global.fetch).toHaveBeenCalledWith('/mcp/servers', expect.objectContaining({
+      method: 'GET',
+    }));
+  });
+
+  it('toggleMcpServer sends toggle payload and returns updated server info', async () => {
+    const mockUpdated = { status: 'ok', server: { id: 'filesystem', enabled: false } };
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockUpdated,
+    });
+
+    const res = await toggleMcpServer('filesystem', false);
+    expect(res.server.enabled).toBe(false);
+    expect(global.fetch).toHaveBeenCalledWith('/mcp/toggle', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ server_id: 'filesystem', enabled: false }),
+    }));
+  });
+});
+

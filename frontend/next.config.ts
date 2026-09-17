@@ -65,6 +65,14 @@ const nextConfig: NextConfig = {
         destination: `${backendUrl}/screener/:path*`,
       },
       {
+        source: '/codemode/:path*',
+        destination: `${backendUrl}/codemode/:path*`,
+      },
+      {
+        source: '/mcp/:path*',
+        destination: `${backendUrl}/mcp/:path*`,
+      },
+      {
         source: '/screener',
         destination: `${backendUrl}/screener`,
       },
