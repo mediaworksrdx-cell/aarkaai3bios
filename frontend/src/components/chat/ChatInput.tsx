@@ -3,8 +3,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ArrowUp, Square, Sparkles, ArrowRight } from 'lucide-react';
 import { ModelSwitcher } from './ModelSwitcher';
-import { EffortLevel } from '@/types';
+import { EffortLevel, ToolApprovalRequest } from '@/types';
 import { SKILL_CATEGORIES } from '@/components/skills/SkillsModal';
+import { isTerminalCommand } from '@/lib/commandDetection';
+import { FloatingApprovalDrawer } from './FloatingApprovalDrawer';
 
 const ALL_SKILLS = SKILL_CATEGORIES.flatMap((cat) =>
   cat.skills.map((s) => ({
@@ -36,6 +38,8 @@ export function ChatInput({
   const [input, setInput] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [dismissedMention, setDismissedMention] = useState(false);
+  const [pendingCommand, setPendingCommand] = useState<string | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<ToolApprovalRequest | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-resize textarea as user types & toggle overflow
@@ -54,7 +58,7 @@ export function ChatInput({
     adjustHeight();
   }, [input]);
 
-  // Synchronize any browser-restored form values (e.g. page refresh / autofill / session restore) on mount
+  // Synchronize any browser-restored form values on mount
   useEffect(() => {
     const el = textareaRef.current;
     if (el && el.value && el.value !== input) {
@@ -97,9 +101,104 @@ export function ChatInput({
   const effectiveInput = input || (textareaRef.current ? textareaRef.current.value : '');
   const hasContent = Boolean(effectiveInput.trim());
 
+  const handleCancelApproval = () => {
+    setPendingApproval(null);
+    setPendingCommand(null);
+    // Return focus to the same text field and preserve the entered command
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 50);
+  };
+
+  const handleResolveCommandApproval = async (
+    approvalId: string,
+    decision: 'approve' | 'deny',
+    reason?: string
+  ) => {
+    if (decision === 'approve') {
+      const cmdToExecute = pendingCommand || effectiveInput.trim();
+      setPendingApproval(null);
+      setPendingCommand(null);
+      setInput('');
+      setDismissedMention(false);
+      if (textareaRef.current) {
+        textareaRef.current.value = '';
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.overflowY = 'hidden';
+      }
+      onSend(cmdToExecute);
+    } else {
+      handleCancelApproval();
+    }
+  };
+
   const handleSubmit = () => {
     const textToSend = effectiveInput.trim();
     if (!textToSend || isStreaming) return;
+
+    // Command detection step: intercept before execution
+    if (isTerminalCommand(textToSend)) {
+      setPendingCommand(textToSend);
+      const agentRef = selectedModel.includes('claude')
+        ? 'Claude'
+        : selectedModel.includes('gemini')
+        ? 'Gemini'
+        : 'Aarka';
+
+      const approvalReq: ToolApprovalRequest = {
+        approval_id: 'cmd-gate-' + Date.now(),
+        tool_name: 'BashTool',
+        arguments: { command: textToSend },
+        mutation_risk: 'high',
+        action_hash: 'cmd-' + Math.random().toString(36).substring(2, 10),
+        description: `Execute terminal command: ${textToSend}`,
+        human_summary: `Allow run ${textToSend}?`,
+        timeout_seconds: 120,
+        created_at: Date.now(),
+        status: 'pending',
+        model_persona: {
+          provider: selectedModel.includes('claude') ? 'claude' : selectedModel.includes('gemini') ? 'gemini' : 'aarka',
+          name: selectedModel.includes('claude') ? 'Claude' : selectedModel.includes('gemini') ? 'Gemini' : 'Aarka AI',
+          badge: 'Aarka Engine',
+          badge_color: '',
+          accent_color: '#0D9488',
+          agent_ref: agentRef,
+        },
+        dynamic_options: [
+          {
+            id: 1,
+            action: 'allow_once',
+            label: `Execute '${textToSend}' in isolated sandbox`,
+            recommended: true,
+          },
+          {
+            id: 2,
+            action: 'allow_and_stream',
+            label: `Execute '${textToSend}' and stream live terminal output`,
+          },
+          {
+            id: 3,
+            action: 'customize',
+            label: 'Edit command parameters before execution',
+          },
+          {
+            id: 4,
+            action: 'always_allow',
+            label: `Always allow '${textToSend}' in this session (Always Allow)`,
+          },
+          {
+            id: 5,
+            action: 'deny',
+            label: `No (tell ${agentRef} what to do instead)`,
+          },
+        ],
+      };
+
+      setPendingApproval(approvalReq);
+      return;
+    }
+
+    // Normal conversational text flow
     onSend(textToSend);
     setInput('');
     setDismissedMention(false);
@@ -274,6 +373,15 @@ export function ChatInput({
           Aarka AI can make mistakes. Verify critical facts and financial models.
         </div>
       </div>
+
+      {/* Intercepted Command Permission Popup */}
+      {pendingApproval && (
+        <FloatingApprovalDrawer
+          request={pendingApproval}
+          onResolve={handleResolveCommandApproval}
+          onDismiss={handleCancelApproval}
+        />
+      )}
     </div>
   );
 }
