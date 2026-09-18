@@ -171,7 +171,7 @@ describe('commandDetection Module', () => {
       expect(req).not.toBeNull();
       expect(req?.tool_name).toBe('FinanceStrategyMasterSelection');
       expect(req?.target_resource).toBe('BTC (Crypto) · NEUTRAL Strategy');
-      expect(req?.arguments?.candidates?.[0].strategy_name).toBe('BTC Range-Bound Volatility Harvest');
+      expect(req?.arguments?.candidates?.[0].strategy_name).toBe('BTC Range-Bound Channel Oscillation');
     });
 
     it('Case 7: Multi-Asset Forex Interception -> EUR/USD Bearish', () => {

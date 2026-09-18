@@ -181,39 +181,51 @@ def generate_dynamic_approval_options(
         candidates = args.get("candidates", [])
         master = args.get("master_recommended", "")
         master_cand = next((c for c in candidates if c.get("candidate_id") == master), candidates[0] if candidates else {})
-        strat_name = master_cand.get("strategy_name", "Master Algorithmic Strategy")
+        strat_name = master_cand.get("strategy_name", "Strategy Setup")
+
+        alt_cand = candidates[1] if len(candidates) > 1 else {}
+        alt_name = alt_cand.get("strategy_name", "Alternative Strategy")
+
+        is_options = args.get("is_options", False) or any(
+            c.get("strategy_type", "").lower() in ("bull_call_spread", "bear_put_spread", "iron_condor", "long_straddle", "options spread")
+            or bool(c.get("legs"))
+            for c in candidates
+        ) or bool(re.search(r'\b(options?|calls?|puts?|strikes?|expir(?:y|ies)|spreads?|straddles?|condors?)\b', query.lower()))
+
+        customize_label = "Customize strike prices, premium limits & expiry dates" if is_options else "Customize entry price, stop-loss & profit targets"
+        customize_detail = "Manually tune legs, strikes, and risk allocation." if is_options else "Manually tune position sizing, risk limits, and take-profit targets."
 
         return [
             {
                 "id": 1,
                 "action": "allow_once",
-                "label": f"Execute Master Strategy ({strat_name})",
+                "label": f"Execute Strategy ({strat_name})",
                 "detail": f"Optimal win rate: {master_cand.get('win_rate_est', '74%')} • Max loss: {master_cand.get('max_loss_per_lot', '₹2,200')}.",
                 "recommended": True,
             },
             {
                 "id": 2,
                 "action": "select_alternative",
-                "label": "Execute Alternative Directional Momentum Breakout Ladder",
-                "detail": "Higher momentum breakout strategy with dynamic trail stop.",
+                "label": f"Execute Alternative ({alt_name})",
+                "detail": "Alternative high-probability setup with dynamic trail stop.",
             },
             {
                 "id": 3,
                 "action": "customize",
-                "label": "Customize strike prices, premium limits & expiry dates",
-                "detail": "Manually tune legs, lots, and risk allocation.",
+                "label": customize_label,
+                "detail": customize_detail,
             },
             {
                 "id": 4,
                 "action": "always_allow",
                 "label": "Always auto-execute strategies matching risk profile (Always Allow)",
-                "detail": "Authorize automated multi-leg position sizing within risk limit.",
+                "detail": "Authorize automated execution within predefined risk limits.",
             },
             {
                 "id": 5,
                 "action": "deny",
                 "label": f"No (tell {agent} what to do instead)",
-                "detail": "Reject strategy recommendation and scan alternative sectors.",
+                "detail": "Reject strategy recommendation and scan alternative setups.",
             },
         ]
 

@@ -44,6 +44,31 @@ def test_generate_candidate_strategies_neutral():
     assert len(res["candidates"]) == 2
 
 
+def test_generate_candidate_strategies_commodity_non_options():
+    # Verify GC=F (Gold Commodity) produces institutional spot/futures setups, NOT options
+    indicators = {
+        "current_price": 2580.0,
+        "atr": 22.0,
+        "rsi": 48.0,
+    }
+    res = generate_candidate_strategies("GC=F", indicators, "NEUTRAL", risk_reward=5.0, is_options_intent=False)
+    assert res is not None
+    assert res["is_options"] is False
+    assert res["symbol"] == "GC=F"
+    assert res["master_recommended"] == "candidate_range_mean_reversion"
+    assert len(res["candidates"]) == 2
+
+    cands = res["candidates"]
+    assert cands[0]["strategy_name"] == "Range-Bound Channel Oscillation"
+    assert cands[0]["technology_tag"] == "Range-Bound Mean Reversion"
+    assert cands[0]["legs"] == []  # No option legs!
+    assert "strike" not in cands[0]
+
+    assert cands[1]["strategy_name"] == "Volatility Squeeze Channel Trading"
+    assert cands[1]["technology_tag"] == "Consolidation Squeeze"
+    assert cands[1]["legs"] == []
+
+
 def test_mutating_action_signals_detection():
     query_action = "Write a python script named healthcheck.py that checks disk space and save it to the workspace directory."
     

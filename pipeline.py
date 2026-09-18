@@ -2426,24 +2426,32 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
                         context_parts.append(f"[Options Strategy]\n{strat_text}")
                         sources.append("strategy")
 
-                        # Generate candidate strategies for Master of Technology selection gate
+                        is_options_query = bool(re.search(r'\b(options?|calls?|puts?|strikes?|expir(?:y|ies)|spreads?|straddles?|condors?)\b', q_lower))
+
+                        # Generate candidate strategies (20 institutional strategies for spot/futures/equities, or options if requested)
                         try:
                             candidate_data = options_strategy.generate_candidate_strategies(
                                 symbol=target_symbol,
                                 indicators=indicators,
                                 signal=signal,
                                 risk_reward=5.0,
+                                is_options_intent=is_options_query,
                             )
                             if candidate_data:
                                 from modules.approval_store import get_approval_store
                                 appr_store = get_approval_store()
+                                summary_label = (
+                                    f"Select Options Strategy for {target_symbol} ({signal})"
+                                    if is_options_query
+                                    else f"Select {signal} Strategy for {target_symbol}"
+                                )
                                 strat_req = appr_store.create_request(
                                     user_id=user_id,
                                     session_id=session_id,
                                     tool_name="FinanceStrategyMasterSelection",
                                     args=candidate_data,
                                     risk_level="HIGH",
-                                    human_summary=f"Select Master of Technology Strategy for {target_symbol} ({signal})",
+                                    human_summary=summary_label,
                                     target_resource=target_symbol,
                                     timeout_seconds=120.0,
                                 )

@@ -43,8 +43,20 @@ function getHumanTitle(request: ToolApprovalRequest): string {
   const path = String(request.arguments?.path || request.target_resource || '').trim();
 
   if (request.human_summary) {
-    const summary = request.human_summary.trim();
+    let summary = request.human_summary.trim();
+    // Sanitize any legacy "Master of Technology" text
+    summary = summary.replace(/Master\s+of\s+Technology\s*/gi, '');
     if (/^allow run /i.test(summary)) {
+      return summary.endsWith('?') ? summary : `${summary}?`;
+    }
+    if (/^allow select /i.test(summary)) {
+      const clean = summary.replace(/^allow select\s+/i, 'Select ');
+      return clean.endsWith('?') ? clean : `${clean}?`;
+    }
+    if (/^select /i.test(summary)) {
+      return summary.endsWith('?') ? summary : `${summary}?`;
+    }
+    if (/^what strategy/i.test(summary)) {
       return summary.endsWith('?') ? summary : `${summary}?`;
     }
     if (/^execute shell command:\s*pytest/i.test(summary) || /^pytest/i.test(cmd)) {
@@ -162,18 +174,19 @@ export function FloatingApprovalDrawer({
   }, []);
 
   // Finance strategy selection support
+  const rawArgs = request.arguments || (request as any).args || {};
   const isFinanceStrategy = request.tool_name === 'FinanceStrategyMasterSelection' ||
-    Boolean(request.arguments?.candidates && Array.isArray(request.arguments.candidates));
-  const strategyData = (request.arguments || {}) as FinanceStrategyApprovalData;
+    Boolean(rawArgs?.candidates && Array.isArray(rawArgs.candidates));
+  const strategyData = rawArgs as FinanceStrategyApprovalData;
   const candidates: CandidateFinanceStrategy[] = strategyData.candidates || [];
 
   const [selectedCandidateId, setSelectedCandidateId] = useState<string>(() => {
     return strategyData.master_recommended || candidates[0]?.candidate_id || '';
   });
 
-  const actionCommand = String(request.arguments?.command || request.command_preview || '');
-  const targetResource = String(request.target_resource || request.arguments?.path || '');
-  const actionTarget = actionCommand || targetResource || (request.arguments ? JSON.stringify(request.arguments) : request.tool_name);
+  const actionCommand = String(rawArgs.command || request.command_preview || '');
+  const targetResource = String(request.target_resource || rawArgs.path || '');
+  const actionTarget = actionCommand || targetResource || (rawArgs ? JSON.stringify(rawArgs) : request.tool_name);
 
   // Dynamic or synthesized options
   const baseOptions: DynamicApprovalOption[] =

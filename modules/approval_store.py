@@ -94,6 +94,7 @@ class ToolApprovalRecord:
             d["status"] = d["status"].lower()
         if "risk_level" in d and isinstance(d["risk_level"], str):
             d["mutation_risk"] = d["risk_level"].lower()
+        d["arguments"] = d.get("args") or {}
         return d
 
 

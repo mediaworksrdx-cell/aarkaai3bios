@@ -223,14 +223,14 @@ describe('ChatInput Command & Intent Permission Flow - Multi-Asset & Regimes', (
     const drawer = screen.getByTestId('floating-approval-drawer');
     expect(drawer).toBeInTheDocument();
     expect(within(drawer).getByText(/Select NEUTRAL Strategy for Bitcoin \(Crypto\)/i)).toBeInTheDocument();
-    expect(within(drawer).getByText('BTC Range-Bound Volatility Harvest')).toBeInTheDocument();
+    expect(within(drawer).getByText('BTC Range-Bound Channel Oscillation')).toBeInTheDocument();
 
     const approveBtn = within(drawer).getByRole('button', { name: /Approve/i });
     fireEvent.click(approveBtn);
 
     await waitFor(() => {
       expect(onSend).toHaveBeenCalledWith(
-        expect.stringContaining('Execute BTC Range-Bound Volatility Harvest for BTC (Crypto)')
+        expect.stringContaining('Execute BTC Range-Bound Channel Oscillation for BTC (Crypto)')
       );
     });
   });
