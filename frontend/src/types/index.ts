@@ -78,7 +78,7 @@ export interface DynamicApprovalOption {
   id: number;
   action: 'allow_once' | 'allow_and_run' | 'allow_and_stream' | 'allow_in_conversation' | 'customize' | 'always_allow' | 'dry_run' | 'select_alternative' | 'deny' | string;
   label: string;
-  detail: string;
+  detail?: string;
   recommended?: boolean;
 }
 

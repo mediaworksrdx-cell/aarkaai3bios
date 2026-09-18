@@ -53,32 +53,27 @@ const mockClaudeFileRequest: ToolApprovalRequest = {
       id: 1,
       action: 'allow_once',
       label: "Allow & save 'healthcheck.py' to workspace",
-      detail: 'Write verified disk health monitor script directly into workspace.',
       recommended: true,
     },
     {
       id: 2,
       action: 'allow_and_run',
       label: "Save 'healthcheck.py' and execute immediately (python healthcheck.py)",
-      detail: 'Atomic disk write followed by automatic sandbox execution.',
     },
     {
       id: 3,
       action: 'customize',
       label: "Inspect & customize 'healthcheck.py' code before committing",
-      detail: 'Review diff lines, modify parameters, or adjust imports.',
     },
     {
       id: 4,
       action: 'always_allow',
-      label: 'Always allow workspace file modifications in this session (Always Allow)',
-      detail: 'Auto-approves future file writes by Claude for this session.',
+      label: 'Always allow workspace file modifications in this session',
     },
     {
       id: 5,
       action: 'deny',
       label: 'No (tell Claude what to do instead)',
-      detail: 'Reject this file write and provide alternate requirements.',
     },
   ],
 };
@@ -152,19 +147,22 @@ const mockFinanceRequest: ToolApprovalRequest = {
 };
 
 describe('FloatingApprovalDrawer Component', () => {
-  it('renders docked drawer with BashTool command and keyboard hints', () => {
+  it('renders minimalist card matching reference with title, command box, options, and actions', () => {
     render(<FloatingApprovalDrawer request={mockBashRequest} />);
 
     expect(screen.getByTestId('floating-approval-drawer')).toBeInTheDocument();
-    expect(screen.getByText('BashTool')).toBeInTheDocument();
-    expect(screen.getByText('High Risk')).toBeInTheDocument();
+    expect(screen.getByText('Allow run python3 healthcheck.py?')).toBeInTheDocument();
     expect(screen.getByText('python3 healthcheck.py')).toBeInTheDocument();
-    expect(screen.getByText('Always Allow')).toBeInTheDocument();
+    expect(screen.getByText('Yes, allow this time')).toBeInTheDocument();
+    expect(screen.getByText("Yes, and always allow 'python3 healthcheck.py' in this conversation")).toBeInTheDocument();
+    expect(screen.getByText("Yes, and always allow 'python3 healthcheck.py' in this project")).toBeInTheDocument();
+    expect(screen.getByText("Yes, and always allow 'python3 healthcheck.py'")).toBeInTheDocument();
+    expect(screen.getByText('No (tell the agent what to do instead)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Approve/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Deny/i })).toBeInTheDocument();
   });
 
-  it('calls onResolve with approve decision when Approve button is clicked', async () => {
+  it('calls onResolve with approve decision when Submit button is clicked', async () => {
     const mockResolve = vi.fn().mockResolvedValue(undefined);
     render(<FloatingApprovalDrawer request={mockBashRequest} onResolve={mockResolve} />);
 
@@ -176,7 +174,7 @@ describe('FloatingApprovalDrawer Component', () => {
     });
   });
 
-  it('handles Always Allow button click by registering tool and approving', async () => {
+  it('handles selecting option 4 (always allow) and submitting', async () => {
     const mockResolve = vi.fn().mockResolvedValue(undefined);
     const mockAlwaysAllow = vi.fn();
     render(
@@ -187,8 +185,11 @@ describe('FloatingApprovalDrawer Component', () => {
       />
     );
 
-    const alwaysBtn = screen.getByRole('button', { name: /Always Allow/i });
-    fireEvent.click(alwaysBtn);
+    const alwaysOption = screen.getByText("Yes, and always allow 'python3 healthcheck.py'");
+    fireEvent.click(alwaysOption);
+
+    const submitBtn = screen.getByRole('button', { name: /Approve/i });
+    fireEvent.click(submitBtn);
 
     await waitFor(() => {
       expect(mockAlwaysAllow).toHaveBeenCalledWith('BashTool');
@@ -196,7 +197,7 @@ describe('FloatingApprovalDrawer Component', () => {
     });
   });
 
-  it('renders Master of Technology Strategy candidate cards and passes selected strategy to onResolve', async () => {
+  it('renders Master Finance Strategy candidate cards and passes selected strategy to onResolve', async () => {
     const mockResolve = vi.fn().mockResolvedValue(undefined);
     render(<FloatingApprovalDrawer request={mockFinanceRequest} onResolve={mockResolve} />);
 
@@ -208,7 +209,7 @@ describe('FloatingApprovalDrawer Component', () => {
     const secondStratCard = screen.getByText('Bull Call Algorithmic Ladder');
     fireEvent.click(secondStratCard);
 
-    // Click Approve
+    // Click Submit
     const approveBtn = screen.getByRole('button', { name: /Approve/i });
     fireEvent.click(approveBtn);
 
@@ -217,28 +218,39 @@ describe('FloatingApprovalDrawer Component', () => {
     });
   });
 
-  it('toggles customize mode to edit arguments', () => {
-    render(<FloatingApprovalDrawer request={mockBashRequest} />);
+  it('toggles option 5 to input rejection reason and submits deny', async () => {
+    const mockResolve = vi.fn().mockResolvedValue(undefined);
+    render(<FloatingApprovalDrawer request={mockBashRequest} onResolve={mockResolve} />);
 
-    const customizeBtn = screen.getByRole('button', { name: /Customize/i });
-    fireEvent.click(customizeBtn);
+    const option5 = screen.getByText('No (tell the agent what to do instead)');
+    fireEvent.click(option5);
 
-    expect(screen.getByPlaceholderText('Modify arguments...')).toBeInTheDocument();
+    const reasonInput = screen.getByPlaceholderText('tell the agent what to do instead...');
+    expect(reasonInput).toBeInTheDocument();
+
+    fireEvent.change(reasonInput, { target: { value: 'run unit tests instead' } });
+
+    const submitBtn = screen.getByRole('button', { name: /Approve/i });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(mockResolve).toHaveBeenCalledWith('gate-abc-78901', 'deny', 'run unit tests instead', undefined);
+    });
   });
 
-  it('renders Claude model persona branding and dynamic contextual options', () => {
+  it('renders dynamic contextual options when provided by model persona', () => {
     render(<FloatingApprovalDrawer request={mockClaudeFileRequest} />);
 
-    expect(screen.getByText('Claude · Constitutional Safety')).toBeInTheDocument();
     expect(screen.getByText("Allow & save 'healthcheck.py' to workspace")).toBeInTheDocument();
     expect(screen.getByText("Save 'healthcheck.py' and execute immediately (python healthcheck.py)")).toBeInTheDocument();
     expect(screen.getByText("No (tell Claude what to do instead)")).toBeInTheDocument();
   });
 
-  it('renders Gemini model persona branding and synthesized options', () => {
+  it('renders synthesized options tailored to Gemini model persona', () => {
     render(<FloatingApprovalDrawer request={mockGeminiRequest} />);
 
-    expect(screen.getByText('Gemini · Multimodal Verification')).toBeInTheDocument();
-    expect(screen.getByText("Execute 'pytest tests/unit' in isolated sandbox")).toBeInTheDocument();
+    expect(screen.getByText('Allow run backend unit tests?')).toBeInTheDocument();
+    expect(screen.getByText('pytest tests/unit')).toBeInTheDocument();
+    expect(screen.getByText('No (tell Gemini what to do instead)')).toBeInTheDocument();
   });
 });
