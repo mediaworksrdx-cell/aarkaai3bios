@@ -13,8 +13,8 @@ def detect_model_persona(model_name: str = "") -> Dict[str, str]:
             "provider": "claude",
             "name": "Claude Sonnet",
             "badge": "Claude · Constitutional Safety",
-            "badge_color": "border-[#D97706]/40 bg-[#D97706]/15 text-[#F59E0B]",
-            "accent_color": "#D97706",
+            "badge_color": "border-[#C15F3D]/30 bg-[#C15F3D]/10 text-[#C15F3D]",
+            "accent_color": "#C15F3D",
             "agent_ref": "Claude",
         }
     elif "gemini" in norm:
@@ -22,8 +22,8 @@ def detect_model_persona(model_name: str = "") -> Dict[str, str]:
             "provider": "gemini",
             "name": "Gemini Pro",
             "badge": "Gemini · Multimodal Verification",
-            "badge_color": "border-indigo-500/40 bg-indigo-500/15 text-indigo-400",
-            "accent_color": "#6366F1",
+            "badge_color": "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400",
+            "accent_color": "#2563EB",
             "agent_ref": "Gemini",
         }
     else:
@@ -31,8 +31,8 @@ def detect_model_persona(model_name: str = "") -> Dict[str, str]:
             "provider": "aarka",
             "name": "Aarka AI",
             "badge": "Aarka Engine · Autonomous Execution",
-            "badge_color": "border-teal-500/40 bg-teal-500/15 text-teal-400",
-            "accent_color": "#14B8A6",
+            "badge_color": "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+            "accent_color": "#0D9488",
             "agent_ref": "Aarka",
         }
 

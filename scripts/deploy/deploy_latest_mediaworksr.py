@@ -112,7 +112,7 @@ def deploy():
 
     # Step 4: Build frontend
     print("\n[4/5] Building Next.js frontend on remote host...")
-    build_cmd = f"export PATH=/usr/bin:/bin:/home/mediaworksr/.nvm/versions/node/v20.18.0/bin:$PATH && cd {REMOTE_DIR}/frontend && npm run build"
+    build_cmd = f"export PATH=/usr/bin:/bin:/home/mediaworksr/.nvm/versions/node/v20.18.0/bin:$PATH && cd {REMOTE_DIR}/frontend && rm -rf .next && npm run build"
     res = run_ssh(build_cmd)
     if res.returncode != 0:
         print("Frontend build note / err:", res.stderr)
