@@ -7,6 +7,7 @@ import { EffortLevel, ToolApprovalRequest } from '@/types';
 import { SKILL_CATEGORIES } from '@/components/skills/SkillsModal';
 import { isTerminalCommand } from '@/lib/commandDetection';
 import { FloatingApprovalDrawer } from './FloatingApprovalDrawer';
+import { useChatContext } from '@/context/ChatContext';
 
 const ALL_SKILLS = SKILL_CATEGORIES.flatMap((cat) =>
   cat.skills.map((s) => ({
@@ -41,6 +42,12 @@ export function ChatInput({
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState<ToolApprovalRequest | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Consume backend SSE approval requests from context
+  const { activeApprovalRequest } = useChatContext();
+
+  // Merge: local intercepted command approval takes priority over backend SSE approval
+  const effectiveApproval = pendingApproval || activeApprovalRequest || null;
 
   // Auto-resize textarea as user types & toggle overflow
   const adjustHeight = () => {
@@ -288,6 +295,15 @@ export function ChatInput({
             </div>
           </div>
         )}
+        {/* Input-Anchored Approval Drawer (emerges above input, Claude/Gamma style) */}
+        {effectiveApproval && (
+          <FloatingApprovalDrawer
+            request={effectiveApproval}
+            onResolve={pendingApproval ? handleResolveCommandApproval : undefined}
+            onDismiss={pendingApproval ? handleCancelApproval : undefined}
+            anchorMode="inline"
+          />
+        )}
 
         {/* Floating Input Container */}
         <div className="flex flex-col bg-[var(--bg-secondary)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-lg)] focus-within:border-[var(--border-accent)] focus-within:shadow-[var(--shadow-float)] transition-all duration-200 p-2 sm:p-3">
@@ -373,15 +389,6 @@ export function ChatInput({
           Aarka AI can make mistakes. Verify critical facts and financial models.
         </div>
       </div>
-
-      {/* Intercepted Command Permission Popup */}
-      {pendingApproval && (
-        <FloatingApprovalDrawer
-          request={pendingApproval}
-          onResolve={handleResolveCommandApproval}
-          onDismiss={handleCancelApproval}
-        />
-      )}
     </div>
   );
 }

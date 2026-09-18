@@ -23,6 +23,9 @@ interface FloatingApprovalDrawerProps {
   onAlwaysAllow?: (toolName: string) => void;
   onDismiss?: () => void;
   className?: string;
+  /** 'inline' (default): renders in normal DOM flow above the input field.
+   *  'portal': renders as a fixed viewport overlay via createPortal (legacy). */
+  anchorMode?: 'inline' | 'portal';
 }
 
 function normalizeStatus(s?: string): ApprovalStatus {
@@ -122,6 +125,7 @@ export function FloatingApprovalDrawer({
   onAlwaysAllow,
   onDismiss,
   className = '',
+  anchorMode = 'inline',
 }: FloatingApprovalDrawerProps) {
   const { resolveApproval: contextResolve, alwaysAllowTool: contextAlwaysAllow, dismissActiveApproval } = useChatContext();
   const effectiveResolve = onResolve || contextResolve;
@@ -309,71 +313,130 @@ export function FloatingApprovalDrawer({
     return null;
   }
 
-  const renderPortalOrContent = (children: React.ReactNode) => {
-    if (typeof document !== 'undefined' && mounted && document.body) {
+  // ── Inline anchor mode: render directly in the DOM flow ──
+  const isInline = anchorMode === 'inline';
+
+  // Wrapper for portal vs inline rendering
+  const renderWrapper = (children: React.ReactNode) => {
+    if (!isInline && typeof document !== 'undefined' && mounted && document.body) {
       return createPortal(children, document.body);
     }
     return children;
   };
 
-  // Feedback states
+  // ── Feedback states ──
+
   if (status === 'approved') {
-    return renderPortalOrContent(
+    const feedbackContent = (
       <div
-        className={`fixed inset-0 z-[9999] flex flex-col justify-end items-center pb-24 sm:pb-28 px-4 bg-black/15 dark:bg-black/35 backdrop-blur-[1px] transition-all duration-200 ${className}`}
+        className={
+          isInline
+            ? `w-full mb-2 animate-emerge ${className}`
+            : `fixed inset-0 z-[9999] flex flex-col justify-end items-center pb-24 sm:pb-28 px-4 bg-black/15 dark:bg-black/35 backdrop-blur-[1px] transition-all duration-200 ${className}`
+        }
         data-testid="floating-approval-drawer"
       >
-        <div className="flex items-center gap-3 px-6 py-4 rounded-2xl border border-emerald-500/30 bg-white dark:bg-[#18181b] shadow-2xl text-emerald-600 dark:text-emerald-400 text-sm font-medium animate-in fade-in max-w-xl w-full mb-2">
+        <div
+          className={
+            isInline
+              ? 'flex items-center gap-3 px-5 py-3.5 rounded-2xl border border-emerald-500/25 bg-[var(--bg-secondary)] shadow-[var(--shadow-md)] text-emerald-600 text-sm font-medium w-full'
+              : 'flex items-center gap-3 px-6 py-4 rounded-2xl border border-emerald-500/30 bg-white dark:bg-[#18181b] shadow-2xl text-emerald-600 dark:text-emerald-400 text-sm font-medium animate-in fade-in max-w-xl w-full mb-2'
+          }
+        >
           <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
           <span className="truncate">Allowed. Executing in workspace...</span>
         </div>
       </div>
     );
+    return renderWrapper(feedbackContent);
   }
 
   if (status === 'rejected') {
-    return renderPortalOrContent(
+    const feedbackContent = (
       <div
-        className={`fixed inset-0 z-[9999] flex flex-col justify-end items-center pb-24 sm:pb-28 px-4 bg-black/15 dark:bg-black/35 backdrop-blur-[1px] transition-all duration-200 ${className}`}
+        className={
+          isInline
+            ? `w-full mb-2 animate-emerge ${className}`
+            : `fixed inset-0 z-[9999] flex flex-col justify-end items-center pb-24 sm:pb-28 px-4 bg-black/15 dark:bg-black/35 backdrop-blur-[1px] transition-all duration-200 ${className}`
+        }
         data-testid="floating-approval-drawer"
       >
-        <div className="flex items-center gap-3 px-6 py-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#18181b] shadow-2xl text-neutral-700 dark:text-neutral-300 text-sm font-medium animate-in fade-in max-w-xl w-full mb-2">
-          <ShieldX className="w-5 h-5 text-neutral-500 flex-shrink-0" />
+        <div
+          className={
+            isInline
+              ? 'flex items-center gap-3 px-5 py-3.5 rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-md)] text-[var(--text-secondary)] text-sm font-medium w-full'
+              : 'flex items-center gap-3 px-6 py-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#18181b] shadow-2xl text-neutral-700 dark:text-neutral-300 text-sm font-medium animate-in fade-in max-w-xl w-full mb-2'
+          }
+        >
+          <ShieldX className="w-5 h-5 text-[var(--text-tertiary)] flex-shrink-0" />
           <span>Execution skipped. Returning to input...</span>
         </div>
       </div>
     );
+    return renderWrapper(feedbackContent);
   }
 
   if (status !== 'pending' && !isSubmitting) {
     return null;
   }
 
-  return renderPortalOrContent(
+  // ── Main pending approval card ──
+
+  const cardContent = (
     <div
-      className={`fixed inset-0 z-[9999] flex flex-col justify-end items-center pb-24 sm:pb-28 px-4 bg-black/15 dark:bg-black/35 backdrop-blur-[1px] transition-all duration-200 animate-in fade-in ${className}`}
+      className={
+        isInline
+          ? `w-full mb-2 animate-emerge ${className}`
+          : `fixed inset-0 z-[9999] flex flex-col justify-end items-center pb-24 sm:pb-28 px-4 bg-black/15 dark:bg-black/35 backdrop-blur-[1px] transition-all duration-200 animate-in fade-in ${className}`
+      }
       data-testid="floating-approval-drawer"
       role="dialog"
-      aria-modal="true"
+      aria-modal={!isInline}
       aria-labelledby="approval-modal-title"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          handleDecision('deny');
-        }
-      }}
+      {...(!isInline && {
+        onClick: (e: React.MouseEvent) => {
+          if (e.target === e.currentTarget) {
+            handleDecision('deny');
+          }
+        },
+      })}
     >
-      <div className="relative w-full max-w-2xl rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#18181b] text-neutral-900 dark:text-neutral-100 shadow-2xl shadow-black/10 p-6 sm:p-7 flex flex-col gap-4 animate-in slide-in-from-bottom-4 zoom-in-95 duration-150 mb-2">
-        
+      <div
+        className={
+          isInline
+            ? 'relative w-full rounded-2xl border border-[var(--border)] focus-within:border-[var(--border-accent)] bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-float)] p-5 sm:p-6 flex flex-col gap-3.5 transition-shadow duration-200'
+            : 'relative w-full max-w-2xl rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#18181b] text-neutral-900 dark:text-neutral-100 shadow-2xl shadow-black/10 p-6 sm:p-7 flex flex-col gap-4 animate-in slide-in-from-bottom-4 zoom-in-95 duration-150 mb-2'
+        }
+      >
         {/* Title Row */}
         <div className="flex items-center gap-2.5">
-          <SquareTerminal className="w-4 h-4 text-neutral-600 dark:text-neutral-400 flex-shrink-0 stroke-[2]" />
-          <h3 id="approval-modal-title" className="text-sm sm:text-base font-semibold text-neutral-900 dark:text-neutral-100 leading-none">
+          <SquareTerminal
+            className={
+              isInline
+                ? 'w-4 h-4 text-[var(--text-secondary)] flex-shrink-0 stroke-[2]'
+                : 'w-4 h-4 text-neutral-600 dark:text-neutral-400 flex-shrink-0 stroke-[2]'
+            }
+          />
+          <h3
+            id="approval-modal-title"
+            className={
+              isInline
+                ? 'text-sm sm:text-base font-semibold text-[var(--text-primary)] leading-none'
+                : 'text-sm sm:text-base font-semibold text-neutral-900 dark:text-neutral-100 leading-none'
+            }
+          >
             {humanTitle}
           </h3>
         </div>
 
         {/* Command / Target Box */}
-        <div className="w-full bg-[#f4f4f5] dark:bg-neutral-800/80 rounded-xl px-4 py-3 font-mono text-[13px] text-neutral-800 dark:text-neutral-200 select-all overflow-x-auto whitespace-pre-wrap break-all">
+        <div
+          className={
+            isInline
+              ? 'w-full bg-[var(--bg-tertiary)] rounded-xl px-4 py-3 font-mono text-[13px] text-[var(--text-primary)] select-all overflow-x-auto whitespace-pre-wrap break-all'
+              : 'w-full bg-[#f4f4f5] dark:bg-neutral-800/80 rounded-xl px-4 py-3 font-mono text-[13px] text-neutral-800 dark:text-neutral-200 select-all overflow-x-auto whitespace-pre-wrap break-all'
+          }
+        >
           {actionTarget}
         </div>
 
@@ -390,12 +453,22 @@ export function FloatingApprovalDrawer({
                   onClick={() => setSelectedCandidateId(cand.candidate_id)}
                   className={`p-3 rounded-xl border transition-all cursor-pointer text-left ${
                     isSelected
-                      ? 'bg-neutral-100 dark:bg-neutral-800 border-neutral-400 dark:border-neutral-600 shadow-sm'
-                      : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
+                      ? isInline
+                        ? 'bg-[var(--bg-tertiary)] border-[var(--border-accent)] shadow-sm'
+                        : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-400 dark:border-neutral-600 shadow-sm'
+                      : isInline
+                        ? 'bg-[var(--bg-secondary)] border-[var(--border)] hover:bg-[var(--bg-hover)]'
+                        : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-1 mb-1">
-                    <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100">
+                    <span
+                      className={
+                        isInline
+                          ? 'text-xs font-bold text-[var(--text-primary)]'
+                          : 'text-xs font-bold text-neutral-900 dark:text-neutral-100'
+                      }
+                    >
                       {cand.strategy_name}
                     </span>
                     {isMaster && (
@@ -404,7 +477,13 @@ export function FloatingApprovalDrawer({
                       </span>
                     )}
                   </div>
-                  <div className="grid grid-cols-3 gap-1 text-[10px] font-mono pt-1 text-neutral-500 dark:text-neutral-400">
+                  <div
+                    className={
+                      isInline
+                        ? 'grid grid-cols-3 gap-1 text-[10px] font-mono pt-1 text-[var(--text-tertiary)]'
+                        : 'grid grid-cols-3 gap-1 text-[10px] font-mono pt-1 text-neutral-500 dark:text-neutral-400'
+                    }
+                  >
                     <div>Win: {cand.win_rate_est || '70%'}</div>
                     <div>R:R: {cand.risk_reward_actual || '1:2.4'}</div>
                     <div>Risk: {cand.max_loss_per_lot || '₹2,500'}</div>
@@ -428,11 +507,21 @@ export function FloatingApprovalDrawer({
                 onClick={() => setSelectedOption(opt.id)}
                 className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl cursor-pointer select-none transition-colors text-sm ${
                   isSelected
-                    ? 'bg-[#ececed] dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
-                    : 'text-neutral-700 dark:text-neutral-300 hover:bg-[#f4f4f5] dark:hover:bg-neutral-800/50'
+                    ? isInline
+                      ? 'bg-[var(--accent-muted)] border border-[var(--border-accent)] text-[var(--text-primary)] font-medium'
+                      : 'bg-[#ececed] dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
+                    : isInline
+                      ? 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] border border-transparent'
+                      : 'text-neutral-700 dark:text-neutral-300 hover:bg-[#f4f4f5] dark:hover:bg-neutral-800/50'
                 }`}
               >
-                <span className="w-5 h-5 rounded flex items-center justify-center text-xs font-semibold text-neutral-600 dark:text-neutral-400 bg-[#e4e4e7] dark:bg-neutral-700 flex-shrink-0">
+                <span
+                  className={
+                    isInline
+                      ? 'w-5 h-5 rounded flex items-center justify-center text-xs font-semibold text-[var(--text-secondary)] bg-[var(--bg-tertiary)] flex-shrink-0'
+                      : 'w-5 h-5 rounded flex items-center justify-center text-xs font-semibold text-neutral-600 dark:text-neutral-400 bg-[#e4e4e7] dark:bg-neutral-700 flex-shrink-0'
+                  }
+                >
                   {opt.id}
                 </span>
                 <span className="truncate flex-1">
@@ -445,13 +534,17 @@ export function FloatingApprovalDrawer({
 
         {/* Option 5: Rejection Reason Input */}
         {selectedOption === 5 && (
-          <div className="pl-8 -mt-0.5 animate-in fade-in duration-150">
+          <div className="pl-8 -mt-0.5">
             <input
               type="text"
               value={rejectionReason}
               onChange={(e) => setRejectionReason(e.target.value)}
               placeholder="tell the agent what to do instead..."
-              className="w-full px-3.5 py-2 text-sm bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-xl text-neutral-900 dark:text-neutral-100 outline-none focus:border-[#0070f3] focus:ring-1 focus:ring-[#0070f3]"
+              className={
+                isInline
+                  ? 'w-full px-3.5 py-2 text-sm bg-[var(--bg-input)] border border-[var(--border)] rounded-xl text-[var(--text-primary)] outline-none focus:border-[var(--border-accent)] focus:ring-1 focus:ring-[var(--accent-primary)] transition-colors'
+                  : 'w-full px-3.5 py-2 text-sm bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-xl text-neutral-900 dark:text-neutral-100 outline-none focus:border-[#0070f3] focus:ring-1 focus:ring-[#0070f3]'
+              }
               autoFocus
             />
           </div>
@@ -459,7 +552,7 @@ export function FloatingApprovalDrawer({
 
         {/* Error notification if submission fails */}
         {errorMessage && (
-          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-600 dark:text-red-400 animate-in fade-in">
+          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-600 dark:text-red-400">
             {errorMessage}
           </div>
         )}
@@ -472,7 +565,11 @@ export function FloatingApprovalDrawer({
             type="button"
             aria-label="Deny"
             name="Deny"
-            className="text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200 text-sm font-medium px-4 py-2 cursor-pointer transition-colors disabled:opacity-50"
+            className={
+              isInline
+                ? 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] text-sm font-medium px-4 py-2 cursor-pointer transition-colors disabled:opacity-50'
+                : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200 text-sm font-medium px-4 py-2 cursor-pointer transition-colors disabled:opacity-50'
+            }
           >
             Skip
           </button>
@@ -483,7 +580,11 @@ export function FloatingApprovalDrawer({
             type="button"
             aria-label="Approve"
             name="Approve"
-            className="flex items-center gap-1.5 px-5 py-2 text-sm font-medium rounded-xl bg-[#0070f3] hover:bg-[#0060df] text-white shadow-sm transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
+            className={
+              isInline
+                ? 'flex items-center gap-1.5 px-5 py-2 text-sm font-medium rounded-xl bg-[var(--accent-primary)] hover:bg-[var(--accent-hover)] text-white shadow-sm transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50'
+                : 'flex items-center gap-1.5 px-5 py-2 text-sm font-medium rounded-xl bg-[#0070f3] hover:bg-[#0060df] text-white shadow-sm transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50'
+            }
           >
             {isSubmitting ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -496,4 +597,6 @@ export function FloatingApprovalDrawer({
       </div>
     </div>
   );
+
+  return renderWrapper(cardContent);
 }

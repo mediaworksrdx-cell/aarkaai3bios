@@ -38,6 +38,20 @@ const config: Config = {
         serif: ["var(--font-display)", "var(--font-sans)", "Inter", "-apple-system", "sans-serif"],
         mono: ["var(--font-mono)", "JetBrains Mono", "monospace"],
       },
+      keyframes: {
+        'emerge-from-input': {
+          '0%': { opacity: '0', transform: 'translateY(12px) scale(0.97)' },
+          '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+        },
+        'dismiss-to-input': {
+          '0%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+          '100%': { opacity: '0', transform: 'translateY(8px) scale(0.98)' },
+        },
+      },
+      animation: {
+        'emerge': 'emerge-from-input 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+        'dismiss': 'dismiss-to-input 0.15s cubic-bezier(0.4, 0, 1, 1) forwards',
+      },
     },
   },
   plugins: [],
