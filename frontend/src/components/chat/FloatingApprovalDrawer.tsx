@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -94,7 +95,7 @@ function synthesizeClientDynamicOptions(
   const toolName = request.tool_name;
   const targetResource = String(request.target_resource || request.arguments?.path || '');
   const cmd = String(request.arguments?.command || request.command_preview || '');
-  const agent = request.model_persona?.agent_ref || 'the agent';
+  const agent = request.model_persona?.agent_ref || 'Aarka';
 
   if (toolName === 'FileEditTool') {
     const isPy = targetResource.endsWith('.py');
@@ -253,6 +254,7 @@ export function FloatingApprovalDrawer({
   const effectiveAlwaysAllow = onAlwaysAllow || contextAlwaysAllow;
   const effectiveDismiss = onDismiss || dismissActiveApproval;
 
+  const [mounted, setMounted] = useState<boolean>(false);
   const [status, setStatus] = useState<ApprovalStatus>(() => normalizeStatus(request.status));
   const totalTimeout = request.timeout_seconds || 120;
   const [remainingSeconds, setRemainingSeconds] = useState<number>(() => {
@@ -277,6 +279,10 @@ export function FloatingApprovalDrawer({
       return '';
     }
   });
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Check if this is a finance strategy approval
   const isFinanceStrategy = request.tool_name === 'FinanceStrategyMasterSelection' ||
@@ -415,14 +421,22 @@ export function FloatingApprovalDrawer({
     return null;
   }
 
+  // Helper renderer that wraps content in createPortal when mounted
+  const renderPortalOrContent = (children: React.ReactNode) => {
+    if (typeof document !== 'undefined' && mounted && document.body) {
+      return createPortal(children, document.body);
+    }
+    return children;
+  };
+
   // Quick feedback confirmation modal upon approval
   if (status === 'approved') {
-    return (
+    return renderPortalOrContent(
       <div
-        className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 dark:bg-black/60 backdrop-blur-md transition-all duration-300 ${className}`}
+        className={`fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 dark:bg-black/80 backdrop-blur-xl transition-all duration-300 ${className}`}
         data-testid="floating-approval-drawer"
       >
-        <div className="flex items-center justify-between gap-4 px-6 py-4 rounded-2xl border border-emerald-500/40 bg-emerald-950/90 backdrop-blur-2xl shadow-2xl text-emerald-400 text-sm font-mono animate-in fade-in max-w-md w-full">
+        <div className="flex items-center justify-between gap-4 px-6 py-4 rounded-2xl border border-emerald-500/40 bg-emerald-950/95 backdrop-blur-2xl shadow-2xl text-emerald-400 text-sm font-mono animate-in fade-in max-w-md w-full">
           <span className="flex items-center gap-3 min-w-0">
             <CheckCircle2 className="w-5 h-5 text-emerald-400 animate-pulse flex-shrink-0" />
             <span className="truncate">Authorized <strong>{request.tool_name}</strong>. Executing in workspace...</span>
@@ -434,12 +448,12 @@ export function FloatingApprovalDrawer({
   }
 
   if (status === 'rejected') {
-    return (
+    return renderPortalOrContent(
       <div
-        className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 dark:bg-black/60 backdrop-blur-md transition-all duration-300 ${className}`}
+        className={`fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 dark:bg-black/80 backdrop-blur-xl transition-all duration-300 ${className}`}
         data-testid="floating-approval-drawer"
       >
-        <div className="flex items-center gap-3 px-6 py-4 rounded-2xl border border-red-500/40 bg-red-950/90 backdrop-blur-2xl shadow-2xl text-red-400 text-sm font-mono animate-in fade-in max-w-md w-full">
+        <div className="flex items-center gap-3 px-6 py-4 rounded-2xl border border-red-500/40 bg-red-950/95 backdrop-blur-2xl shadow-2xl text-red-400 text-sm font-mono animate-in fade-in max-w-md w-full">
           <ShieldX className="w-5 h-5 text-red-400 flex-shrink-0" />
           <span>Execution denied by operator. Workspace unchanged.</span>
         </div>
@@ -465,21 +479,21 @@ export function FloatingApprovalDrawer({
     humanTitle = `Allow ${request.human_summary}?`;
   }
 
-  return (
+  return renderPortalOrContent(
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 dark:bg-black/70 backdrop-blur-md transition-all duration-200 animate-in fade-in ${className}`}
+      className={`fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-5 bg-black/60 dark:bg-black/80 backdrop-blur-xl transition-all duration-200 animate-in fade-in ${className}`}
       data-testid="floating-approval-drawer"
       role="dialog"
       aria-modal="true"
       aria-labelledby="approval-modal-title"
     >
-      <div className="relative w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] shadow-2xl shadow-black/60 ring-1 ring-white/10 p-5 sm:p-6 flex flex-col gap-4">
+      <div className="relative w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-2xl border border-white/10 bg-[#18181b]/98 dark:bg-[#121216]/98 text-[var(--text-primary)] shadow-2xl shadow-black/80 ring-1 ring-white/15 p-5 sm:p-6 flex flex-col gap-4">
         
         {/* Top Header: Model Persona & Risk & Countdown */}
         <div className="flex items-center justify-between gap-3 border-b border-[var(--border)]/60 pb-3">
           <div className="flex items-center gap-2 flex-wrap">
             <span
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${persona.badge_color}`}
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border shadow-sm ${persona.badge_color}`}
               title={`Active Engine: ${persona.name}`}
             >
               <Cpu className="w-3.5 h-3.5 flex-shrink-0" />
@@ -492,7 +506,7 @@ export function FloatingApprovalDrawer({
           </div>
 
           <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="flex items-center gap-1 text-xs font-mono text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] px-2.5 py-1 rounded-lg border border-[var(--border)]">
+            <div className="flex items-center gap-1.5 text-xs font-mono text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] px-3 py-1 rounded-lg border border-[var(--border)] shadow-inner">
               <Clock className="w-3.5 h-3.5" />
               <span>{remainingSeconds}s</span>
             </div>
@@ -500,7 +514,7 @@ export function FloatingApprovalDrawer({
             <button
               onClick={() => handleDecision('deny')}
               type="button"
-              className="p-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors cursor-pointer"
+              className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors cursor-pointer"
               title="Dismiss dialog (Esc)"
             >
               <X className="w-4 h-4" />
@@ -510,7 +524,7 @@ export function FloatingApprovalDrawer({
 
         {/* Title & Tool Name */}
         <div className="flex items-start gap-3">
-          <div className="w-9 h-9 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)] flex items-center justify-center flex-shrink-0 text-[var(--text-secondary)] mt-0.5 shadow-sm">
+          <div className="w-10 h-10 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)] flex items-center justify-center flex-shrink-0 text-[var(--text-secondary)] mt-0.5 shadow-sm">
             {isFinanceStrategy ? (
               <TrendingUp className="w-5 h-5 text-emerald-400" />
             ) : request.tool_name === 'BashTool' ? (
@@ -522,8 +536,8 @@ export function FloatingApprovalDrawer({
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-mono text-[var(--text-tertiary)] uppercase tracking-wider mb-0.5">
-              Operation Authorization Gate
+            <div className="text-[11px] font-mono text-[var(--text-tertiary)] uppercase tracking-wider mb-0.5">
+              Authorization Required · Protected Workspace Operation
             </div>
             <h3 id="approval-modal-title" className="text-base sm:text-lg font-semibold text-[var(--text-primary)] leading-tight">
               {humanTitle}
@@ -554,11 +568,11 @@ export function FloatingApprovalDrawer({
               </button>
             )}
           </div>
-          <div className="text-[var(--text-primary)] font-mono text-xs leading-relaxed bg-[var(--bg-secondary)]/60 p-2 rounded-lg border border-[var(--border)]/60">
+          <div className="text-[var(--text-primary)] font-mono text-xs leading-relaxed bg-[var(--bg-secondary)]/60 p-2.5 rounded-lg border border-[var(--border)]/60">
             {actionTarget}
           </div>
           {showCodePreview && request.diff_preview && (
-            <pre className="mt-1 p-2.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] font-mono text-[11px] text-[var(--text-secondary)] max-h-40 overflow-y-auto whitespace-pre-wrap">
+            <pre className="mt-1 p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] font-mono text-[11px] text-[var(--text-secondary)] max-h-44 overflow-y-auto whitespace-pre-wrap">
               {request.diff_preview}
             </pre>
           )}
@@ -614,55 +628,55 @@ export function FloatingApprovalDrawer({
         )}
 
         {/* Dynamic Contextual Options List */}
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <div className="text-xs font-medium text-[var(--text-tertiary)] px-1 flex items-center justify-between">
-            <span>Select Action (press 1–5 or click):</span>
+            <span>Select Option (press 1–5 or click):</span>
             <span className="text-[11px] font-mono opacity-70">Enter to confirm</span>
           </div>
 
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             {dynamicOptions.map((opt) => {
               const isSelected = selectedOption === opt.id;
               return (
                 <div
                   key={opt.id}
                   onClick={() => setSelectedOption(opt.id)}
-                  className={`flex items-start gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${
+                  className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all ${
                     isSelected
-                      ? 'bg-[var(--accent-muted)] border border-[var(--border-accent)] font-medium text-[var(--text-primary)] shadow-sm ring-1 ring-[var(--border-accent)]/30'
-                      : 'hover:bg-[var(--bg-tertiary)]/70 text-[var(--text-secondary)] border border-transparent bg-[var(--bg-primary)]/40'
+                      ? 'bg-blue-600/15 border border-blue-500/50 font-medium text-[var(--text-primary)] shadow-md ring-1 ring-blue-500/30'
+                      : 'hover:bg-[var(--bg-tertiary)]/80 text-[var(--text-secondary)] border border-[var(--border)]/70 bg-[var(--bg-primary)]/50'
                   }`}
                 >
                   <span
-                    className={`w-5 h-5 rounded-md flex items-center justify-center text-xs font-mono font-bold flex-shrink-0 mt-0.5 transition-colors ${
+                    className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-mono font-bold flex-shrink-0 mt-0.5 transition-colors ${
                       isSelected
-                        ? 'bg-[var(--accent-primary)] text-white shadow-sm'
+                        ? 'bg-blue-600 text-white shadow-sm ring-1 ring-white/20'
                         : 'bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] border border-[var(--border)]'
                     }`}
                   >
                     {opt.id}
                   </span>
 
-                  <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                  <div className="flex-1 min-w-0 flex flex-col gap-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs sm:text-sm font-semibold truncate text-[var(--text-primary)]">
+                      <span className="text-xs sm:text-sm font-semibold text-[var(--text-primary)]">
                         {opt.label}
                       </span>
                       {opt.recommended && (
-                        <span className="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex-shrink-0">
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex-shrink-0">
                           RECOMMENDED
                         </span>
                       )}
                     </div>
                     {opt.detail && (
-                      <span className="text-[11px] text-[var(--text-tertiary)] leading-tight line-clamp-1">
+                      <span className="text-xs text-[var(--text-tertiary)] leading-snug">
                         {opt.detail}
                       </span>
                     )}
                   </div>
 
                   {isSelected && (
-                    <Check className="w-4 h-4 text-[var(--accent-primary)] flex-shrink-0 mt-0.5" />
+                    <Check className="w-4 h-4 text-blue-400 flex-shrink-0 mt-1" />
                   )}
                 </div>
               );
@@ -672,13 +686,13 @@ export function FloatingApprovalDrawer({
 
         {/* Option 5: Expandable Rejection Reason Input */}
         {selectedOption === 5 && (
-          <div className="pl-8 -mt-1 animate-in fade-in">
+          <div className="pl-9 -mt-1 animate-in fade-in">
             <input
               type="text"
               value={rejectionReason}
               onChange={(e) => setRejectionReason(e.target.value)}
               placeholder="tell the agent what to do instead..."
-              className="w-full px-3 py-2 text-xs bg-[var(--bg-primary)] border border-red-500/40 rounded-xl text-[var(--text-primary)] outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/30"
+              className="w-full px-3.5 py-2.5 text-xs bg-[var(--bg-primary)] border border-red-500/40 rounded-xl text-[var(--text-primary)] outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/30"
               autoFocus
             />
           </div>
@@ -686,7 +700,7 @@ export function FloatingApprovalDrawer({
 
         {/* Inline Argument Customizer */}
         {isCustomizeOpen && status === 'pending' && (
-          <div className="p-3 rounded-xl bg-[var(--bg-primary)] border border-amber-500/30 space-y-2 animate-in fade-in">
+          <div className="p-3.5 rounded-xl bg-[var(--bg-primary)] border border-amber-500/30 space-y-2 animate-in fade-in">
             <div className="flex items-center justify-between text-xs text-amber-400 font-semibold">
               <span className="flex items-center gap-1.5">
                 <Sliders className="w-3.5 h-3.5" /> Parameter Customization:
@@ -696,7 +710,7 @@ export function FloatingApprovalDrawer({
             <textarea
               value={customArgsText}
               onChange={(e) => setCustomArgsText(e.target.value)}
-              className="w-full h-24 p-2 text-xs font-mono bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] outline-none resize-none focus:border-amber-500/50"
+              className="w-full h-24 p-2.5 text-xs font-mono bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] outline-none resize-none focus:border-amber-500/50"
               placeholder="Modify arguments..."
             />
           </div>
@@ -711,7 +725,7 @@ export function FloatingApprovalDrawer({
               type="button"
               name="Customize"
               aria-label="Customize"
-              className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors"
+              className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors"
               title="Customize arguments"
             >
               <Sliders className="w-3.5 h-3.5" />
@@ -727,7 +741,7 @@ export function FloatingApprovalDrawer({
               type="button"
               name="Always Allow"
               aria-label="Always Allow"
-              className="text-xs text-amber-400/80 hover:text-amber-400 flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-amber-500/10 cursor-pointer transition-colors"
+              className="text-xs text-amber-400/90 hover:text-amber-400 flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-amber-500/10 cursor-pointer transition-colors font-medium"
               title="Always allow this tool"
             >
               <span>Always Allow</span>
@@ -735,7 +749,7 @@ export function FloatingApprovalDrawer({
           </div>
 
           {/* Right: Skip and Submit Buttons */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-3">
             <button
               onClick={() => handleDecision('deny')}
               disabled={isSubmitting}
@@ -753,13 +767,13 @@ export function FloatingApprovalDrawer({
               type="button"
               name="Approve"
               aria-label="Approve"
-              className="flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white shadow-md shadow-blue-600/25 transition-all disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-2 px-6 py-2.5 text-xs font-semibold rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white shadow-lg shadow-blue-600/30 transition-all disabled:opacity-50 cursor-pointer"
             >
               {isSubmitting ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : null}
               <span>Submit</span>
-              <span className="text-[11px] font-mono opacity-80">↵</span>
+              <span className="text-[11px] font-mono opacity-90">↵</span>
             </button>
           </div>
         </div>
