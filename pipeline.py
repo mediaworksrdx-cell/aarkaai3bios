@@ -2433,7 +2433,16 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     # Technical Analysis + Multi-Asset Strategy Selection (Stocks, Index, Commodity, Crypto, Forex)
     finance_strategy_req = None
     q_lower = query.lower()
-    is_strategy_query = any(kw in q_lower for kw in _STRATEGY_KEYWORDS)
+    is_strategy_execution = any(
+        q_lower.startswith(prefix)
+        for prefix in [
+            "execute ", "implement strategy", "apply strategy",
+            "execute trading plan", "trading plan for", "execution plan for",
+            "execute strategy"
+        ]
+    ) or "harvests predictable oscillations" in q_lower or "follow disciplined risk parameters" in q_lower
+
+    is_strategy_query = any(kw in q_lower for kw in _STRATEGY_KEYWORDS) or is_strategy_execution
     if is_strategy_query:
         try:
             from modules import technical, options_strategy, subscription
@@ -2498,15 +2507,6 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             sources.append("technical")
 
             is_options_query = bool(re.search(r'\b(options?|calls?|puts?|strikes?|expir(?:y|ies)|spreads?|straddles?|condors?)\b', q_lower))
-
-            is_strategy_execution = any(
-                q_lower.startswith(prefix)
-                for prefix in [
-                    "execute ", "implement strategy", "apply strategy",
-                    "execute trading plan", "trading plan for", "execution plan for",
-                    "execute strategy"
-                ]
-            ) or "harvests predictable oscillations" in q_lower or "follow disciplined risk parameters" in q_lower
 
             if is_strategy_execution:
                 clean_sym = target_symbol.replace("^", "").replace(".NS", "").replace("=F", "").replace("=X", "")
