@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   SquareTerminal,
+  FileCode2,
+  TrendingUp,
   CheckCircle2,
   ShieldX,
   Loader2,
@@ -57,7 +59,14 @@ function getHumanTitle(request: ToolApprovalRequest): string {
     }
     if (summary.toLowerCase().startsWith('modify file:')) {
       const cleanPath = summary.replace(/^modify file:\s*/i, '');
-      return `Allow modify ${cleanPath}?`;
+      return `Allow modify file: ${cleanPath}?`;
+    }
+    if (summary.toLowerCase().startsWith('allow modify ')) {
+      if (!summary.toLowerCase().includes('file:')) {
+        const clean = summary.replace(/^allow modify\s*/i, '');
+        return `Allow modify file: ${clean.endsWith('?') ? clean : clean + '?'}`;
+      }
+      return summary.endsWith('?') ? summary : `${summary}?`;
     }
     if (summary.toLowerCase().startsWith('allow ')) {
       return summary.endsWith('?') ? summary : `${summary}?`;
@@ -76,7 +85,7 @@ function getHumanTitle(request: ToolApprovalRequest): string {
   }
 
   if (request.tool_name === 'FileEditTool') {
-    return path ? `Allow modify ${path}?` : 'Allow modify file?';
+    return path ? `Allow modify file: ${path}?` : 'Allow modify file?';
   }
 
   return `Allow ${request.tool_name}?`;
@@ -409,24 +418,51 @@ export function FloatingApprovalDrawer({
         }
       >
         {/* Title Row */}
-        <div className="flex items-center gap-2.5">
-          <SquareTerminal
-            className={
-              isInline
-                ? 'w-4 h-4 text-[var(--text-secondary)] flex-shrink-0 stroke-[2]'
-                : 'w-4 h-4 text-neutral-600 dark:text-neutral-400 flex-shrink-0 stroke-[2]'
-            }
-          />
-          <h3
-            id="approval-modal-title"
-            className={
-              isInline
-                ? 'text-sm sm:text-base font-semibold text-[var(--text-primary)] leading-none'
-                : 'text-sm sm:text-base font-semibold text-neutral-900 dark:text-neutral-100 leading-none'
-            }
-          >
-            {humanTitle}
-          </h3>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            {request.tool_name === 'FileEditTool' ? (
+              <FileCode2 className="w-4 h-4 text-blue-500 flex-shrink-0 stroke-[2]" />
+            ) : request.tool_name === 'FinanceStrategyMasterSelection' ? (
+              <TrendingUp className="w-4 h-4 text-emerald-500 flex-shrink-0 stroke-[2]" />
+            ) : (
+              <SquareTerminal
+                className={
+                  isInline
+                    ? 'w-4 h-4 text-[var(--text-secondary)] flex-shrink-0 stroke-[2]'
+                    : 'w-4 h-4 text-neutral-600 dark:text-neutral-400 flex-shrink-0 stroke-[2]'
+                }
+              />
+            )}
+            <h3
+              id="approval-modal-title"
+              className={
+                isInline
+                  ? 'text-sm sm:text-base font-semibold text-[var(--text-primary)] leading-none truncate'
+                  : 'text-sm sm:text-base font-semibold text-neutral-900 dark:text-neutral-100 leading-none truncate'
+              }
+            >
+              {humanTitle}
+            </h3>
+          </div>
+
+          {/* Badges: Persona Badge & Tool Badge */}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {request.model_persona?.badge && (
+              <span
+                className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
+                  request.model_persona.badge_color ||
+                  (request.model_persona.provider === 'claude'
+                    ? 'border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                    : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400')
+                }`}
+              >
+                {request.model_persona.badge}
+              </span>
+            )}
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] border border-[var(--border)]">
+              {request.tool_name}
+            </span>
+          </div>
         </div>
 
         {/* Command / Target Box */}

@@ -853,6 +853,21 @@ export async function submitToolApproval(
   reason?: string,
   selectedMasterStrategy?: string
 ): Promise<{ status: string; approval_id: string; resolution: string; message?: string }> {
+  // Client-intercepted gate IDs bypass backend POST to avoid unnecessary network latency or 404
+  if (
+    approvalId.startsWith('cmd-gate-') ||
+    approvalId.startsWith('file-gate-') ||
+    approvalId.startsWith('fin-gate-') ||
+    approvalId.startsWith('local-gate-') ||
+    approvalId.startsWith('client-gate-')
+  ) {
+    return {
+      status: decision === 'approve' ? 'approved' : 'rejected',
+      approval_id: approvalId,
+      resolution: decision,
+      message: 'Local gate resolved directly',
+    };
+  }
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...getAuthHeaders(),

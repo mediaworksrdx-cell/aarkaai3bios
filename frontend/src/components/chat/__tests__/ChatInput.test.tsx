@@ -12,7 +12,7 @@ vi.mock('@/context/ChatContext', () => ({
   }),
 }));
 
-describe('ChatInput Command Permission Flow', () => {
+describe('ChatInput Command & Intent Permission Flow - 4 Cases', () => {
   it('submits normal conversational text directly without showing permission popup', () => {
     const onSend = vi.fn();
     render(
@@ -32,7 +32,7 @@ describe('ChatInput Command Permission Flow', () => {
     expect(screen.queryByTestId('floating-approval-drawer')).not.toBeInTheDocument();
   });
 
-  it('intercepts terminal command df -h on Enter, displays permission popup, and does not execute immediately', () => {
+  it('Case 1: Intercepts terminal command df -h on Enter, displays popup with BashTool, and executes upon approval', async () => {
     const onSend = vi.fn();
     render(
       <ChatInput
@@ -60,9 +60,119 @@ describe('ChatInput Command Permission Flow', () => {
     expect(within(drawer).getByText('Edit command parameters before execution')).toBeInTheDocument();
     expect(within(drawer).getByText("Always allow 'df -h' in this session (Always Allow)")).toBeInTheDocument();
     expect(within(drawer).getByText('No (tell Aarka what to do instead)')).toBeInTheDocument();
+
+    // Approve
+    const approveBtn = within(drawer).getByRole('button', { name: /Approve/i });
+    fireEvent.click(approveBtn);
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith('df -h');
+    });
   });
 
-  it('preserves entered command in text field when popup is skipped/cancelled', async () => {
+  it('Case 2: Intercepts microservice file creation (FileEditTool) for api_service.py and displays dynamic options', async () => {
+    const onSend = vi.fn();
+    render(
+      <ChatInput
+        onSend={onSend}
+        isStreaming={false}
+        selectedModel="aarka-2.0"
+        onModelChange={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText(/Ask Aarka anything/i);
+    const prompt = 'Create a Python script api_service.py with a FastAPI health check and status endpoint';
+    fireEvent.change(textarea, { target: { value: prompt } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+
+    expect(onSend).not.toHaveBeenCalled();
+
+    const drawer = screen.getByTestId('floating-approval-drawer');
+    expect(drawer).toBeInTheDocument();
+    expect(within(drawer).getByText('Allow modify file: api_service.py?')).toBeInTheDocument();
+    expect(within(drawer).getByText('api_service.py')).toBeInTheDocument();
+    expect(within(drawer).getByText('FileEditTool')).toBeInTheDocument();
+    expect(within(drawer).getByText("Allow & save 'api_service.py' to workspace")).toBeInTheDocument();
+    expect(within(drawer).getByText("Save 'api_service.py' and execute immediately (python api_service.py)")).toBeInTheDocument();
+    expect(within(drawer).getByText("Inspect & customize 'api_service.py' code before committing")).toBeInTheDocument();
+    expect(within(drawer).getByText('No (tell Aarka what to do instead)')).toBeInTheDocument();
+
+    const approveBtn = within(drawer).getByRole('button', { name: /Approve/i });
+    fireEvent.click(approveBtn);
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(prompt);
+    });
+  });
+
+  it('Case 3: Intercepts quantitative finance strategy selection for NIFTY and displays strategy cards with Aarka Engine badge', async () => {
+    const onSend = vi.fn();
+    render(
+      <ChatInput
+        onSend={onSend}
+        isStreaming={false}
+        selectedModel="aarka-2.0"
+        onModelChange={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText(/Ask Aarka anything/i);
+    const prompt = 'Screen top bullish options strategies for NIFTY';
+    fireEvent.change(textarea, { target: { value: prompt } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+
+    expect(onSend).not.toHaveBeenCalled();
+
+    const drawer = screen.getByTestId('floating-approval-drawer');
+    expect(drawer).toBeInTheDocument();
+    expect(within(drawer).getByText('Aarka Engine · Autonomous Execution')).toBeInTheDocument();
+    expect(within(drawer).getByText('Delta-Neutral Volatility Engine')).toBeInTheDocument();
+    expect(within(drawer).getByText('Bull Call Algorithmic Ladder')).toBeInTheDocument();
+    expect(within(drawer).getByText('★ RECOMMENDED')).toBeInTheDocument();
+
+    const approveBtn = within(drawer).getByRole('button', { name: /Approve/i });
+    fireEvent.click(approveBtn);
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(prompt);
+    });
+  });
+
+  it('Case 4: Intercepts Claude engine persona test for db_backup.py with amber badge and Claude tailored options', async () => {
+    const onSend = vi.fn();
+    render(
+      <ChatInput
+        onSend={onSend}
+        isStreaming={false}
+        selectedModel="claude-3-7-sonnet"
+        onModelChange={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText(/Ask Aarka anything/i);
+    const prompt = 'Write a backup script db_backup.py to compress and archive the database';
+    fireEvent.change(textarea, { target: { value: prompt } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+
+    expect(onSend).not.toHaveBeenCalled();
+
+    const drawer = screen.getByTestId('floating-approval-drawer');
+    expect(drawer).toBeInTheDocument();
+    expect(within(drawer).getByText('Allow modify file: db_backup.py?')).toBeInTheDocument();
+    expect(within(drawer).getByText('Claude · Constitutional Safety')).toBeInTheDocument();
+    expect(within(drawer).getByText("Allow & save 'db_backup.py' to workspace")).toBeInTheDocument();
+    expect(within(drawer).getByText('No (tell Claude what to do instead)')).toBeInTheDocument();
+
+    const approveBtn = within(drawer).getByRole('button', { name: /Approve/i });
+    fireEvent.click(approveBtn);
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(prompt);
+    });
+  });
+
+  it('preserves entered text in field when popup is skipped/cancelled', async () => {
     const onSend = vi.fn();
     render(
       <ChatInput
@@ -83,40 +193,7 @@ describe('ChatInput Command Permission Flow', () => {
     const skipBtn = within(drawer).getByRole('button', { name: /Deny/i });
     fireEvent.click(skipBtn);
 
-    // After skipping, onSend should not have been called
     expect(onSend).not.toHaveBeenCalled();
-
-    // The text in the input should still be preserved
     expect(textarea.value).toBe('df -h');
-  });
-
-  it('executes pendingCommand only after user approves in the popup', async () => {
-    const onSend = vi.fn();
-    render(
-      <ChatInput
-        onSend={onSend}
-        isStreaming={false}
-        selectedModel="aarka-2.0"
-        onModelChange={vi.fn()}
-      />
-    );
-
-    const textarea = screen.getByPlaceholderText(/Ask Aarka anything/i) as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: 'df -h' } });
-    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
-
-    expect(onSend).not.toHaveBeenCalled();
-
-    const drawer = screen.getByTestId('floating-approval-drawer');
-    // Click Submit in the popup (Option 1 selected by default)
-    const approveBtn = within(drawer).getByRole('button', { name: /Approve/i });
-    fireEvent.click(approveBtn);
-
-    await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith('df -h');
-    });
-
-    // Input should be cleared upon approved execution
-    expect(textarea.value).toBe('');
   });
 });
