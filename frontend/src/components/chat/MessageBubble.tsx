@@ -21,8 +21,6 @@ import remarkGfm from 'remark-gfm';
 import { MODEL_OPTIONS } from '@/styles/theme';
 import { useChatContext } from '@/context/ChatContext';
 import { exportToPdf, exportToWord, exportToMarkdown, PdfTemplateId } from '@/lib/api';
-import { ToolApprovalCard } from './ToolApprovalCard';
-import { FinanceStrategyApprovalCard } from './FinanceStrategyApprovalCard';
 import { CodeModeSandboxCard } from './CodeModeSandboxCard';
 
 interface MessageBubbleProps {
