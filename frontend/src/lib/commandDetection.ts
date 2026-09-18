@@ -1,9 +1,12 @@
-import { ToolApprovalRequest } from '@/types';
+import { ToolApprovalRequest, CandidateFinanceStrategy } from '@/types';
 
 /**
  * Command & Action Intent Detection Utility
- * Detects whether user input in the chat text field is a terminal command,
- * file creation/modification intent, or quantitative finance strategy screening.
+ * Detects whether user input in the chat text field is:
+ * 1. A terminal command (BashTool)
+ * 2. A microservice/script file creation/modification intent (FileEditTool)
+ * 3. A multi-asset quantitative finance strategy selection (Stocks, Index, Commodity, Crypto, Forex)
+ *    across market regimes (Bullish, Bearish, Neutral, Reversal)
  */
 
 const KNOWN_CLI_COMMANDS = new Set([
@@ -127,22 +130,408 @@ export function detectFileCreationIntent(raw: string): { filename: string; isPyt
   };
 }
 
-export function detectFinanceStrategyIntent(raw: string): { symbol: string; signal: 'BULLISH' | 'BEARISH' } | null {
+// ── Multi-Asset Financial Knowledge Base ──
+
+export interface AssetInfo {
+  symbol: string;
+  name: string;
+  category: 'Stock' | 'Index' | 'Commodity' | 'Crypto' | 'Forex';
+  currency: string;
+  lotSize?: number;
+  basePrice?: number;
+}
+
+export type MarketRegime = 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'REVERSAL' | 'MULTI_REGIME' | 'ALL_REGIMES';
+
+const KNOWN_FINANCIAL_ASSETS: Record<string, AssetInfo> = {
+  // Commodities
+  'gold': { symbol: 'GOLD', name: 'Gold', category: 'Commodity', currency: '$', basePrice: 2650 },
+  'silver': { symbol: 'SILVER', name: 'Silver', category: 'Commodity', currency: '$', basePrice: 31.5 },
+  'crude oil': { symbol: 'CRUDE OIL', name: 'Crude Oil', category: 'Commodity', currency: '$', basePrice: 71.0 },
+  'crude': { symbol: 'CRUDE OIL', name: 'Crude Oil', category: 'Commodity', currency: '$', basePrice: 71.0 },
+  'oil': { symbol: 'CRUDE OIL', name: 'Crude Oil', category: 'Commodity', currency: '$', basePrice: 71.0 },
+  'brent': { symbol: 'BRENT', name: 'Brent Crude', category: 'Commodity', currency: '$', basePrice: 74.5 },
+  'natural gas': { symbol: 'NATURAL GAS', name: 'Natural Gas', category: 'Commodity', currency: '$', basePrice: 2.8 },
+  'gas': { symbol: 'NATURAL GAS', name: 'Natural Gas', category: 'Commodity', currency: '$', basePrice: 2.8 },
+  'copper': { symbol: 'COPPER', name: 'Copper', category: 'Commodity', currency: '$', basePrice: 4.3 },
+  'wheat': { symbol: 'WHEAT', name: 'Wheat', category: 'Commodity', currency: '$', basePrice: 580 },
+  'corn': { symbol: 'CORN', name: 'Corn', category: 'Commodity', currency: '$', basePrice: 420 },
+
+  // Crypto
+  'bitcoin': { symbol: 'BTC', name: 'Bitcoin', category: 'Crypto', currency: '$', basePrice: 63500 },
+  'btc': { symbol: 'BTC', name: 'Bitcoin', category: 'Crypto', currency: '$', basePrice: 63500 },
+  'ethereum': { symbol: 'ETH', name: 'Ethereum', category: 'Crypto', currency: '$', basePrice: 2650 },
+  'eth': { symbol: 'ETH', name: 'Ethereum', category: 'Crypto', currency: '$', basePrice: 2650 },
+  'solana': { symbol: 'SOL', name: 'Solana', category: 'Crypto', currency: '$', basePrice: 152 },
+  'sol': { symbol: 'SOL', name: 'Solana', category: 'Crypto', currency: '$', basePrice: 152 },
+  'ripple': { symbol: 'XRP', name: 'Ripple', category: 'Crypto', currency: '$', basePrice: 0.58 },
+  'xrp': { symbol: 'XRP', name: 'Ripple', category: 'Crypto', currency: '$', basePrice: 0.58 },
+  'cardano': { symbol: 'ADA', name: 'Cardano', category: 'Crypto', currency: '$', basePrice: 0.38 },
+  'ada': { symbol: 'ADA', name: 'Cardano', category: 'Crypto', currency: '$', basePrice: 0.38 },
+  'doge': { symbol: 'DOGE', name: 'Dogecoin', category: 'Crypto', currency: '$', basePrice: 0.12 },
+  'dogecoin': { symbol: 'DOGE', name: 'Dogecoin', category: 'Crypto', currency: '$', basePrice: 0.12 },
+  'crypto': { symbol: 'CRYPTO', name: 'Crypto', category: 'Crypto', currency: '$', basePrice: 60000 },
+
+  // Forex
+  'eurusd': { symbol: 'EUR/USD', name: 'EUR/USD', category: 'Forex', currency: '$', basePrice: 1.115 },
+  'eur/usd': { symbol: 'EUR/USD', name: 'EUR/USD', category: 'Forex', currency: '$', basePrice: 1.115 },
+  'gbpusd': { symbol: 'GBP/USD', name: 'GBP/USD', category: 'Forex', currency: '$', basePrice: 1.325 },
+  'gbp/usd': { symbol: 'GBP/USD', name: 'GBP/USD', category: 'Forex', currency: '$', basePrice: 1.325 },
+  'usdjpy': { symbol: 'USD/JPY', name: 'USD/JPY', category: 'Forex', currency: '¥', basePrice: 143.5 },
+  'usd/jpy': { symbol: 'USD/JPY', name: 'USD/JPY', category: 'Forex', currency: '¥', basePrice: 143.5 },
+  'usdinr': { symbol: 'USD/INR', name: 'USD/INR', category: 'Forex', currency: '₹', basePrice: 83.7 },
+  'usd/inr': { symbol: 'USD/INR', name: 'USD/INR', category: 'Forex', currency: '₹', basePrice: 83.7 },
+  'audusd': { symbol: 'AUD/USD', name: 'AUD/USD', category: 'Forex', currency: '$', basePrice: 0.685 },
+  'aud/usd': { symbol: 'AUD/USD', name: 'AUD/USD', category: 'Forex', currency: '$', basePrice: 0.685 },
+  'forex': { symbol: 'FOREX', name: 'Forex FX', category: 'Forex', currency: '$', basePrice: 1.0 },
+
+  // Indices
+  'nifty': { symbol: 'NIFTY', name: 'NIFTY 50', category: 'Index', currency: '₹', lotSize: 25, basePrice: 25400 },
+  'nifty 50': { symbol: 'NIFTY', name: 'NIFTY 50', category: 'Index', currency: '₹', lotSize: 25, basePrice: 25400 },
+  'banknifty': { symbol: 'BANKNIFTY', name: 'Bank Nifty', category: 'Index', currency: '₹', lotSize: 15, basePrice: 53200 },
+  'bank nifty': { symbol: 'BANKNIFTY', name: 'Bank Nifty', category: 'Index', currency: '₹', lotSize: 15, basePrice: 53200 },
+  'sensex': { symbol: 'SENSEX', name: 'BSE Sensex', category: 'Index', currency: '₹', lotSize: 10, basePrice: 83100 },
+  'finnifty': { symbol: 'FINNIFTY', name: 'Fin Nifty', category: 'Index', currency: '₹', lotSize: 40, basePrice: 24200 },
+  's&p 500': { symbol: 'S&P 500', name: 'S&P 500', category: 'Index', currency: '$', basePrice: 5700 },
+  'sp500': { symbol: 'S&P 500', name: 'S&P 500', category: 'Index', currency: '$', basePrice: 5700 },
+  's&p': { symbol: 'S&P 500', name: 'S&P 500', category: 'Index', currency: '$', basePrice: 5700 },
+  'nasdaq': { symbol: 'NASDAQ', name: 'Nasdaq 100', category: 'Index', currency: '$', basePrice: 19800 },
+  'dow': { symbol: 'DOW JONES', name: 'Dow Jones', category: 'Index', currency: '$', basePrice: 42100 },
+  'dow jones': { symbol: 'DOW JONES', name: 'Dow Jones', category: 'Index', currency: '$', basePrice: 42100 },
+
+  // Stocks
+  'reliance': { symbol: 'RELIANCE', name: 'Reliance Industries', category: 'Stock', currency: '₹', lotSize: 250, basePrice: 2980 },
+  'tcs': { symbol: 'TCS', name: 'Tata Consultancy Services', category: 'Stock', currency: '₹', lotSize: 175, basePrice: 4250 },
+  'infosys': { symbol: 'INFY', name: 'Infosys', category: 'Stock', currency: '₹', lotSize: 400, basePrice: 1920 },
+  'infy': { symbol: 'INFY', name: 'Infosys', category: 'Stock', currency: '₹', lotSize: 400, basePrice: 1920 },
+  'hdfc': { symbol: 'HDFCBANK', name: 'HDFC Bank', category: 'Stock', currency: '₹', lotSize: 550, basePrice: 1680 },
+  'hdfc bank': { symbol: 'HDFCBANK', name: 'HDFC Bank', category: 'Stock', currency: '₹', lotSize: 550, basePrice: 1680 },
+  'icici': { symbol: 'ICICIBANK', name: 'ICICI Bank', category: 'Stock', currency: '₹', lotSize: 700, basePrice: 1240 },
+  'icici bank': { symbol: 'ICICIBANK', name: 'ICICI Bank', category: 'Stock', currency: '₹', lotSize: 700, basePrice: 1240 },
+  'sbi': { symbol: 'SBIN', name: 'State Bank of India', category: 'Stock', currency: '₹', lotSize: 1500, basePrice: 790 },
+  'state bank': { symbol: 'SBIN', name: 'State Bank of India', category: 'Stock', currency: '₹', lotSize: 1500, basePrice: 790 },
+  'tata motors': { symbol: 'TATAMOTORS', name: 'Tata Motors', category: 'Stock', currency: '₹', lotSize: 1400, basePrice: 970 },
+  'tata steel': { symbol: 'TATASTEEL', name: 'Tata Steel', category: 'Stock', currency: '₹', lotSize: 5500, basePrice: 155 },
+  'apple': { symbol: 'AAPL', name: 'Apple', category: 'Stock', currency: '$', basePrice: 228 },
+  'aapl': { symbol: 'AAPL', name: 'Apple', category: 'Stock', currency: '$', basePrice: 228 },
+  'tesla': { symbol: 'TSLA', name: 'Tesla', category: 'Stock', currency: '$', basePrice: 245 },
+  'tsla': { symbol: 'TSLA', name: 'Tesla', category: 'Stock', currency: '$', basePrice: 245 },
+  'nvidia': { symbol: 'NVDA', name: 'Nvidia', category: 'Stock', currency: '$', basePrice: 120 },
+  'nvda': { symbol: 'NVDA', name: 'Nvidia', category: 'Stock', currency: '$', basePrice: 120 },
+  'microsoft': { symbol: 'MSFT', name: 'Microsoft', category: 'Stock', currency: '$', basePrice: 435 },
+  'msft': { symbol: 'MSFT', name: 'Microsoft', category: 'Stock', currency: '$', basePrice: 435 },
+  'google': { symbol: 'GOOGL', name: 'Alphabet Google', category: 'Stock', currency: '$', basePrice: 165 },
+  'amazon': { symbol: 'AMZN', name: 'Amazon', category: 'Stock', currency: '$', basePrice: 188 },
+  'meta': { symbol: 'META', name: 'Meta Platforms', category: 'Stock', currency: '$', basePrice: 565 },
+};
+
+export function generateCandidateStrategiesForAsset(
+  asset: AssetInfo,
+  regime: MarketRegime,
+  isOptionsIntent: boolean = false
+): { master_recommended: string; candidates: CandidateFinanceStrategy[] } {
+  const sym = asset.symbol;
+  const cur = asset.currency;
+
+  if (regime === 'BULLISH') {
+    if (isOptionsIntent || asset.category === 'Index') {
+      return {
+        master_recommended: 'candidate_strat_1',
+        candidates: [
+          {
+            candidate_id: 'candidate_strat_1',
+            category: 'BULLISH',
+            technology_tag: 'DELTA_NEUTRAL',
+            strategy_name: 'Delta-Neutral Volatility Engine',
+            strategy_type: 'Options Spread',
+            legs: [{ action: 'BUY', type: 'CE', strike: Math.round(asset.basePrice || 25500), premium_est: 110 }],
+            win_rate_est: '74%',
+            risk_reward_actual: '1:2.8',
+            max_loss_per_lot: `${cur}2,200`,
+            rationale: 'Captures volatility crush while preserving delta-neutral hedging.',
+          },
+          {
+            candidate_id: 'candidate_strat_2',
+            category: 'BULLISH',
+            technology_tag: 'MOMENTUM_BREAKOUT',
+            strategy_name: 'Bull Call Algorithmic Ladder',
+            strategy_type: 'Bull Spread',
+            legs: [{ action: 'BUY', type: 'CE', strike: Math.round((asset.basePrice || 25400) - 100), premium_est: 140 }],
+            win_rate_est: '68%',
+            risk_reward_actual: '1:3.2',
+            max_loss_per_lot: `${cur}3,500`,
+            rationale: 'High momentum breakout tracking system with defined risk.',
+          },
+        ],
+      };
+    }
+
+    return {
+      master_recommended: 'candidate_strat_1',
+      candidates: [
+        {
+          candidate_id: 'candidate_strat_1',
+          category: 'BULLISH',
+          technology_tag: 'MOMENTUM_BREAKOUT',
+          strategy_name: `${sym} Institutional Breakout Momentum`,
+          strategy_type: 'Trend Following',
+          legs: [],
+          win_rate_est: '73%',
+          risk_reward_actual: '1:3.1',
+          max_loss_per_lot: `${cur}1,800`,
+          rationale: 'Captures high-volume momentum breakout above resistance with trailing EMA stop.',
+        },
+        {
+          candidate_id: 'candidate_strat_2',
+          category: 'BULLISH',
+          technology_tag: 'VALUE_PULLBACK',
+          strategy_name: `${sym} Pullback Accumulation & Value Swing`,
+          strategy_type: 'Pullback Swing',
+          legs: [],
+          win_rate_est: '77%',
+          risk_reward_actual: '1:2.6',
+          max_loss_per_lot: `${cur}1,200`,
+          rationale: 'Systematic dip accumulation into 50-period moving average with structural stop.',
+        },
+      ],
+    };
+  }
+
+  if (regime === 'BEARISH') {
+    return {
+      master_recommended: 'candidate_strat_1',
+      candidates: [
+        {
+          candidate_id: 'candidate_strat_1',
+          category: 'BEARISH',
+          technology_tag: 'BREAKDOWN_SHORT',
+          strategy_name: `${sym} Breakdown Momentum & Liquidity Short`,
+          strategy_type: 'Directional Short',
+          legs: [],
+          win_rate_est: '70%',
+          risk_reward_actual: '1:3.2',
+          max_loss_per_lot: `${cur}1,700`,
+          rationale: 'Executes on critical support breakdown with negative delta momentum confirmation.',
+        },
+        {
+          candidate_id: 'candidate_strat_2',
+          category: 'BEARISH',
+          technology_tag: 'PULLBACK_FADE',
+          strategy_name: `${sym} Defensive Hedged Short / Pullback Fade`,
+          strategy_type: 'Hedged Short',
+          legs: [],
+          win_rate_est: '74%',
+          risk_reward_actual: '1:2.8',
+          max_loss_per_lot: `${cur}1,300`,
+          rationale: 'Fades overbought relief rallies into descending resistance with tight risk ceiling.',
+        },
+      ],
+    };
+  }
+
+  if (regime === 'NEUTRAL') {
+    return {
+      master_recommended: 'candidate_strat_1',
+      candidates: [
+        {
+          candidate_id: 'candidate_strat_1',
+          category: 'NEUTRAL',
+          technology_tag: 'VOLATILITY_HARVEST',
+          strategy_name: `${sym} Range-Bound Volatility Harvest`,
+          strategy_type: 'Mean Reversion',
+          legs: [],
+          win_rate_est: '81%',
+          risk_reward_actual: '1:2.1',
+          max_loss_per_lot: `${cur}1,400`,
+          rationale: 'Captures mean-reverting channel oscillations and volatility decay within defined bands.',
+        },
+        {
+          candidate_id: 'candidate_strat_2',
+          category: 'NEUTRAL',
+          technology_tag: 'GRID_TRADING',
+          strategy_name: `${sym} Automated Grid Channel Trading`,
+          strategy_type: 'Grid Channel',
+          legs: [],
+          win_rate_est: '85%',
+          risk_reward_actual: '1:2.0',
+          max_loss_per_lot: `${cur}1,100`,
+          rationale: 'Bracketed limit orders profit from range consolidation between key pivot points.',
+        },
+      ],
+    };
+  }
+
+  if (regime === 'REVERSAL') {
+    return {
+      master_recommended: 'candidate_strat_1',
+      candidates: [
+        {
+          candidate_id: 'candidate_strat_1',
+          category: 'REVERSAL',
+          technology_tag: 'SNIPER_PIVOT',
+          strategy_name: `${sym} Climactic Exhaustion & Sniper Pivot`,
+          strategy_type: 'Counter-Trend Reversal',
+          legs: [],
+          win_rate_est: '69%',
+          risk_reward_actual: '1:3.7',
+          max_loss_per_lot: `${cur}1,500`,
+          rationale: 'Identifies volume-climax exhaustion and multi-timeframe divergence for sharp counter-trend pivot.',
+        },
+        {
+          candidate_id: 'candidate_strat_2',
+          category: 'REVERSAL',
+          technology_tag: 'LIQUIDITY_SWEEP',
+          strategy_name: `${sym} False-Breakout Liquidity Sweep Reversal`,
+          strategy_type: 'Liquidity Reversal',
+          legs: [],
+          win_rate_est: '72%',
+          risk_reward_actual: '1:3.4',
+          max_loss_per_lot: `${cur}1,250`,
+          rationale: 'Exploits trapped breakout participants after a false sweep outside the standard deviation band.',
+        },
+      ],
+    };
+  }
+
+  // MULTI_REGIME or ALL_REGIMES: 4 interactive cards (Bullish, Bearish, Neutral, Reversal)
+  return {
+    master_recommended: 'candidate_bull',
+    candidates: [
+      {
+        candidate_id: 'candidate_bull',
+        category: 'BULLISH',
+        technology_tag: 'TREND_MOMENTUM',
+        strategy_name: `${sym} Bullish Momentum Breakout Strategy`,
+        strategy_type: 'Trend Following',
+        legs: [],
+        win_rate_est: '72%',
+        risk_reward_actual: '1:3.1',
+        max_loss_per_lot: `${cur}1,800`,
+        rationale: 'Trend-following long continuation setup tracking institutional inflows.',
+      },
+      {
+        candidate_id: 'candidate_bear',
+        category: 'BEARISH',
+        technology_tag: 'BREAKDOWN_SHORT',
+        strategy_name: `${sym} Bearish Breakdown Short Strategy`,
+        strategy_type: 'Directional Short',
+        legs: [],
+        win_rate_est: '69%',
+        risk_reward_actual: '1:3.2',
+        max_loss_per_lot: `${cur}1,700`,
+        rationale: 'Key support breakdown and liquidity sweep short setup.',
+      },
+      {
+        candidate_id: 'candidate_neutral',
+        category: 'NEUTRAL',
+        technology_tag: 'RANGE_HARVEST',
+        strategy_name: `${sym} Neutral Range Volatility Harvest`,
+        strategy_type: 'Mean Reversion',
+        legs: [],
+        win_rate_est: '80%',
+        risk_reward_actual: '1:2.1',
+        max_loss_per_lot: `${cur}1,400`,
+        rationale: 'Channel oscillation and volatility decay within defined price bands.',
+      },
+      {
+        candidate_id: 'candidate_reversal',
+        category: 'REVERSAL',
+        technology_tag: 'SNIPER_PIVOT',
+        strategy_name: `${sym} Exhaustion Mean-Reversion Reversal`,
+        strategy_type: 'Counter-Trend Pivot',
+        legs: [],
+        win_rate_est: '68%',
+        risk_reward_actual: '1:3.7',
+        max_loss_per_lot: `${cur}1,500`,
+        rationale: 'Counter-trend sniper pivot off multi-timeframe divergence and volume exhaustion.',
+      },
+    ],
+  };
+}
+
+export function detectFinanceStrategyIntent(raw: string): {
+  asset: AssetInfo;
+  regime: MarketRegime;
+  isOptionsIntent: boolean;
+  symbol: string;
+  signal: string;
+} | null {
   if (!raw) return null;
   const trimmed = raw.trim();
   const lower = trimmed.toLowerCase();
 
-  const isStrategyKeywords =
-    /options?\s+strateg(?:ies|y)|option\s+spread|volatility\s+engine|straddle|strangle|iron\s+condor|screen\s+top\s+(?:bullish|bearish)?\s*options/i.test(lower) ||
-    (/\b(screen|scanner|strategies|strategy)\b/i.test(lower) && /\b(nifty|banknifty|finnifty|sensex|options)\b/i.test(lower));
+  // Financial strategy trigger signals
+  const hasStrategyKeywords =
+    /\b(strategy|strategies|setup|setups|trade|trading|screen|scanner|bullish|bearish|neutral|reversal|options?|call|put|spread|straddle|condor)\b/i.test(lower) ||
+    /what\s+strategy\s+to\s+choose|which\s+strategy|choose\s+strategy|trade\s+plan/i.test(lower);
 
-  if (!isStrategyKeywords) return null;
+  if (!hasStrategyKeywords) return null;
 
-  const tickerMatch = trimmed.match(/\b(NIFTY|BANKNIFTY|FINNIFTY|SENSEX|RELIANCE|TCS|INFY|HDFCBANK|SPY|QQQ|AAPL|MSFT|NVDA|TSLA)\b/i);
-  const symbol = tickerMatch ? tickerMatch[1].toUpperCase() : 'NIFTY';
-  const signal = lower.includes('bearish') ? 'BEARISH' : 'BULLISH';
+  // 1. Identify financial asset
+  let matchedAsset: AssetInfo | null = null;
+  const sortedNames = Object.keys(KNOWN_FINANCIAL_ASSETS).sort((a, b) => b.length - a.length);
 
-  return { symbol, signal };
+  for (const name of sortedNames) {
+    const regex = new RegExp(`\\b${name.replace('/', '\\/')}\\b`, 'i');
+    if (regex.test(lower)) {
+      matchedAsset = KNOWN_FINANCIAL_ASSETS[name];
+      break;
+    }
+  }
+
+  // Ticker symbol regex fallback (e.g. BTC, ETH, NIFTY, GOLD, TSLA, AAPL, etc.)
+  if (!matchedAsset) {
+    const tickerMatch = trimmed.match(/\b(NIFTY|BANKNIFTY|FINNIFTY|SENSEX|GOLD|SILVER|CRUDE|BRENT|BTC|ETH|SOL|XRP|ADA|DOGE|EURUSD|GBPUSD|USDINR|USDJPY|RELIANCE|TCS|INFY|HDFC|AAPL|TSLA|NVDA|MSFT)\b/i);
+    if (tickerMatch) {
+      const t = tickerMatch[1].toLowerCase();
+      matchedAsset = KNOWN_FINANCIAL_ASSETS[t] || {
+        symbol: tickerMatch[1].toUpperCase(),
+        name: tickerMatch[1].toUpperCase(),
+        category: 'Stock',
+        currency: '$',
+      };
+    }
+  }
+
+  if (!matchedAsset) {
+    // If user explicitly asks "what strategy to choose" with a financial regime
+    if (/(bullish|bearish|neutral|reversal)/i.test(lower) && /(strategy|strategies|options|stocks|crypto|forex|commodity)/i.test(lower)) {
+      matchedAsset = {
+        symbol: 'MARKET',
+        name: 'Financial Market',
+        category: 'Stock',
+        currency: '$',
+      };
+    } else {
+      return null;
+    }
+  }
+
+  // 2. Identify market regimes mentioned
+  const regimes: string[] = [];
+  if (/\b(bullish|bull|long|uptrend|buy|buying)\b/i.test(lower)) regimes.push('BULLISH');
+  if (/\b(bearish|bear|short|downtrend|sell|selling)\b/i.test(lower)) regimes.push('BEARISH');
+  if (/\b(neutral|range-bound|range bound|sideways|consolidation|condor)\b/i.test(lower)) regimes.push('NEUTRAL');
+  if (/\b(reversal|mean reversion|mean-reversion|pivot|contrarian|exhaustion|turnaround)\b/i.test(lower)) regimes.push('REVERSAL');
+
+  let regime: MarketRegime = 'ALL_REGIMES';
+  if (regimes.length === 1) {
+    regime = regimes[0] as MarketRegime;
+  } else if (regimes.length > 1) {
+    regime = 'MULTI_REGIME';
+  } else {
+    regime = 'ALL_REGIMES';
+  }
+
+  const isOptionsIntent = /\b(option|options|strike|expiry|spread|straddle|condor)\b/i.test(lower);
+
+  return {
+    symbol: matchedAsset.symbol,
+    signal: regime,
+    asset: matchedAsset,
+    regime,
+    isOptionsIntent,
+  };
 }
 
 export function detectSubmissionApproval(
@@ -175,14 +564,14 @@ export function detectSubmissionApproval(
         {
           id: 1,
           action: 'allow_once',
-          label: 'Execute \'' + trimmed + '\' in isolated sandbox',
+          label: `Execute '${trimmed}' in isolated sandbox`,
           detail: 'Run shell command safely within workspace execution constraints.',
           recommended: true,
         },
         {
           id: 2,
           action: 'allow_and_stream',
-          label: 'Execute \'' + trimmed + '\' and stream live terminal output',
+          label: `Execute '${trimmed}' and stream live terminal output`,
           detail: 'Stream stdout & stderr chunks directly to chat console.',
         },
         {
@@ -194,13 +583,13 @@ export function detectSubmissionApproval(
         {
           id: 4,
           action: 'always_allow',
-          label: 'Always allow \'' + trimmed + '\' in this session (Always Allow)',
+          label: `Always allow '${trimmed}' in this session (Always Allow)`,
           detail: 'Whitelist this command pattern to prevent redundant authorization gates.',
         },
         {
           id: 5,
           action: 'deny',
-          label: 'No (tell ' + agentRef + ' what to do instead)',
+          label: `No (tell ${agentRef} what to do instead)`,
           detail: 'Halt command execution and redirect agent workflow.',
         },
       ],
@@ -229,84 +618,75 @@ export function detectSubmissionApproval(
         {
           id: 1,
           action: 'allow_once',
-          label: 'Allow & save \'' + filename + '\' to workspace',
+          label: `Allow & save '${filename}' to workspace`,
           detail: 'Write verified script directly into the workspace root.',
           recommended: true,
         },
         {
           id: 2,
           action: isPy ? 'allow_and_run' : 'allow_in_conversation',
-          label: 'Save \'' + filename + '\' and execute immediately (' + (isPy ? 'python ' + filename : 'inspect in workspace') + ')',
+          label: `Save '${filename}' and execute immediately (${isPy ? 'python ' + filename : 'inspect in workspace'})`,
           detail: 'Atomic disk write followed by automatic execution in sandbox.',
         },
         {
           id: 3,
           action: 'customize',
-          label: 'Inspect & customize \'' + filename + '\' code before committing',
+          label: `Inspect & customize '${filename}' code before committing`,
           detail: 'Review diff lines, modify parameters, or adjust imports.',
         },
         {
           id: 4,
           action: 'always_allow',
           label: 'Always allow workspace file modifications in this session (Always Allow)',
-          detail: 'Auto-approves future file writes by ' + agentRef + ' for the remainder of this session.',
+          detail: `Auto-approves future file writes by ${agentRef} for the remainder of this session.`,
         },
         {
           id: 5,
           action: 'deny',
-          label: 'No (tell ' + agentRef + ' what to do instead)',
+          label: `No (tell ${agentRef} what to do instead)`,
           detail: 'Reject this file write and provide alternate requirements or corrections.',
         },
       ],
     };
   }
 
-  // 3. Quantitative Finance Strategy Selection (FinanceStrategyMasterSelection)
+  // 3. Multi-Asset Quantitative Financial Strategy (Stocks, Index, Commodity, Crypto, Forex)
   const finIntent = detectFinanceStrategyIntent(trimmed);
   if (finIntent) {
-    const { symbol, signal } = finIntent;
+    const { asset, regime, isOptionsIntent } = finIntent;
+    const strategyBundle = generateCandidateStrategiesForAsset(asset, regime, isOptionsIntent);
+    const firstCand = strategyBundle.candidates[0];
+
+    const regimeLabel =
+      regime === 'ALL_REGIMES' || regime === 'MULTI_REGIME'
+        ? 'Strategy Selection'
+        : `${regime} Strategy`;
+
+    const summaryText =
+      regime === 'ALL_REGIMES' || regime === 'MULTI_REGIME'
+        ? `What strategy to choose for ${asset.name} (${asset.category})?`
+        : `Select ${regime} Strategy for ${asset.name} (${asset.category})`;
+
     return {
       approval_id: 'fin-gate-' + Date.now(),
       tool_name: 'FinanceStrategyMasterSelection',
-      target_resource: symbol + ' · ' + signal + ' Options Strategy',
-      human_summary: 'Select Master Strategy for ' + symbol + ' (' + signal + ')',
+      target_resource: isOptionsIntent
+        ? `${asset.symbol} · ${regime === 'ALL_REGIMES' || regime === 'MULTI_REGIME' ? 'Options Strategy' : `${regime} Options Strategy`}`
+        : `${asset.symbol} (${asset.category}) · ${regimeLabel}`,
+      human_summary: summaryText,
       mutation_risk: 'medium',
       action_hash: 'fin-' + Math.random().toString(36).substring(2, 10),
-      description: 'Screen options strategies for ' + symbol,
+      description: `Screen ${regimeLabel.toLowerCase()} setups for ${asset.name}`,
       arguments: {
-        symbol,
-        signal,
-        current_price: 25400,
-        lot_size: 25,
+        symbol: asset.symbol,
+        category: asset.category,
+        signal: regime,
+        current_price: asset.basePrice || 25000,
+        lot_size: asset.lotSize || 1,
         expiry: '26-SEP-2026',
-        currency: 'INR',
-        master_recommended: 'strat-1',
-        candidates: [
-          {
-            candidate_id: 'strat-1',
-            category: 'VOLATILITY_ARBITRAGE',
-            technology_tag: 'DELTA_NEUTRAL',
-            strategy_name: 'Delta-Neutral Volatility Engine',
-            strategy_type: 'Options Spread',
-            legs: [{ action: 'BUY', type: 'CE', strike: 25500, premium_est: 110 }],
-            win_rate_est: '74%',
-            risk_reward_actual: '1:2.8',
-            max_loss_per_lot: '₹2,200',
-            rationale: 'Captures volatility crush while preserving delta-neutral hedging.',
-          },
-          {
-            candidate_id: 'strat-2',
-            category: 'DIRECTIONAL_MOMENTUM',
-            technology_tag: 'MOMENTUM_BREAKOUT',
-            strategy_name: 'Bull Call Algorithmic Ladder',
-            strategy_type: 'Bull Spread',
-            legs: [{ action: 'BUY', type: 'CE', strike: 25400, premium_est: 140 }],
-            win_rate_est: '68%',
-            risk_reward_actual: '1:3.2',
-            max_loss_per_lot: '₹3,500',
-            rationale: 'High momentum breakout tracking system with defined risk.',
-          },
-        ],
+        currency: asset.currency,
+        master_recommended: strategyBundle.master_recommended,
+        candidates: strategyBundle.candidates,
       },
       timeout_seconds: 120,
       created_at: Date.now(),
@@ -316,33 +696,35 @@ export function detectSubmissionApproval(
         {
           id: 1,
           action: 'allow_once',
-          label: 'Execute Master Strategy (Delta-Neutral Volatility Engine)',
-          detail: 'Optimal win rate: 74% • Max loss: ₹2,200.',
+          label: `Execute Strategy (${firstCand.strategy_name})`,
+          detail: `Optimal win rate: ${firstCand.win_rate_est || '74%'} • Max loss: ${firstCand.max_loss_per_lot || '$1,500'}.`,
           recommended: true,
         },
         {
           id: 2,
           action: 'select_alternative',
-          label: 'Execute Alternative Directional Momentum Breakout Ladder',
-          detail: 'Higher momentum breakout strategy with dynamic trail stop.',
+          label: strategyBundle.candidates[1]
+            ? `Execute Alternative (${strategyBundle.candidates[1].strategy_name})`
+            : 'Execute Alternative Tactical Setup',
+          detail: 'Alternative strategy setup with dynamic trail stop.',
         },
         {
           id: 3,
           action: 'customize',
-          label: 'Customize strike prices, premium limits & expiry dates',
-          detail: 'Manually tune legs, lots, and risk allocation.',
+          label: 'Customize entry price, stop-loss & profit targets',
+          detail: 'Manually tune position sizing, risk limits, and leverage.',
         },
         {
           id: 4,
           action: 'always_allow',
           label: 'Always auto-execute strategies matching risk profile (Always Allow)',
-          detail: 'Authorize automated multi-leg position sizing within risk limit.',
+          detail: 'Authorize automated position sizing within risk parameters.',
         },
         {
           id: 5,
           action: 'deny',
-          label: 'No (tell ' + agentRef + ' what to do instead)',
-          detail: 'Reject strategy recommendation and scan alternative sectors.',
+          label: `No (tell ${agentRef} what to do instead)`,
+          detail: 'Reject strategy recommendation and scan alternative assets.',
         },
       ],
     };

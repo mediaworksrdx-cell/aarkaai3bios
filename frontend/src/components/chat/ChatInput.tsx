@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ArrowUp, Square, Sparkles, ArrowRight } from 'lucide-react';
 import { ModelSwitcher } from './ModelSwitcher';
-import { EffortLevel, ToolApprovalRequest } from '@/types';
+import { EffortLevel, ToolApprovalRequest, CandidateFinanceStrategy } from '@/types';
 import { SKILL_CATEGORIES } from '@/components/skills/SkillsModal';
 import { isTerminalCommand, detectSubmissionApproval } from '@/lib/commandDetection';
 import { FloatingApprovalDrawer } from './FloatingApprovalDrawer';
@@ -120,10 +120,25 @@ export function ChatInput({
   const handleResolveCommandApproval = async (
     approvalId: string,
     decision: 'approve' | 'deny',
-    reason?: string
+    reason?: string,
+    selectedMasterStrategy?: string
   ) => {
     if (decision === 'approve') {
-      const cmdToExecute = pendingCommand || effectiveInput.trim();
+      let cmdToExecute = pendingCommand || effectiveInput.trim();
+
+      // If user approved a finance strategy and selected a candidate, format explicit execution prompt
+      if (pendingApproval && (pendingApproval.tool_name === 'FinanceStrategyMasterSelection' || pendingApproval.arguments?.candidates)) {
+        const candidates = pendingApproval.arguments?.candidates as CandidateFinanceStrategy[] | undefined;
+        const symbol = pendingApproval.arguments?.symbol || '';
+        const category = pendingApproval.arguments?.category || '';
+        if (candidates && candidates.length > 0) {
+          const chosen = (selectedMasterStrategy && candidates.find((c) => c.candidate_id === selectedMasterStrategy)) || candidates[0];
+          if (chosen) {
+            cmdToExecute = `Execute ${chosen.strategy_name} for ${symbol || 'asset'}${category ? ` (${category})` : ''}: ${chosen.rationale || `Follow disciplined risk parameters with ${chosen.win_rate_est || 'high'} win rate and ${chosen.risk_reward_actual || '1:2+'} R:R`}`;
+          }
+        }
+      }
+
       setPendingApproval(null);
       setPendingCommand(null);
       setInput('');

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   SquareTerminal,
@@ -176,10 +176,26 @@ export function FloatingApprovalDrawer({
   const actionTarget = actionCommand || targetResource || (request.arguments ? JSON.stringify(request.arguments) : request.tool_name);
 
   // Dynamic or synthesized options
-  const dynamicOptions: DynamicApprovalOption[] =
+  const baseOptions: DynamicApprovalOption[] =
     request.dynamic_options && request.dynamic_options.length > 0
       ? request.dynamic_options
       : synthesizeOptions(request, actionTarget);
+
+  const dynamicOptions = useMemo(() => {
+    if (!isFinanceStrategy || !selectedCandidateId) return baseOptions;
+    const currentSelected = candidates.find((c) => c.candidate_id === selectedCandidateId) || candidates[0];
+    if (!currentSelected) return baseOptions;
+    return baseOptions.map((opt) => {
+      if (opt.id === 1) {
+        return {
+          ...opt,
+          label: `Execute Strategy (${currentSelected.strategy_name})`,
+          detail: `Optimal win rate: ${currentSelected.win_rate_est || '74%'} • Max loss: ${currentSelected.max_loss_per_lot || '$1,500'}.`,
+        };
+      }
+      return opt;
+    });
+  }, [baseOptions, isFinanceStrategy, selectedCandidateId, candidates]);
 
   const humanTitle = getHumanTitle(request);
 
@@ -273,13 +289,25 @@ export function FloatingApprovalDrawer({
       return;
     }
 
+    if (isFinanceStrategy && (selectedOption === 2 || activeOpt?.action === 'select_alternative') && candidates[1]) {
+      const cand2 = candidates[1];
+      setSelectedCandidateId(cand2.candidate_id);
+      if (effectiveResolve) {
+        await effectiveResolve(request.approval_id, 'approve', undefined, cand2.candidate_id);
+      }
+      setStatus('approved');
+      setTimeout(() => {
+        setIsDismissed(true);
+        if (effectiveDismiss) effectiveDismiss();
+      }, 400);
+      return;
+    }
+
     if (
-      selectedOption === 2 ||
-      selectedOption === 3 ||
-      selectedOption === 4 ||
       activeOpt?.action === 'always_allow' ||
       activeOpt?.action === 'allow_in_conversation' ||
-      activeOpt?.action === 'allow_in_project'
+      activeOpt?.action === 'allow_in_project' ||
+      (!isFinanceStrategy && (selectedOption === 2 || selectedOption === 3 || selectedOption === 4))
     ) {
       if (effectiveAlwaysAllow) effectiveAlwaysAllow(request.tool_name);
     }
@@ -483,6 +511,18 @@ export function FloatingApprovalDrawer({
               const isSelected = cand.candidate_id === selectedCandidateId;
               const isMaster = cand.candidate_id === strategyData.master_recommended;
 
+              const tag = (cand.technology_tag || cand.strategy_type || '').toUpperCase();
+              let regimeBadge = 'border-slate-500/30 bg-slate-500/10 text-slate-400';
+              if (tag.includes('BULL')) {
+                regimeBadge = 'border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400';
+              } else if (tag.includes('BEAR')) {
+                regimeBadge = 'border-rose-500/40 bg-rose-500/15 text-rose-600 dark:text-rose-400';
+              } else if (tag.includes('NEUTRAL') || tag.includes('VOLATILITY') || tag.includes('DELTA') || tag.includes('GRID')) {
+                regimeBadge = 'border-blue-500/40 bg-blue-500/15 text-blue-600 dark:text-blue-400';
+              } else if (tag.includes('REVERSAL') || tag.includes('EXHAUSTION') || tag.includes('SWEEP') || tag.includes('PIVOT')) {
+                regimeBadge = 'border-purple-500/40 bg-purple-500/15 text-purple-600 dark:text-purple-400';
+              }
+
               return (
                 <div
                   key={cand.candidate_id}
@@ -490,8 +530,8 @@ export function FloatingApprovalDrawer({
                   className={`p-3 rounded-xl border transition-all cursor-pointer text-left ${
                     isSelected
                       ? isInline
-                        ? 'bg-[var(--bg-tertiary)] border-[var(--border-accent)] shadow-sm'
-                        : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-400 dark:border-neutral-600 shadow-sm'
+                        ? 'bg-[var(--bg-tertiary)] border-[var(--border-accent)] ring-1 ring-[var(--border-accent)] shadow-sm'
+                        : 'bg-neutral-100 dark:bg-neutral-800 border-neutral-400 dark:border-neutral-500 ring-1 ring-neutral-400 shadow-sm'
                       : isInline
                         ? 'bg-[var(--bg-secondary)] border-[var(--border)] hover:bg-[var(--bg-hover)]'
                         : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
@@ -507,12 +547,26 @@ export function FloatingApprovalDrawer({
                     >
                       {cand.strategy_name}
                     </span>
-                    {isMaster && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-800 dark:text-amber-400 border border-amber-500/40">
-                        ★ RECOMMENDED
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1">
+                      {isMaster && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-800 dark:text-amber-400 border border-amber-500/40">
+                          ★ RECOMMENDED
+                        </span>
+                      )}
+                      {isSelected && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/40">
+                          ✓ SELECTED
+                        </span>
+                      )}
+                    </div>
                   </div>
+                  {cand.technology_tag && (
+                    <div className="mb-1.5">
+                      <span className={`text-[9px] font-semibold font-mono px-1.5 py-0.5 rounded border ${regimeBadge}`}>
+                        {cand.technology_tag}
+                      </span>
+                    </div>
+                  )}
                   <div
                     className={
                       isInline

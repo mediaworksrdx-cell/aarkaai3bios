@@ -12,7 +12,7 @@ vi.mock('@/context/ChatContext', () => ({
   }),
 }));
 
-describe('ChatInput Command & Intent Permission Flow - 4 Cases', () => {
+describe('ChatInput Command & Intent Permission Flow - Multi-Asset & Regimes', () => {
   it('submits normal conversational text directly without showing permission popup', () => {
     const onSend = vi.fn();
     render(
@@ -106,7 +106,7 @@ describe('ChatInput Command & Intent Permission Flow - 4 Cases', () => {
     });
   });
 
-  it('Case 3: Intercepts quantitative finance strategy selection for NIFTY and displays strategy cards with Aarka Engine badge', async () => {
+  it('Case 3: Intercepts quantitative finance strategy selection for NIFTY, displays strategy cards, and triggers chosen strategy on approve', async () => {
     const onSend = vi.fn();
     render(
       <ChatInput
@@ -135,11 +135,107 @@ describe('ChatInput Command & Intent Permission Flow - 4 Cases', () => {
     fireEvent.click(approveBtn);
 
     await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith(prompt);
+      expect(onSend).toHaveBeenCalledWith(
+        expect.stringContaining('Execute Delta-Neutral Volatility Engine for NIFTY')
+      );
     });
   });
 
-  it('Case 4: Intercepts Claude engine persona test for db_backup.py with amber badge and Claude tailored options', async () => {
+  it('Case 4: Selecting a different candidate card triggers that specific strategy execution', async () => {
+    const onSend = vi.fn();
+    render(
+      <ChatInput
+        onSend={onSend}
+        isStreaming={false}
+        selectedModel="aarka-2.0"
+        onModelChange={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText(/Ask Aarka anything/i);
+    fireEvent.change(textarea, { target: { value: 'Screen top bullish options strategies for NIFTY' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+
+    const drawer = screen.getByTestId('floating-approval-drawer');
+    expect(drawer).toBeInTheDocument();
+
+    // Click the second candidate card
+    const card2 = within(drawer).getByText('Bull Call Algorithmic Ladder');
+    fireEvent.click(card2);
+
+    // Option 1 dynamically reflects the selected strategy
+    expect(within(drawer).getByText(/Execute Strategy \(Bull Call Algorithmic Ladder\)/i)).toBeInTheDocument();
+
+    const approveBtn = within(drawer).getByRole('button', { name: /Approve/i });
+    fireEvent.click(approveBtn);
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(
+        expect.stringContaining('Execute Bull Call Algorithmic Ladder for NIFTY')
+      );
+    });
+  });
+
+  it('Case 5: Multi-Asset Commodity Interception -> Gold Reversal popup and execution', async () => {
+    const onSend = vi.fn();
+    render(
+      <ChatInput
+        onSend={onSend}
+        isStreaming={false}
+        selectedModel="aarka-2.0"
+        onModelChange={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText(/Ask Aarka anything/i);
+    fireEvent.change(textarea, { target: { value: 'Suggest a reversal trading strategy for Gold' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+
+    const drawer = screen.getByTestId('floating-approval-drawer');
+    expect(drawer).toBeInTheDocument();
+    expect(within(drawer).getByText(/Select REVERSAL Strategy for Gold \(Commodity\)/i)).toBeInTheDocument();
+
+    const approveBtn = within(drawer).getByRole('button', { name: /Approve/i });
+    fireEvent.click(approveBtn);
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(
+        expect.stringContaining('for GOLD (Commodity)')
+      );
+    });
+  });
+
+  it('Case 6: Multi-Asset Crypto Interception -> Bitcoin Neutral Grid popup and execution', async () => {
+    const onSend = vi.fn();
+    render(
+      <ChatInput
+        onSend={onSend}
+        isStreaming={false}
+        selectedModel="aarka-2.0"
+        onModelChange={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText(/Ask Aarka anything/i);
+    fireEvent.change(textarea, { target: { value: 'What neutral strategy should I use for Bitcoin?' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
+
+    const drawer = screen.getByTestId('floating-approval-drawer');
+    expect(drawer).toBeInTheDocument();
+    expect(within(drawer).getByText(/Select NEUTRAL Strategy for Bitcoin \(Crypto\)/i)).toBeInTheDocument();
+    expect(within(drawer).getByText('BTC Range-Bound Volatility Harvest')).toBeInTheDocument();
+
+    const approveBtn = within(drawer).getByRole('button', { name: /Approve/i });
+    fireEvent.click(approveBtn);
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(
+        expect.stringContaining('Execute BTC Range-Bound Volatility Harvest for BTC (Crypto)')
+      );
+    });
+  });
+
+  it('Case 7: Claude engine persona test for db_backup.py with amber badge and Claude tailored options', async () => {
     const onSend = vi.fn();
     render(
       <ChatInput

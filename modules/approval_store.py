@@ -313,7 +313,9 @@ class SQLiteApprovalStore(ApprovalStoreInterface):
             is_guest = row_user in ("default", "guest_visitor", "None", "") or req_user in ("default", "guest_visitor", "None", "")
             is_match = (row_user == req_user) or is_guest or (req_user == "admin")
             if not is_match:
-                logger.info("Permitting approval resolution with valid gate UUID for user %s (owner was %s)", req_user, row_user)
+                conn.rollback()
+                audit_event("approval.unauthorized_access", approval_id=approval_id, attempted_by=req_user, owner=row_user)
+                return ApprovalResponse(approval_id, "unauthorized", f"User '{req_user}' does not own approval request '{approval_id}'")
 
             audit_event("approval.resolved_attempt", approval_id=approval_id, resolver=req_user, owner=row_user)
 
