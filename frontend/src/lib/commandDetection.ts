@@ -304,6 +304,42 @@ export function generateCandidateStrategiesForAsset(
   }
 
   if (regime === 'BEARISH') {
+    if (isOptionsIntent) {
+      const p = Math.round(asset.basePrice || 25400);
+      return {
+        master_recommended: 'candidate_strat_1',
+        candidates: [
+          {
+            candidate_id: 'candidate_strat_1',
+            category: 'BEARISH',
+            technology_tag: 'BEAR_PUT_SPREAD',
+            strategy_name: 'Bear Put Spread (Moderate Bearish)',
+            strategy_type: 'Options Spread',
+            legs: [
+              { action: 'BUY', type: 'PE', strike: p, premium_est: 130 },
+              { action: 'SELL', type: 'PE', strike: p - 200, premium_est: 50 },
+            ],
+            win_rate_est: '71%',
+            risk_reward_actual: '1:2.5',
+            max_loss_per_lot: `${cur}2,000`,
+            rationale: 'Defined-risk vertical put spread capitalizing on downside continuation.',
+          },
+          {
+            candidate_id: 'candidate_strat_2',
+            category: 'BEARISH',
+            technology_tag: 'LONG_PUT',
+            strategy_name: 'Long Put Breakdown Accelerator',
+            strategy_type: 'Long Put',
+            legs: [{ action: 'BUY', type: 'PE', strike: p - 100, premium_est: 95 }],
+            win_rate_est: '64%',
+            risk_reward_actual: '1:3.4',
+            max_loss_per_lot: `${cur}2,375`,
+            rationale: 'Aggressive directional put purchase targeting high-velocity breakdown.',
+          },
+        ],
+      };
+    }
+
     return {
       master_recommended: 'candidate_strat_1',
       candidates: [
@@ -342,6 +378,47 @@ export function generateCandidateStrategiesForAsset(
   }
 
   if (regime === 'NEUTRAL') {
+    if (isOptionsIntent) {
+      const p = Math.round(asset.basePrice || 25400);
+      return {
+        master_recommended: 'candidate_strat_1',
+        candidates: [
+          {
+            candidate_id: 'candidate_strat_1',
+            category: 'NEUTRAL',
+            technology_tag: 'IRON_CONDOR',
+            strategy_name: 'Iron Condor (Neutral / Range-Bound)',
+            strategy_type: 'Options Spread',
+            legs: [
+              { action: 'SELL', type: 'CE', strike: p + 200, premium_est: 60 },
+              { action: 'BUY', type: 'CE', strike: p + 300, premium_est: 25 },
+              { action: 'SELL', type: 'PE', strike: p - 200, premium_est: 60 },
+              { action: 'BUY', type: 'PE', strike: p - 300, premium_est: 25 },
+            ],
+            win_rate_est: '82%',
+            risk_reward_actual: '1:2.0',
+            max_loss_per_lot: `${cur}1,750`,
+            rationale: 'Double credit spread harvesting theta decay within well-defined volatility boundaries.',
+          },
+          {
+            candidate_id: 'candidate_strat_2',
+            category: 'NEUTRAL',
+            technology_tag: 'SHORT_STRANGLE',
+            strategy_name: 'Short Strangle Premium Harvest',
+            strategy_type: 'Options Strangle',
+            legs: [
+              { action: 'SELL', type: 'CE', strike: p + 350, premium_est: 45 },
+              { action: 'SELL', type: 'PE', strike: p - 350, premium_est: 45 },
+            ],
+            win_rate_est: '86%',
+            risk_reward_actual: '1:1.8',
+            max_loss_per_lot: `${cur}2,900`,
+            rationale: 'High probability OTM premium capture in low-implied-volatility regimes.',
+          },
+        ],
+      };
+    }
+
     return {
       master_recommended: 'candidate_strat_1',
       candidates: [
@@ -380,6 +457,47 @@ export function generateCandidateStrategiesForAsset(
   }
 
   if (regime === 'REVERSAL') {
+    if (isOptionsIntent) {
+      const p = Math.round(asset.basePrice || 25400);
+      return {
+        master_recommended: 'candidate_strat_1',
+        candidates: [
+          {
+            candidate_id: 'candidate_strat_1',
+            category: 'REVERSAL',
+            technology_tag: 'REVERSE_BUTTERFLY',
+            strategy_name: 'Reverse Iron Butterfly (Vol Expansion)',
+            strategy_type: 'Options Reversal',
+            legs: [
+              { action: 'BUY', type: 'CE', strike: p, premium_est: 120 },
+              { action: 'BUY', type: 'PE', strike: p, premium_est: 120 },
+              { action: 'SELL', type: 'CE', strike: p + 250, premium_est: 35 },
+              { action: 'SELL', type: 'PE', strike: p - 250, premium_est: 35 },
+            ],
+            win_rate_est: '68%',
+            risk_reward_actual: '1:3.2',
+            max_loss_per_lot: `${cur}2,100`,
+            rationale: 'Exploits sharp reversal breakout out of consolidation with defined risk.',
+          },
+          {
+            candidate_id: 'candidate_strat_2',
+            category: 'REVERSAL',
+            technology_tag: 'PIVOT_RATIO_SPREAD',
+            strategy_name: 'Contrarian Pivot Ratio Spread',
+            strategy_type: 'Options Ratio Spread',
+            legs: [
+              { action: 'BUY', type: 'CE', strike: p + 50, premium_est: 90 },
+              { action: 'SELL', type: 'CE', strike: p + 200, premium_est: 40 },
+            ],
+            win_rate_est: '72%',
+            risk_reward_actual: '1:3.0',
+            max_loss_per_lot: `${cur}1,500`,
+            rationale: 'Asymmetric risk-reward ratio spread timed at exhaustion pivot support.',
+          },
+        ],
+      };
+    }
+
     return {
       master_recommended: 'candidate_strat_1',
       candidates: [
@@ -481,7 +599,7 @@ export function detectFinanceStrategyIntent(raw: string): {
   // Financial strategy trigger signals
   const hasStrategyKeywords =
     /\b(strategy|strategies|setup|setups|trade|trading|screen|scanner|bullish|bearish|neutral|reversal|options?|call|put|spread|straddle|condor)\b/i.test(lower) ||
-    /what\s+strategy\s+to\s+choose|which\s+strategy|choose\s+strategy|trade\s+plan/i.test(lower);
+    /what\s+strategy\s+to\s+choose|which\s+strategy|choose\s+strategy|trade\s+plan|what\s+strategy/i.test(lower);
 
   if (!hasStrategyKeywords) return null;
 
@@ -512,8 +630,12 @@ export function detectFinanceStrategyIntent(raw: string): {
   }
 
   if (!matchedAsset) {
-    // If user explicitly asks "what strategy to choose" with a financial regime
-    if (/(bullish|bearish|neutral|reversal)/i.test(lower) && /(strategy|strategies|options|stocks|crypto|forex|commodity)/i.test(lower)) {
+    // If user asks about strategy, regime, or what strategy to choose without a specific asset
+    if (
+      /(bullish|bearish|neutral|reversal)/i.test(lower) ||
+      /what\s+strategy|which\s+strategy|choose\s+strategy|trade\s+plan|recommend\s+strategy/i.test(lower) ||
+      /(strategy|strategies)\b/i.test(lower)
+    ) {
       matchedAsset = {
         symbol: 'MARKET',
         name: 'Financial Market',

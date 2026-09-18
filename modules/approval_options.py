@@ -3,6 +3,7 @@ AARKAAI – Dynamic Contextual Approval Options Engine.
 Synthesizes query-specific, domain-tailored, and model-aware authorization choices
 for Aarka Autonomous Engine, Gemini Pro/Flash, and Claude Sonnet/Opus.
 """
+import re
 from typing import List, Dict, Any
 
 def detect_model_persona(model_name: str = "") -> Dict[str, str]:

@@ -153,12 +153,15 @@ _FACTUAL_PREFIXES = [
 ]
 
 _STRATEGY_KEYWORDS = [
-    "strategy", "option", "options", "call", "put", "spread",
+    "strategy", "strategies", "option", "options", "call", "put", "spread",
     "iron condor", "straddle", "strangle", "covered call",
     "bull call", "bear put", "technical", "rsi", "macd",
     "ema", "bollinger", "signal", "setup", "trade setup",
     "lot size", "stop loss", "target", "risk reward",
     "technical analysis", "chart", "indicator",
+    "bullish", "bearish", "neutral", "reversal",
+    "screener", "scanner", "screen",
+    "what strategy", "choose strategy", "which strategy", "trade plan",
 ]
 
 
@@ -678,6 +681,15 @@ def _has_live_finance_intent(query: str, domain: str, intent: str) -> bool:
         "chart", "trade", "buy", "sell", "portfolio", "etf", "mutual fund"
     ]
     if any(kw in q_clean for kw in stock_keywords):
+        return True
+
+    # Check for quantitative strategy, screener, options, or market regime intent
+    strategy_keywords = [
+        "strategy", "strategies", "bullish", "bearish", "neutral", "reversal",
+        "options", "option", "call", "put", "strike", "spread", "straddle", "condor",
+        "screener", "scanner", "setup", "setups", "trade plan", "nifty", "banknifty", "sensex"
+    ]
+    if any(kw in q_clean for kw in strategy_keywords):
         return True
 
     # Check for forex pairs or commodities explicitly
@@ -2395,71 +2407,109 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             logger.info("Finance circuit breaker is OPEN — skipping")
             context_parts.append("[System Note: Live market data feed is temporarily in cooling down state due to transient upstream network failures. Synthesizing from internal valuation and fundamental knowledge.]")
 
-    # Technical Analysis + Options Strategy (premium feature)
+    # Technical Analysis + Multi-Asset Strategy Selection (Stocks, Index, Commodity, Crypto, Forex)
     q_lower = query.lower()
     is_strategy_query = any(kw in q_lower for kw in _STRATEGY_KEYWORDS)
-    if is_strategy_query and fin_tickers:
+    if is_strategy_query:
         try:
             from modules import technical, options_strategy, subscription
 
             # Check freemium access
             access = subscription.check_access(user_id, feature="strategy")
             if access["allowed"]:
-                # Run technical analysis on first detected ticker
-                target_symbol = fin_tickers[0]
-                indicators = technical.compute_indicators(target_symbol)
-                if indicators:
-                    signal = technical.get_signal(indicators)
-                    tech_summary = technical.format_technical_summary(target_symbol, indicators, signal)
-                    context_parts.append(f"[Technical Analysis]\n{tech_summary}")
-                    sources.append("technical")
+                if not fin_tickers:
+                    fin_tickers = finance.extract_tickers(query)
 
-                    # Generate options strategy
-                    strategy = options_strategy.generate_strategy(
+                target_symbol = fin_tickers[0] if fin_tickers else None
+                if not target_symbol:
+                    if any(w in q_lower for w in ["nifty", "nse"]): target_symbol = "^NSEI"
+                    elif any(w in q_lower for w in ["banknifty", "bank nifty"]): target_symbol = "^NSEBANK"
+                    elif any(w in q_lower for w in ["sensex", "bse"]): target_symbol = "^BSESN"
+                    elif any(w in q_lower for w in ["gold"]): target_symbol = "GC=F"
+                    elif any(w in q_lower for w in ["silver"]): target_symbol = "SI=F"
+                    elif any(w in q_lower for w in ["crude", "oil", "brent"]): target_symbol = "CL=F"
+                    elif any(w in q_lower for w in ["bitcoin", "btc"]): target_symbol = "BTC-USD"
+                    elif any(w in q_lower for w in ["ethereum", "eth"]): target_symbol = "ETH-USD"
+                    elif any(w in q_lower for w in ["solana", "sol"]): target_symbol = "SOL-USD"
+                    elif any(w in q_lower for w in ["eurusd", "eur/usd"]): target_symbol = "EURUSD=X"
+                    elif any(w in q_lower for w in ["gbpusd", "gbp/usd"]): target_symbol = "GBPUSD=X"
+                    elif any(w in q_lower for w in ["usdjpy", "usd/jpy"]): target_symbol = "USDJPY=X"
+                    elif any(w in q_lower for w in ["usdinr", "usd/inr"]): target_symbol = "USDINR=X"
+                    elif any(w in q_lower for w in ["reliance"]): target_symbol = "RELIANCE.NS"
+                    elif any(w in q_lower for w in ["tcs"]): target_symbol = "TCS.NS"
+                    elif any(w in q_lower for w in ["infy", "infosys"]): target_symbol = "INFY.NS"
+                    elif any(w in q_lower for w in ["apple", "aapl"]): target_symbol = "AAPL"
+                    elif any(w in q_lower for w in ["tesla", "tsla"]): target_symbol = "TSLA"
+                    elif any(w in q_lower for w in ["nvidia", "nvda"]): target_symbol = "NVDA"
+                    else: target_symbol = "MARKET"
+
+                # Detect regime from query
+                detected_signal = "NEUTRAL"
+                if any(w in q_lower for w in ["bullish", "bull", "long", "uptrend", "buy"]):
+                    detected_signal = "BULLISH"
+                elif any(w in q_lower for w in ["bearish", "bear", "short", "downtrend", "sell"]):
+                    detected_signal = "BEARISH"
+                elif any(w in q_lower for w in ["reversal", "pivot", "mean reversion", "exhaustion", "turnaround"]):
+                    detected_signal = "REVERSAL"
+                elif any(w in q_lower for w in ["neutral", "range", "sideways", "condor"]):
+                    detected_signal = "NEUTRAL"
+
+                indicators = None
+                if target_symbol != "MARKET":
+                    try:
+                        indicators = technical.compute_indicators(target_symbol)
+                    except Exception as ind_err:
+                        logger.warning("Error computing indicators for %s: %s", target_symbol, ind_err)
+
+                if not indicators:
+                    base_p = 25400.0 if ("nifty" in target_symbol.lower() or target_symbol == "^NSEI") else (63500.0 if "btc" in target_symbol.lower() else (2650.0 if "gc=" in target_symbol.lower() else 100.0))
+                    indicators = {
+                        "current_price": base_p,
+                        "atr": max(base_p * 0.015, 1.0),
+                        "rsi": 58.0 if detected_signal == "BULLISH" else (42.0 if detected_signal == "BEARISH" else 50.0),
+                        "bb_position": 0.5,
+                    }
+
+                signal = detected_signal if detected_signal != "NEUTRAL" else (technical.get_signal(indicators) if indicators and "signal" in indicators else "NEUTRAL")
+                tech_summary = technical.format_technical_summary(target_symbol, indicators, signal)
+                context_parts.append(f"[Technical Analysis]\n{tech_summary}")
+                sources.append("technical")
+
+                is_options_query = bool(re.search(r'\b(options?|calls?|puts?|strikes?|expir(?:y|ies)|spreads?|straddles?|condors?)\b', q_lower))
+
+                # Generate candidate strategies (20 institutional strategies for spot/futures/equities, or options if requested)
+                try:
+                    candidate_data = options_strategy.generate_candidate_strategies(
                         symbol=target_symbol,
                         indicators=indicators,
                         signal=signal,
                         risk_reward=5.0,
+                        is_options_intent=is_options_query,
                     )
-                    if strategy:
-                        strat_text = options_strategy.format_strategy_output(strategy)
-                        context_parts.append(f"[Options Strategy]\n{strat_text}")
-                        sources.append("strategy")
+                    if candidate_data:
+                        from modules.approval_store import get_approval_store
+                        appr_store = get_approval_store()
+                        clean_sym = target_symbol.replace("^", "").replace(".NS", "").replace("=F", "").replace("=X", "")
+                        summary_label = (
+                            f"Select Options Strategy for {clean_sym} ({signal})"
+                            if is_options_query
+                            else f"Select {signal} Strategy for {clean_sym}"
+                        )
+                        strat_req = appr_store.create_request(
+                            user_id=user_id,
+                            session_id=session_id,
+                            tool_name="FinanceStrategyMasterSelection",
+                            args=candidate_data,
+                            risk_level="HIGH",
+                            human_summary=summary_label,
+                            target_resource=clean_sym,
+                            timeout_seconds=120.0,
+                        )
+                        finance_strategy_req = strat_req.to_dict()
+                except Exception as strat_gate_err:
+                    logger.warning("Failed creating finance strategy approval gate: %s", strat_gate_err)
 
-                        is_options_query = bool(re.search(r'\b(options?|calls?|puts?|strikes?|expir(?:y|ies)|spreads?|straddles?|condors?)\b', q_lower))
-
-                        # Generate candidate strategies (20 institutional strategies for spot/futures/equities, or options if requested)
-                        try:
-                            candidate_data = options_strategy.generate_candidate_strategies(
-                                symbol=target_symbol,
-                                indicators=indicators,
-                                signal=signal,
-                                risk_reward=5.0,
-                                is_options_intent=is_options_query,
-                            )
-                            if candidate_data:
-                                from modules.approval_store import get_approval_store
-                                appr_store = get_approval_store()
-                                summary_label = (
-                                    f"Select Options Strategy for {target_symbol} ({signal})"
-                                    if is_options_query
-                                    else f"Select {signal} Strategy for {target_symbol}"
-                                )
-                                strat_req = appr_store.create_request(
-                                    user_id=user_id,
-                                    session_id=session_id,
-                                    tool_name="FinanceStrategyMasterSelection",
-                                    args=candidate_data,
-                                    risk_level="HIGH",
-                                    human_summary=summary_label,
-                                    target_resource=target_symbol,
-                                    timeout_seconds=120.0,
-                                )
-                                finance_strategy_req = strat_req.to_dict()
-                        except Exception as strat_gate_err:
-                            logger.warning("Failed creating finance strategy approval gate: %s", strat_gate_err)
-
-                    subscription.record_premium_usage(user_id)
+                subscription.record_premium_usage(user_id)
             else:
                 # Paywall message
                 context_parts.append(f"[Subscription]\n{access['message']}")
@@ -2621,6 +2671,28 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             "type": "approval_request",
             "payload": finance_strategy_req
         }
+        yield {"type": "status", "status": f"Waiting for operator strategy selection for {finance_strategy_req.get('target_resource', 'asset')}..."}
+
+        from modules.approval_store import get_approval_store
+        appr_store = get_approval_store()
+        approved, resolution_reason = appr_store.await_resolution(
+            approval_id=finance_strategy_req["approval_id"],
+            expected_action_hash=finance_strategy_req["action_hash"],
+            timeout_seconds=120.0,
+        )
+
+        yield {
+            "type": "approval_resolved",
+            "payload": {
+                "approval_id": finance_strategy_req["approval_id"],
+                "status": "approved" if approved else "rejected",
+                "resolved_at": int(time.time() * 1000)
+            }
+        }
+
+        if not approved:
+            yield {"type": "final", "content": f"Strategy selection cancelled by operator ({resolution_reason})."}
+            return
 
     user_facts = ""
     try:

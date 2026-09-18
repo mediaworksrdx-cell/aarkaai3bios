@@ -159,11 +159,16 @@ export function ChatInput({
     if (!textToSend || isStreaming) return;
 
     // Intent detection step: intercept commands, file edits, and finance strategies before execution
-    const interceptedApproval = detectSubmissionApproval(textToSend, selectedModel);
-    if (interceptedApproval) {
-      setPendingCommand(textToSend);
-      setPendingApproval(interceptedApproval);
-      return;
+    try {
+      const interceptedApproval = detectSubmissionApproval(textToSend, selectedModel);
+      if (interceptedApproval) {
+        console.log('[Aarka Intent Intercepted]', interceptedApproval);
+        setPendingCommand(textToSend);
+        setPendingApproval(interceptedApproval);
+        return;
+      }
+    } catch (err) {
+      console.warn('[Aarka Intent Interception Warning]', err);
     }
 
     // Normal conversational text flow
