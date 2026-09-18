@@ -2672,13 +2672,38 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         }
         yield {"type": "status", "status": f"Waiting for operator strategy selection for {finance_strategy_req.get('target_resource', 'asset')}..."}
 
+        import asyncio
         from modules.approval_store import get_approval_store
         appr_store = get_approval_store()
-        approved, resolution_reason = appr_store.await_resolution(
-            approval_id=finance_strategy_req["approval_id"],
-            expected_action_hash=finance_strategy_req["action_hash"],
-            timeout_seconds=120.0,
-        )
+
+        start_wait = time.time()
+        timeout_sec = 120.0
+        approved = False
+        resolution_reason = "Approval timed out"
+
+        while time.time() - start_wait < timeout_sec:
+            rec = appr_store.get_request(finance_strategy_req["approval_id"])
+            if not rec:
+                resolution_reason = "Approval record not found"
+                break
+            now_ts = time.time()
+            if rec.status == "APPROVED":
+                if rec.action_hash != finance_strategy_req["action_hash"]:
+                    approved = False
+                    resolution_reason = "Action hash mismatch"
+                else:
+                    approved = True
+                    resolution_reason = "Approved by user"
+                break
+            elif rec.status == "REJECTED":
+                approved = False
+                resolution_reason = "Action denied by user"
+                break
+            elif rec.status == "EXPIRED" or now_ts > rec.expires_at:
+                approved = False
+                resolution_reason = "Approval request expired"
+                break
+            await asyncio.sleep(0.25)
 
         yield {
             "type": "approval_resolved",

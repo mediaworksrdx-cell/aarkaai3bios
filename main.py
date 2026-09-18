@@ -1281,7 +1281,12 @@ async def prompt_stream(
             logger.error("Streaming error: %s", exc, exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'detail': 'Inference service encountered a temporary error. Please retry.'})}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
 
 
 @app.post("/strategy", response_model=StrategyResponse, tags=["premium"])
