@@ -39,6 +39,9 @@ function getHumanTitle(request: ToolApprovalRequest): string {
 
   if (request.human_summary) {
     const summary = request.human_summary.trim();
+    if (/^allow run /i.test(summary)) {
+      return summary.endsWith('?') ? summary : `${summary}?`;
+    }
     if (/^execute shell command:\s*pytest/i.test(summary) || /^pytest/i.test(cmd)) {
       if (cmd.includes('unit')) {
         return 'Allow run backend unit tests?';
@@ -66,7 +69,7 @@ function getHumanTitle(request: ToolApprovalRequest): string {
       }
       return 'Allow run unit tests?';
     }
-    return cmd ? `Allow run ${cmd.length > 35 ? cmd.slice(0, 35) + '...' : cmd}?` : 'Allow run command?';
+    return cmd ? `Allow run ${cmd}?` : 'Allow run command?';
   }
 
   if (request.tool_name === 'FileEditTool') {
@@ -177,7 +180,7 @@ export function FloatingApprovalDrawer({
     }
   }, [request.status, status]);
 
-  // Live countdown timer (runs in background for automatic timeout expiry)
+  // Live countdown timer
   useEffect(() => {
     if (status !== 'pending' || remainingSeconds <= 0) return;
 
@@ -198,6 +201,22 @@ export function FloatingApprovalDrawer({
   const handleDecision = async (decision: 'approve' | 'deny', reason?: string) => {
     if (status !== 'pending' || isSubmitting) return;
 
+    if (decision === 'deny') {
+      // Immediate clean dismissal on skip/cancel so user is never locked out
+      setStatus('rejected');
+      setIsDismissed(true);
+      if (effectiveDismiss) effectiveDismiss();
+      if (effectiveResolve) {
+        effectiveResolve(
+          request.approval_id,
+          'deny',
+          reason,
+          isFinanceStrategy ? selectedCandidateId : undefined
+        ).catch(() => {});
+      }
+      return;
+    }
+
     setIsSubmitting(true);
     setErrorMessage(null);
 
@@ -210,15 +229,20 @@ export function FloatingApprovalDrawer({
           isFinanceStrategy ? selectedCandidateId : undefined
         );
       }
-      setStatus(decision === 'approve' ? 'approved' : 'rejected');
+      setStatus('approved');
       setTimeout(() => {
         setIsDismissed(true);
         if (effectiveDismiss) effectiveDismiss();
-      }, 700);
+      }, 400);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to record authorization decision';
       setErrorMessage(msg);
       setIsSubmitting(false);
+      // Ensure drawer dismisses anyway so user can continue
+      setTimeout(() => {
+        setIsDismissed(true);
+        if (effectiveDismiss) effectiveDismiss();
+      }, 500);
     }
   };
 
@@ -227,6 +251,12 @@ export function FloatingApprovalDrawer({
 
     if (selectedOption === 5 || activeOpt?.action === 'deny') {
       await handleDecision('deny', rejectionReason || 'Rejected by user');
+      return;
+    }
+
+    if (activeOpt?.action === 'customize') {
+      // Return to text field to edit parameters
+      await handleDecision('deny', 'Edit parameters requested');
       return;
     }
 
@@ -290,10 +320,10 @@ export function FloatingApprovalDrawer({
   if (status === 'approved') {
     return renderPortalOrContent(
       <div
-        className={`fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/20 dark:bg-black/40 backdrop-blur-[2px] transition-all duration-200 ${className}`}
+        className={`fixed inset-0 z-[9999] flex flex-col justify-end items-center pb-24 sm:pb-28 px-4 bg-black/15 dark:bg-black/35 backdrop-blur-[1px] transition-all duration-200 ${className}`}
         data-testid="floating-approval-drawer"
       >
-        <div className="flex items-center gap-3 px-6 py-4 rounded-2xl border border-emerald-500/30 bg-white dark:bg-[#18181b] shadow-xl text-emerald-600 dark:text-emerald-400 text-sm font-medium animate-in fade-in max-w-md w-full">
+        <div className="flex items-center gap-3 px-6 py-4 rounded-2xl border border-emerald-500/30 bg-white dark:bg-[#18181b] shadow-2xl text-emerald-600 dark:text-emerald-400 text-sm font-medium animate-in fade-in max-w-xl w-full mb-2">
           <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
           <span className="truncate">Allowed. Executing in workspace...</span>
         </div>
@@ -304,12 +334,12 @@ export function FloatingApprovalDrawer({
   if (status === 'rejected') {
     return renderPortalOrContent(
       <div
-        className={`fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/20 dark:bg-black/40 backdrop-blur-[2px] transition-all duration-200 ${className}`}
+        className={`fixed inset-0 z-[9999] flex flex-col justify-end items-center pb-24 sm:pb-28 px-4 bg-black/15 dark:bg-black/35 backdrop-blur-[1px] transition-all duration-200 ${className}`}
         data-testid="floating-approval-drawer"
       >
-        <div className="flex items-center gap-3 px-6 py-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#18181b] shadow-xl text-neutral-700 dark:text-neutral-300 text-sm font-medium animate-in fade-in max-w-md w-full">
+        <div className="flex items-center gap-3 px-6 py-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#18181b] shadow-2xl text-neutral-700 dark:text-neutral-300 text-sm font-medium animate-in fade-in max-w-xl w-full mb-2">
           <ShieldX className="w-5 h-5 text-neutral-500 flex-shrink-0" />
-          <span>Execution skipped. Workspace unchanged.</span>
+          <span>Execution skipped. Returning to input...</span>
         </div>
       </div>
     );
@@ -321,7 +351,7 @@ export function FloatingApprovalDrawer({
 
   return renderPortalOrContent(
     <div
-      className={`fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-black/20 dark:bg-black/40 backdrop-blur-[2px] transition-all duration-200 animate-in fade-in ${className}`}
+      className={`fixed inset-0 z-[9999] flex flex-col justify-end items-center pb-24 sm:pb-28 px-4 bg-black/15 dark:bg-black/35 backdrop-blur-[1px] transition-all duration-200 animate-in fade-in ${className}`}
       data-testid="floating-approval-drawer"
       role="dialog"
       aria-modal="true"
@@ -332,7 +362,7 @@ export function FloatingApprovalDrawer({
         }
       }}
     >
-      <div className="relative w-full max-w-2xl rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#18181b] text-neutral-900 dark:text-neutral-100 shadow-xl shadow-black/5 p-6 sm:p-7 flex flex-col gap-4 animate-in zoom-in-95 duration-150">
+      <div className="relative w-full max-w-2xl rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#18181b] text-neutral-900 dark:text-neutral-100 shadow-2xl shadow-black/10 p-6 sm:p-7 flex flex-col gap-4 animate-in slide-in-from-bottom-4 zoom-in-95 duration-150 mb-2">
         
         {/* Title Row */}
         <div className="flex items-center gap-2.5">
