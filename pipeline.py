@@ -1691,8 +1691,10 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
 
     is_trick = _is_trick_question(query)
     agent_triggers = [
-        "execute", "create a file", "modify file", "write to file", "bash",
-        "test it", "test this", "test the code", "test them", "run the",
+        "create a file", "modify file", "write to file", "bash",
+        "execute script", "execute code", "execute bash", "execute command",
+        "execute python", "execute in terminal",
+        "test it", "test this", "test the code", "test them", "run the script", "run script",
         "what is the output", "what's the output", "output of the code", "what does this print",
         "what will this print", "what is printed", "what does it print", "output of this",
         "trace this", "trace the code",
@@ -1715,11 +1717,25 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     ]
     is_knowledge = any(sig in query.lower() for sig in _knowledge_signals)
 
+    is_fin_query = (
+        domain == "finance"
+        or intent.startswith("finance")
+        or has_finance_context
+        or is_fin_intent
+        or any(sig in query.lower() for sig in [
+            "trading plan", "trade plan", "channel oscillation", "iron condor",
+            "bull call", "bear put", "crypto", "bitcoin", "btc", "forex", "gold",
+            "silver", "crude", "options strategy", "trading strategy"
+        ])
+    )
+
     needs_agent = (
         not is_coding_output
         and not is_knowledge
+        and (not is_fin_query or has_mutating_action_intent)
         and (
-            any(w in query.lower() for w in agent_triggers)
+            has_mutating_action_intent
+            or any(w in query.lower() for w in agent_triggers)
             or bool(re.search(r"\brun\b", query.lower()))
             or bool(re.search(r"\bgit\b", query.lower()))
             or (intent == "coding_help" and any(p in query.lower() for p in ["run", "execute", "trace", "test"]))
@@ -2476,37 +2492,59 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
 
             is_options_query = bool(re.search(r'\b(options?|calls?|puts?|strikes?|expir(?:y|ies)|spreads?|straddles?|condors?)\b', q_lower))
 
-            # Generate candidate strategies (20 institutional strategies for spot/futures/equities, or options if requested)
-            try:
-                candidate_data = options_strategy.generate_candidate_strategies(
-                    symbol=target_symbol,
-                    indicators=indicators,
-                    signal=signal,
-                    risk_reward=5.0,
-                    is_options_intent=is_options_query,
+            is_strategy_execution = any(
+                q_lower.startswith(prefix)
+                for prefix in [
+                    "execute ", "implement strategy", "apply strategy",
+                    "execute trading plan", "trading plan for", "execution plan for",
+                    "execute strategy"
+                ]
+            ) or "harvests predictable oscillations" in q_lower or "follow disciplined risk parameters" in q_lower
+
+            if is_strategy_execution:
+                clean_sym = target_symbol.replace("^", "").replace(".NS", "").replace("=F", "").replace("=X", "")
+                context_parts.append(
+                    f"[Actionable Trading Execution Directives]\n"
+                    f"The operator has selected and approved this trading strategy for {clean_sym}. "
+                    f"Synthesize an immediate, complete, institutional-grade trade execution plan based on live market pricing and technical indicators:\n"
+                    f"1. Strategy Rationale & Regime Confirmation: Explain why this setup fits the current market regime and volatility.\n"
+                    f"2. Precision Entry Triggers: Exact price level / execution zone, indicator confirmations (e.g. RSI bounds, EMA support, Bollinger Band touch).\n"
+                    f"3. Disciplined Invalidation & Stop-Loss: Exact numeric stop-loss price, percentage distance, and ATR volatility cushion.\n"
+                    f"4. Scaled Take-Profit Targets: Target 1 (1:1.5 R:R), Target 2 (1:2.5+ R:R), and trailing runner rules.\n"
+                    f"5. Capital Allocation & Risk Management: Risk limit (max 1-2% of portfolio), position sizing / lot sizing, and dynamic trade management (e.g. moving stop to breakeven after Target 1)."
                 )
-                if candidate_data:
-                    from modules.approval_store import get_approval_store
-                    appr_store = get_approval_store()
-                    clean_sym = target_symbol.replace("^", "").replace(".NS", "").replace("=F", "").replace("=X", "")
-                    summary_label = (
-                        f"Select Options Strategy for {clean_sym} ({signal})"
-                        if is_options_query
-                        else f"Select {signal} Strategy for {clean_sym}"
+            else:
+                # Generate candidate strategies (20 institutional strategies for spot/futures/equities, or options if requested)
+                try:
+                    candidate_data = options_strategy.generate_candidate_strategies(
+                        symbol=target_symbol,
+                        indicators=indicators,
+                        signal=signal,
+                        risk_reward=5.0,
+                        is_options_intent=is_options_query,
                     )
-                    strat_req = appr_store.create_request(
-                        user_id=user_id,
-                        session_id=session_id,
-                        tool_name="FinanceStrategyMasterSelection",
-                        args=candidate_data,
-                        risk_level="HIGH",
-                        human_summary=summary_label,
-                        target_resource=clean_sym,
-                        timeout_seconds=120.0,
-                    )
-                    finance_strategy_req = strat_req.to_dict()
-            except Exception as strat_gate_err:
-                logger.warning("Failed creating finance strategy approval gate: %s", strat_gate_err)
+                    if candidate_data:
+                        from modules.approval_store import get_approval_store
+                        appr_store = get_approval_store()
+                        clean_sym = target_symbol.replace("^", "").replace(".NS", "").replace("=F", "").replace("=X", "")
+                        summary_label = (
+                            f"Select Options Strategy for {clean_sym} ({signal})"
+                            if is_options_query
+                            else f"Select {signal} Strategy for {clean_sym}"
+                        )
+                        strat_req = appr_store.create_request(
+                            user_id=user_id,
+                            session_id=session_id,
+                            tool_name="FinanceStrategyMasterSelection",
+                            args=candidate_data,
+                            risk_level="HIGH",
+                            human_summary=summary_label,
+                            target_resource=clean_sym,
+                            timeout_seconds=120.0,
+                        )
+                        finance_strategy_req = strat_req.to_dict()
+                except Exception as strat_gate_err:
+                    logger.warning("Failed creating finance strategy approval gate: %s", strat_gate_err)
 
             try:
                 subscription.record_premium_usage(user_id)
@@ -2543,8 +2581,10 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             is_coding_output = True
 
     agent_triggers = [
-        "execute", "create a file", "modify file", "write to file", "bash",
-        "test it", "test this", "test the code", "test them", "run the",
+        "create a file", "modify file", "write to file", "bash",
+        "execute script", "execute code", "execute bash", "execute command",
+        "execute python", "execute in terminal",
+        "test it", "test this", "test the code", "test them", "run the script", "run script",
         "what is the output", "what's the output", "output of the code", "what does this print",
         "what will this print", "what is printed", "what does it print", "output of this",
         "trace this", "trace the code",
@@ -2576,10 +2616,23 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     ]
     has_mutating_action_intent = any(sig in query.lower() for sig in mutating_action_signals)
 
+    is_fin_query = (
+        domain == "finance"
+        or intent.startswith("finance")
+        or has_finance_context
+        or is_fin_intent
+        or any(sig in query.lower() for sig in [
+            "trading plan", "trade plan", "channel oscillation", "iron condor",
+            "bull call", "bear put", "crypto", "bitcoin", "btc", "forex", "gold",
+            "silver", "crude", "options strategy", "trading strategy"
+        ])
+    )
+
     needs_agent = (
         not is_coding_output
         and (not is_knowledge or has_mutating_action_intent)
         and (not is_coding_query or has_mutating_action_intent)
+        and (not is_fin_query or has_mutating_action_intent)
         and (
             has_mutating_action_intent
             or any(w in query.lower() for w in agent_triggers)

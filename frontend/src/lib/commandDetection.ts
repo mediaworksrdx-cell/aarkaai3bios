@@ -596,6 +596,16 @@ export function detectFinanceStrategyIntent(raw: string): {
   const trimmed = raw.trim();
   const lower = trimmed.toLowerCase();
 
+  // If user is explicitly executing an already chosen strategy, do not intercept for strategy selection
+  if (
+    lower.startsWith('execute ') ||
+    lower.startsWith('execute trading plan') ||
+    lower.includes('harvests predictable oscillations') ||
+    lower.includes('follow disciplined risk parameters')
+  ) {
+    return null;
+  }
+
   // Financial strategy trigger signals
   const hasStrategyKeywords =
     /\b(strategy|strategies|setup|setups|trade|trading|screen|scanner|bullish|bearish|neutral|reversal|options?|call|put|spread|straddle|condor)\b/i.test(lower) ||
