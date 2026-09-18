@@ -934,6 +934,13 @@ def _should_skip_rag(query: str, intent: str, domain: str) -> bool:
     if any(kw in q_low for kw in creative_keywords):
         return True
 
+    # 6. Live Financial Strategies & Trading Executions
+    # Live market feeds and quantitative indicators provide real-time pricing context;
+    # vector search on static historical RAG documents introduces latency and stale metrics.
+    is_live_fin = domain == "finance" or intent.startswith("finance") or any(sig in q_low for sig in ["btc", "bitcoin", "crypto", "forex", "stock", "nifty", "gold", "silver", "crude", "trading plan", "channel oscillation"])
+    if is_live_fin and not is_sysdesign:
+        return True
+
     return False
 
 
@@ -2705,6 +2712,12 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         "sources": sources,
         "detected_language": detected_lang
     }
+
+    if is_strategy_execution:
+        yield {
+            "type": "status",
+            "status": "Formulating institutional trade execution setup & risk parameters..."
+        }
 
     # If a finance strategy approval gate was generated, emit it immediately to the client
     if finance_strategy_req:
