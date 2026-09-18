@@ -745,13 +745,21 @@ def _generate(prompt, max_new_tokens=150, stop=None, temperature=0.7, force_gene
     return _clean_response(text)
 
 
+_modal_breaker_failures = 0
+_modal_breaker_cooldown_until = 0.0
+
+
 def _stream_modal_gpu(prompt, max_new_tokens=3800, stop=None, temperature=0.7, model_name="7b"):
     """Stream tokens directly from the serverless Modal GPU endpoint with automatic fallback."""
+    global _modal_breaker_failures, _modal_breaker_cooldown_until
     import json
     import urllib.request
     from config import MODAL_GPU_ENDPOINT, MODAL_GPU_ENABLED
 
     if not MODAL_GPU_ENABLED or not MODAL_GPU_ENDPOINT:
+        return None
+
+    if time.time() < _modal_breaker_cooldown_until:
         return None
 
     payload = {
@@ -771,8 +779,9 @@ def _stream_modal_gpu(prompt, max_new_tokens=3800, stop=None, temperature=0.7, m
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"}
         )
-        # 15s timeout: if Modal GPU is cold or slow, seamlessly fall back to local Aarka engine
-        resp = urllib.request.urlopen(req, timeout=15)
+        # Fast 3.5s timeout: if Modal GPU is cold or slow, seamlessly fall back to local Aarka engine
+        resp = urllib.request.urlopen(req, timeout=3.5)
+        _modal_breaker_failures = 0
 
         def generator():
             for line in resp:
@@ -789,7 +798,12 @@ def _stream_modal_gpu(prompt, max_new_tokens=3800, stop=None, temperature=0.7, m
                         pass
         return generator()
     except Exception as exc:
-        logger.warning("Modal GPU invocation failed (%s). Falling back to local engine.", exc)
+        _modal_breaker_failures += 1
+        if _modal_breaker_failures >= 2:
+            _modal_breaker_cooldown_until = time.time() + 180.0
+            logger.warning("Modal GPU circuit breaker tripped for 180s (%s). Falling back to local engine.", exc)
+        else:
+            logger.warning("Modal GPU invocation failed (%s). Falling back to local engine.", exc)
         return None
 
 

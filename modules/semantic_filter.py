@@ -392,7 +392,20 @@ def classify(query: str) -> dict:
     if not is_not_programming_code:
         coding_keywords.append("code")
 
-    if _is_coding_syntax(query) or any(w in q_low for w in coding_keywords):
+    is_finance_query = any(w in q_low for w in [
+        "stock", "shares", "crypto", "bitcoin", "btc", "forex", "gold", "silver", "crude",
+        "nifty", "banknifty", "sensex", "trading", "trade", "strategy", "strategies", "portfolio",
+        "order block", "fair value gap", "liquidity", "bullish", "bearish", "oscillation",
+        "range-bound", "channel", "breakout", "reversal", "risk-reward"
+    ])
+
+    has_explicit_code_request = any(w in q_low for w in [
+        "python", "javascript", "typescript", "java", "c++", "rust", "golang", "sql",
+        "write code", "write a python", "write script", "code for", "implement in python",
+        "def ", "function in", "class ", "debug this code"
+    ])
+
+    if _is_coding_syntax(query) or (any(w in q_low for w in coding_keywords) and (has_explicit_code_request or not is_finance_query)):
         best_domain = "technology"
         intent = "coding_help"
         confidence = max(confidence, 0.92)
@@ -420,6 +433,7 @@ def classify(query: str) -> dict:
         "fvg", "fair value gap", "bos", "choch", "mss", "liquidity sweep",
         "market structure", "price action", "technical chart", "candlestick",
         "support and resistance", "break of structure", "change of character",
+        "oscillation", "channel", "range-bound", "trading plan", "execution plan"
     ]
     if any(re.search(r"\b" + re.escape(w) + r"\b", q_low) for w in trading_keywords):
         best_domain = "finance"
