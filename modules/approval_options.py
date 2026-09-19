@@ -179,6 +179,38 @@ def generate_dynamic_approval_options(
         ]
 
     elif tool_name == "FinanceStrategyMasterSelection":
+        # ── Multi-regime payload (new 4-tab regime picker) ─────────────────────
+        # When the pipeline passes a "regimes" dict, return one option per regime
+        # so the card shows BULLISH / BEARISH / NEUTRAL / REVERSAL as top-level buttons.
+        if args.get("regimes"):
+            auto_signal = (args.get("signal") or "NEUTRAL").upper()
+            regime_meta = {
+                "BULLISH":  {"emoji": "🟢", "color": "text-emerald-600"},
+                "BEARISH":  {"emoji": "🔴", "color": "text-rose-600"},
+                "NEUTRAL":  {"emoji": "🔵", "color": "text-blue-600"},
+                "REVERSAL": {"emoji": "🟣", "color": "text-purple-600"},
+            }
+            regime_options = []
+            for idx, regime in enumerate(["BULLISH", "BEARISH", "NEUTRAL", "REVERSAL"], start=1):
+                meta = regime_meta[regime]
+                strategy_count = len(args["regimes"].get(regime, []))
+                is_recommended = regime in auto_signal or (regime == "NEUTRAL" and auto_signal not in ("BULLISH", "BEARISH", "REVERSAL"))
+                regime_options.append({
+                    "id": idx,
+                    "action": f"select_regime_{regime.lower()}",
+                    "label": f"{meta['emoji']} {regime} — Show {strategy_count} strategies",
+                    "detail": f"View and execute one of {strategy_count} institutional {regime.lower()} setups tailored for {args.get('symbol', 'this asset')}.",
+                    "recommended": is_recommended,
+                })
+            regime_options.append({
+                "id": 5,
+                "action": "deny",
+                "label": f"No (tell {agent} what to do instead)",
+                "detail": "Cancel strategy selection and request an alternative action.",
+            })
+            return regime_options
+
+        # ── Legacy flat-candidate payload (backward compatible) ──────────────
         candidates = args.get("candidates", [])
         master = args.get("master_recommended", "")
         master_cand = next((c for c in candidates if c.get("candidate_id") == master), candidates[0] if candidates else {})

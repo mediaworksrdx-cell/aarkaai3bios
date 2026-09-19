@@ -41,7 +41,7 @@ def test_generate_candidate_strategies_neutral():
     assert res is not None
     assert res["signal"] == "NEUTRAL"
     assert res["master_recommended"] == "candidate_delta_neutral"
-    assert len(res["candidates"]) == 2
+    assert len(res["candidates"]) == 2  # Options mode: always 2 (iron condor + straddle)
 
 
 def test_generate_candidate_strategies_commodity_non_options():
@@ -56,7 +56,18 @@ def test_generate_candidate_strategies_commodity_non_options():
     assert res["is_options"] is False
     assert res["symbol"] == "GC=F"
     assert res["master_recommended"] == "candidate_range_mean_reversion"
-    assert len(res["candidates"]) == 2
+    # Non-options mode now returns 5 per regime (the auto-detected regime's candidates)
+    assert len(res["candidates"]) == 5
+
+    # Verify new multi-regime grouping keys are present
+    assert "regimes" in res
+    assert set(res["regimes"].keys()) == {"BULLISH", "BEARISH", "NEUTRAL", "REVERSAL"}
+    assert len(res["regimes"]["BULLISH"]) == 5
+    assert len(res["regimes"]["BEARISH"]) == 5
+    assert len(res["regimes"]["NEUTRAL"]) == 5
+    assert len(res["regimes"]["REVERSAL"]) == 5
+    assert "regime_masters" in res
+    assert res["regime_masters"]["NEUTRAL"] == "candidate_range_mean_reversion"
 
     cands = res["candidates"]
     assert cands[0]["strategy_name"] == "Range-Bound Channel Oscillation"

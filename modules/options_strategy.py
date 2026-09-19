@@ -488,6 +488,11 @@ def generate_candidate_strategies(
     """
     Generates multiple candidate strategies comparing Defined Risk vs Alpha Momentum
     and designating a recommended 'Master of Technology' strategy.
+
+    For non-options (spot/equity) mode the return payload includes:
+      - 'candidates': flat list for the auto-detected signal (backward compat.)
+      - 'regimes':    {BULLISH:[5], BEARISH:[5], NEUTRAL:[5], REVERSAL:[5]}
+      - 'regime_masters': recommended candidate_id per regime
     """
     try:
         price = indicators.get("current_price", 100.0)
@@ -502,11 +507,13 @@ def generate_candidate_strategies(
         options_mode = True if is_options_intent is None else bool(is_options_intent)
 
         if not options_mode:
-            # 20 Institutional Screener Strategies for Stocks, Commodity, Crypto, Forex, Index
-            candidates = []
-            sig_clean = signal.upper()
-            if "BULL" in sig_clean:
-                cand_1 = {
+            # ── 20 Institutional Strategies (5 per regime) ──────────────────
+            # All 4 regimes are always generated so the approval card can show
+            # the full 4-tab regime picker regardless of the auto-detected signal.
+
+            # ── BULLISH ──────────────────────────────────────────────────────
+            bullish_candidates = [
+                {
                     "candidate_id": "candidate_golden_cross",
                     "category": "BULLISH",
                     "technology_tag": "Golden Cross Momentum",
@@ -521,8 +528,8 @@ def generate_candidate_strategies(
                     "risk_reward_actual": "1:2.8",
                     "win_rate_est": "78%",
                     "rationale": "Institutional trend breakout confirming EMA50/200 crossover with volume support.",
-                }
-                cand_2 = {
+                },
+                {
                     "candidate_id": "candidate_volume_surge",
                     "category": "BULLISH",
                     "technology_tag": "Breakout Volume Surge",
@@ -537,11 +544,61 @@ def generate_candidate_strategies(
                     "risk_reward_actual": "1:3.2",
                     "win_rate_est": "71%",
                     "rationale": "Exploits institutional buying volume expansion breaking consolidation barriers.",
-                }
-                candidates = [cand_1, cand_2]
-                master_rec = "candidate_golden_cross"
-            elif "BEAR" in sig_clean:
-                cand_1 = {
+                },
+                {
+                    "candidate_id": "candidate_ema21_pullback",
+                    "category": "BULLISH",
+                    "technology_tag": "EMA21 Pullback Reentry",
+                    "strategy_name": "EMA21 Pullback Reentry Setup",
+                    "strategy_type": "Pullback Continuation",
+                    "legs": [],
+                    "entry_trigger": f"Buy on first pullback to EMA21 after breakout candle above pivot at {currency}{price:.2f}",
+                    "stop_loss": f"Stop below EMA21 at last swing low ({currency}{max(price - 1.2 * atr, 0.01):.2f})",
+                    "target": f"Target measured move from base ({currency}{price + 2.8 * atr:.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 1.2 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 2.8 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:2.5",
+                    "win_rate_est": "74%",
+                    "rationale": "High-probability reentry capturing the second leg of a trend after institutional pullback absorption.",
+                },
+                {
+                    "candidate_id": "candidate_vwap_reclaim",
+                    "category": "BULLISH",
+                    "technology_tag": "VWAP Reclaim Momentum",
+                    "strategy_name": "VWAP Reclaim Intraday Momentum",
+                    "strategy_type": "VWAP Momentum",
+                    "legs": [],
+                    "entry_trigger": f"Enter long on confirmed VWAP reclaim with increasing bid volume above {currency}{price:.2f}",
+                    "stop_loss": f"Stop below VWAP reclaim candle low ({currency}{max(price - 0.9 * atr, 0.01):.2f})",
+                    "target": f"Target prior day high / extended VWAP band ({currency}{price + 2.5 * atr:.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 0.9 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 2.5 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:2.9",
+                    "win_rate_est": "76%",
+                    "rationale": "Captures institutional re-accumulation after VWAP reclaim signals smart money re-entry above average cost.",
+                },
+                {
+                    "candidate_id": "candidate_fib_breakout",
+                    "category": "BULLISH",
+                    "technology_tag": "Fibonacci 61.8% Continuation",
+                    "strategy_name": "Fibonacci 61.8% Breakout Continuation",
+                    "strategy_type": "Fibonacci Extension",
+                    "legs": [],
+                    "entry_trigger": f"Buy on bounce or breakout above 61.8% Fibonacci retracement at {currency}{price:.2f}",
+                    "stop_loss": f"Stop below 78.6% Fib level ({currency}{max(price - 1.4 * atr, 0.01):.2f})",
+                    "target": f"Target 127.2% Fibonacci extension ({currency}{price + 3.4 * atr:.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 1.4 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 3.4 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:3.1",
+                    "win_rate_est": "69%",
+                    "rationale": "Targets harmonic Fibonacci confluence zones where institutional orders cluster for high-probability continuation.",
+                },
+            ]
+            bullish_master = "candidate_golden_cross"
+
+            # ── BEARISH ──────────────────────────────────────────────────────
+            bearish_candidates = [
+                {
                     "candidate_id": "candidate_death_cross",
                     "category": "BEARISH",
                     "technology_tag": "Death Cross Distribution",
@@ -556,8 +613,8 @@ def generate_candidate_strategies(
                     "risk_reward_actual": "1:2.9",
                     "win_rate_est": "74%",
                     "rationale": "Short setup riding structural distribution and moving average death cross.",
-                }
-                cand_2 = {
+                },
+                {
                     "candidate_id": "candidate_breakdown_surge",
                     "category": "BEARISH",
                     "technology_tag": "Breakdown Volume Surge",
@@ -572,46 +629,61 @@ def generate_candidate_strategies(
                     "risk_reward_actual": "1:3.1",
                     "win_rate_est": "69%",
                     "rationale": "Capitalizes on aggressive panic selling and liquidity purge below key support.",
-                }
-                candidates = [cand_1, cand_2]
-                master_rec = "candidate_death_cross"
-            elif "REV" in sig_clean:
-                cand_1 = {
-                    "candidate_id": "candidate_rsi_divergence",
-                    "category": "REVERSAL",
-                    "technology_tag": "Bullish RSI Divergence",
-                    "strategy_name": "Oversold RSI Divergence Reversal",
-                    "strategy_type": "Counter-Trend Sniper Pivot",
+                },
+                {
+                    "candidate_id": "candidate_ema50_rejection",
+                    "category": "BEARISH",
+                    "technology_tag": "EMA50 Rejection Short",
+                    "strategy_name": "EMA50 Overhead Resistance Short",
+                    "strategy_type": "Resistance Rejection",
                     "legs": [],
-                    "entry_trigger": f"Enter long on lower price low accompanied by higher RSI low below 35 at {currency}{price:.2f}",
-                    "stop_loss": f"Tight stop below recent swing low ({currency}{max(price - 1.3 * atr, 0.01):.2f})",
-                    "target": f"Target mean-reversion to EMA50 ({currency}{price + 3.5 * atr:.2f})",
+                    "entry_trigger": f"Short on bearish rejection candle at EMA50 overhead resistance near {currency}{price:.2f}",
+                    "stop_loss": f"Stop above EMA50 wick high ({currency}{price + 1.3 * atr:.2f})",
+                    "target": f"Target prior swing low / demand zone ({currency}{max(price - 2.7 * atr, 0.01):.2f})",
                     "max_loss_per_lot": f"{currency}{atr * 1.3 * lot_size:,.0f}",
-                    "max_gain_per_lot": f"{currency}{atr * 3.5 * lot_size:,.0f}",
-                    "risk_reward_actual": "1:3.4",
-                    "win_rate_est": "76%",
-                    "rationale": "Sniper reversal entry exploiting institutional exhaustion and momentum divergence.",
-                }
-                cand_2 = {
-                    "candidate_id": "candidate_hammer_reversal",
-                    "category": "REVERSAL",
-                    "technology_tag": "Hammer / Engulfing Reversal",
-                    "strategy_name": "Price Action Liquidity Sweep Reversal",
-                    "strategy_type": "Liquidity Sweep Pivot",
-                    "legs": [],
-                    "entry_trigger": f"Enter on bullish engulfing candle or hammer rejection at support at {currency}{price:.2f}",
-                    "stop_loss": f"Stop below wick low ({currency}{max(price - 1.2 * atr, 0.01):.2f})",
-                    "target": f"Target resistance retest ({currency}{price + 3.0 * atr:.2f})",
-                    "max_loss_per_lot": f"{currency}{atr * 1.2 * lot_size:,.0f}",
-                    "max_gain_per_lot": f"{currency}{atr * 3.0 * lot_size:,.0f}",
-                    "risk_reward_actual": "1:3.1",
+                    "max_gain_per_lot": f"{currency}{atr * 2.7 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:2.7",
                     "win_rate_est": "72%",
-                    "rationale": "Identifies smart-money liquidity sweeps and sudden directional turnaround.",
-                }
-                candidates = [cand_1, cand_2]
-                master_rec = "candidate_rsi_divergence"
-            else:
-                cand_1 = {
+                    "rationale": "Fades institutional sell-side pressure at major EMA overhead zones confirming downtrend continuation.",
+                },
+                {
+                    "candidate_id": "candidate_supply_zone_short",
+                    "category": "BEARISH",
+                    "technology_tag": "Supply Zone Liquidity Short",
+                    "strategy_name": "Supply Zone Institutional Short",
+                    "strategy_type": "Supply Zone Reversal",
+                    "legs": [],
+                    "entry_trigger": f"Enter short at confirmed supply zone retest with bearish engulfing confirmation at {currency}{price:.2f}",
+                    "stop_loss": f"Stop above supply zone upper boundary ({currency}{price + 1.1 * atr:.2f})",
+                    "target": f"Target nearest demand zone / FVG ({currency}{max(price - 3.0 * atr, 0.01):.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 1.1 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 3.0 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:3.0",
+                    "win_rate_est": "67%",
+                    "rationale": "Smart money supply zone short aligned with institutional order flow and bearish market structure.",
+                },
+                {
+                    "candidate_id": "candidate_atr_channel_breakdown",
+                    "category": "BEARISH",
+                    "technology_tag": "ATR Volatility Channel Breakdown",
+                    "strategy_name": "ATR Channel Directional Breakdown",
+                    "strategy_type": "Volatility Channel Breakdown",
+                    "legs": [],
+                    "entry_trigger": f"Short on ATR channel lower boundary breach with expanding bearish volume at {currency}{price:.2f}",
+                    "stop_loss": f"Stop at midline ATR channel ({currency}{price + 0.8 * atr:.2f})",
+                    "target": f"Target 2x ATR channel extension ({currency}{max(price - 2.5 * atr, 0.01):.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 0.8 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 2.5 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:3.3",
+                    "win_rate_est": "65%",
+                    "rationale": "Systematic channel breakdown trades volatility expansion as directional bias confirms with momentum.",
+                },
+            ]
+            bearish_master = "candidate_death_cross"
+
+            # ── NEUTRAL ──────────────────────────────────────────────────────
+            neutral_candidates = [
+                {
                     "candidate_id": "candidate_range_mean_reversion",
                     "category": "NEUTRAL",
                     "technology_tag": "Range-Bound Mean Reversion",
@@ -626,8 +698,8 @@ def generate_candidate_strategies(
                     "risk_reward_actual": "1:2.2",
                     "win_rate_est": "82%",
                     "rationale": "Harvests predictable oscillations in range-bound, low-trend market regimes.",
-                }
-                cand_2 = {
+                },
+                {
                     "candidate_id": "candidate_consolidation_squeeze",
                     "category": "NEUTRAL",
                     "technology_tag": "Consolidation Squeeze",
@@ -642,9 +714,157 @@ def generate_candidate_strategies(
                     "risk_reward_actual": "1:2.0",
                     "win_rate_est": "84%",
                     "rationale": "Capitalizes on low volatility compression before explosive directional expansion.",
-                }
-                candidates = [cand_1, cand_2]
-                master_rec = "candidate_range_mean_reversion"
+                },
+                {
+                    "candidate_id": "candidate_keltner_mean_reversion",
+                    "category": "NEUTRAL",
+                    "technology_tag": "Keltner Channel Mean Reversion",
+                    "strategy_name": "Keltner Channel Inner-Band Reversion",
+                    "strategy_type": "Keltner Oscillation",
+                    "legs": [],
+                    "entry_trigger": f"Buy at lower Keltner band, short at upper Keltner band with RSI confirming extreme near {currency}{price:.2f}",
+                    "stop_loss": f"Stop on close outside Keltner outer band ({currency}{max(price - 1.1 * atr, 0.01):.2f})",
+                    "target": f"Target Keltner midline EMA20 ({currency}{price + 1.6 * atr:.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 1.1 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 1.6 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:1.9",
+                    "win_rate_est": "80%",
+                    "rationale": "Exploits Keltner Channel mean-reversion in low-ADX sideways price action with RSI overbought/oversold confirmation.",
+                },
+                {
+                    "candidate_id": "candidate_vwap_band_reversion",
+                    "category": "NEUTRAL",
+                    "technology_tag": "VWAP Band Mean Reversion",
+                    "strategy_name": "VWAP 2SD Band Mean Reversion",
+                    "strategy_type": "VWAP Statistical Reversion",
+                    "legs": [],
+                    "entry_trigger": f"Enter mean-reversion position at ±2 standard deviation VWAP deviation near {currency}{price:.2f}",
+                    "stop_loss": f"Stop at ±2.5 SD VWAP level ({currency}{max(price - 0.9 * atr, 0.01):.2f})",
+                    "target": f"Target VWAP equilibrium ({currency}{price + 1.4 * atr:.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 0.9 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 1.4 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:1.8",
+                    "win_rate_est": "85%",
+                    "rationale": "Statistical reversion to VWAP equilibrium capitalizing on short-term institutional cost averaging pressure.",
+                },
+                {
+                    "candidate_id": "candidate_adx_grid_scalping",
+                    "category": "NEUTRAL",
+                    "technology_tag": "ADX Flatline Grid Scalping",
+                    "strategy_name": "ADX Sub-20 Grid Scalping Strategy",
+                    "strategy_type": "Grid / Range Scalping",
+                    "legs": [],
+                    "entry_trigger": f"Deploy bidirectional grid orders on ADX < 18 flat range between support and resistance at {currency}{price:.2f}",
+                    "stop_loss": f"Collapse grid on ADX > 25 breakout ({currency}{max(price - 1.3 * atr, 0.01):.2f})",
+                    "target": f"Target per-grid cell profit at defined tick distance ({currency}{price + 1.0 * atr:.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 1.3 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 1.0 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:1.5",
+                    "win_rate_est": "88%",
+                    "rationale": "High-frequency grid scalping in ultra-low ADX regimes with automatic collapse on directional breakout.",
+                },
+            ]
+            neutral_master = "candidate_range_mean_reversion"
+
+            # ── REVERSAL ─────────────────────────────────────────────────────
+            reversal_candidates = [
+                {
+                    "candidate_id": "candidate_rsi_divergence",
+                    "category": "REVERSAL",
+                    "technology_tag": "Bullish RSI Divergence",
+                    "strategy_name": "Oversold RSI Divergence Reversal",
+                    "strategy_type": "Counter-Trend Sniper Pivot",
+                    "legs": [],
+                    "entry_trigger": f"Enter long on lower price low accompanied by higher RSI low below 35 at {currency}{price:.2f}",
+                    "stop_loss": f"Tight stop below recent swing low ({currency}{max(price - 1.3 * atr, 0.01):.2f})",
+                    "target": f"Target mean-reversion to EMA50 ({currency}{price + 3.5 * atr:.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 1.3 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 3.5 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:3.4",
+                    "win_rate_est": "76%",
+                    "rationale": "Sniper reversal entry exploiting institutional exhaustion and momentum divergence.",
+                },
+                {
+                    "candidate_id": "candidate_hammer_reversal",
+                    "category": "REVERSAL",
+                    "technology_tag": "Hammer / Engulfing Reversal",
+                    "strategy_name": "Price Action Liquidity Sweep Reversal",
+                    "strategy_type": "Liquidity Sweep Pivot",
+                    "legs": [],
+                    "entry_trigger": f"Enter on bullish engulfing candle or hammer rejection at support at {currency}{price:.2f}",
+                    "stop_loss": f"Stop below wick low ({currency}{max(price - 1.2 * atr, 0.01):.2f})",
+                    "target": f"Target resistance retest ({currency}{price + 3.0 * atr:.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 1.2 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 3.0 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:3.1",
+                    "win_rate_est": "72%",
+                    "rationale": "Identifies smart-money liquidity sweeps and sudden directional turnaround.",
+                },
+                {
+                    "candidate_id": "candidate_trendline_counter_pivot",
+                    "category": "REVERSAL",
+                    "technology_tag": "Trendline Break Counter Pivot",
+                    "strategy_name": "Trendline Break Counter-Trend Pivot",
+                    "strategy_type": "Trendline Breakout Reversal",
+                    "legs": [],
+                    "entry_trigger": f"Enter on confirmed close above descending trendline with volume expansion at {currency}{price:.2f}",
+                    "stop_loss": f"Stop below trendline breakpoint candle low ({currency}{max(price - 1.0 * atr, 0.01):.2f})",
+                    "target": f"Target prior structure high / reversal target ({currency}{price + 3.2 * atr:.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 1.0 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 3.2 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:3.2",
+                    "win_rate_est": "70%",
+                    "rationale": "Aggressive counter-trend pivot on structural trendline breach with confirmed volume impulse.",
+                },
+                {
+                    "candidate_id": "candidate_order_block_reversal",
+                    "category": "REVERSAL",
+                    "technology_tag": "Order Block Institutional Reversal",
+                    "strategy_name": "Institutional Order Block Reversal",
+                    "strategy_type": "Order Block / Smart Money",
+                    "legs": [],
+                    "entry_trigger": f"Buy at institutional bullish order block (last down candle before impulse up) near {currency}{price:.2f}",
+                    "stop_loss": f"Stop below order block low with buffer ({currency}{max(price - 0.8 * atr, 0.01):.2f})",
+                    "target": f"Target order block origin / breaker block ({currency}{price + 3.8 * atr:.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 0.8 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 3.8 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:4.0",
+                    "win_rate_est": "65%",
+                    "rationale": "Smart money order block theory: targets institutional re-entry zones from prior displacement moves.",
+                },
+                {
+                    "candidate_id": "candidate_double_bottom_reversal",
+                    "category": "REVERSAL",
+                    "technology_tag": "Double Bottom Breakout Reversal",
+                    "strategy_name": "Double Bottom W-Pattern Breakout",
+                    "strategy_type": "Chart Pattern Reversal",
+                    "legs": [],
+                    "entry_trigger": f"Enter long on neckline breakout of double bottom W-pattern with confirming RSI uptick at {currency}{price:.2f}",
+                    "stop_loss": f"Stop below the second bottom low ({currency}{max(price - 1.5 * atr, 0.01):.2f})",
+                    "target": f"Target measured pattern height projection ({currency}{price + 3.3 * atr:.2f})",
+                    "max_loss_per_lot": f"{currency}{atr * 1.5 * lot_size:,.0f}",
+                    "max_gain_per_lot": f"{currency}{atr * 3.3 * lot_size:,.0f}",
+                    "risk_reward_actual": "1:2.8",
+                    "win_rate_est": "73%",
+                    "rationale": "Classic double bottom reversal offering well-defined risk with measured pattern-based profit projection.",
+                },
+            ]
+            reversal_master = "candidate_rsi_divergence"
+
+            # ── Determine active regime's master recommendation ───────────────
+            sig_clean = signal.upper()
+            if "BULL" in sig_clean:
+                active_candidates = bullish_candidates
+                master_rec = bullish_master
+            elif "BEAR" in sig_clean:
+                active_candidates = bearish_candidates
+                master_rec = bearish_master
+            elif "REV" in sig_clean:
+                active_candidates = reversal_candidates
+                master_rec = reversal_master
+            else:
+                active_candidates = neutral_candidates
+                master_rec = neutral_master
 
             return {
                 "symbol": symbol,
@@ -655,7 +875,22 @@ def generate_candidate_strategies(
                 "currency": currency,
                 "is_options": False,
                 "master_recommended": master_rec,
-                "candidates": candidates,
+                # Legacy flat list — candidates for the auto-detected signal only
+                # Preserved for backward compat with existing tests and fallback paths
+                "candidates": active_candidates,
+                # New grouped regimes dict — powers the 4-tab regime picker card
+                "regimes": {
+                    "BULLISH":  bullish_candidates,
+                    "BEARISH":  bearish_candidates,
+                    "NEUTRAL":  neutral_candidates,
+                    "REVERSAL": reversal_candidates,
+                },
+                "regime_masters": {
+                    "BULLISH":  bullish_master,
+                    "BEARISH":  bearish_master,
+                    "NEUTRAL":  neutral_master,
+                    "REVERSAL": reversal_master,
+                },
                 "disclaimer": _DISCLAIMER,
             }
 

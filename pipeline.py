@@ -1632,8 +1632,36 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
 
     # Technical Analysis + Options Strategy (premium feature)
     q_lower = query.lower()
-    is_strategy_query = any(kw in q_lower for kw in _STRATEGY_KEYWORDS)
+    # ── Guard 1: Educational Q&A must not trigger strategy analysis ─────────
+    _EDUC_PREFIXES_NS = (
+        "what is ", "what are ", "what does ", "what do ", "what's ",
+        "who is ", "who are ", "explain ", "how does ", "how do ",
+        "how is ", "define ", "definition of ", "meaning of ",
+        "tell me about ", "formula for ", "how to calculate ",
+        "difference between ", "why is ", "why does ", "can you explain ",
+    )
+    _is_educational_ns = (
+        any(q_lower.startswith(p) for p in _EDUC_PREFIXES_NS)
+        and not any(kw in q_lower for kw in (
+            "execute", "strategy for", "trading plan for",
+            "recommend strategy", "suggest strategy",
+        ))
+    )
+    # ── Guard 2: Only explicit strategy requests open the gate ──────────────
+    _EXPLICIT_NS = (
+        "what strategy", "which strategy", "choose strategy", "pick strategy",
+        "suggest strategy", "recommend strategy", "give me a strategy",
+        "options strategy", "option strategy", "trading strategy", "trade strategy",
+        "strategy for", "strategies for", "trade plan for", "trading plan for",
+        "trade setup for", "strategy recommendation", "best strategy to trade",
+        "give strategy", "show strategy",
+    )
+    is_strategy_query = (
+        any(kw in q_lower for kw in _EXPLICIT_NS)
+        and not _is_educational_ns
+    )
     if is_strategy_query and fin_tickers:
+
         try:
             from modules import technical, options_strategy, subscription
 
@@ -2442,7 +2470,45 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         ]
     ) or "harvests predictable oscillations" in q_lower or "follow disciplined risk parameters" in q_lower
 
-    is_strategy_query = any(kw in q_lower for kw in _STRATEGY_KEYWORDS) or is_strategy_execution
+    # ── Guard 1: Educational / Informational Q&A must NEVER open strategy gate ──
+    # e.g. "what is RSI", "explain MACD", "how does bollinger band work"
+    _EDUCATIONAL_PREFIXES = (
+        "what is ", "what are ", "what does ", "what do ", "what's ",
+        "who is ", "who are ", "explain ", "how does ", "how do ",
+        "how is ", "define ", "definition of ", "meaning of ",
+        "tell me about ", "formula for ", "how to calculate ",
+        "difference between ", "why is ", "why does ", "can you explain ",
+    )
+    is_educational_qa = (
+        any(q_lower.startswith(p) for p in _EDUCATIONAL_PREFIXES)
+        and not any(kw in q_lower for kw in (
+            "execute", "strategy for", "trading plan for",
+            "recommend strategy", "suggest strategy",
+        ))
+    )
+
+    # ── Guard 2: Screener queries already have their own path — do NOT double-fire ──
+    # is_screener is already computed above and must block the strategy gate.
+
+    # ── Guard 3: Only EXPLICITLY strategy-focused queries open the gate ──────────
+    _EXPLICIT_STRATEGY_PHRASES = (
+        "what strategy", "which strategy", "choose strategy", "pick strategy",
+        "suggest strategy", "recommend strategy", "give me a strategy",
+        "options strategy", "option strategy", "trading strategy", "trade strategy",
+        "strategy for", "strategies for", "trade plan for", "trading plan for",
+        "trade setup for", "strategy recommendation", "best strategy to trade",
+        "give strategy", "show strategy",
+    )
+    is_explicit_strategy_request = is_strategy_execution or any(
+        kw in q_lower for kw in _EXPLICIT_STRATEGY_PHRASES
+    )
+
+    is_strategy_query = (
+        is_explicit_strategy_request
+        and not is_screener         # Screener results must NOT be replaced by modal
+        and not is_educational_qa   # Q&A must NOT trigger strategy modal
+    )
+
     if is_strategy_query:
         try:
             from modules import technical, options_strategy, subscription
@@ -2783,6 +2849,141 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         if not approved:
             yield {"type": "final", "content": f"Strategy selection cancelled by operator ({resolution_reason})."}
             return
+
+        # ── Two-step flow: check if user selected a REGIME (step 1) ──────────
+        # The selected option's action is stored in the resolved record's args.
+        # We look up the regime from the selected dynamic_option action string.
+        resolved_rec = appr_store.get_request(finance_strategy_req["approval_id"])
+        selected_action = ""
+        if resolved_rec and resolved_rec.args:
+            # The args blob carries the original candidate_data incl. regimes.
+            # Extract which regime option was selected via dynamic_options matching.
+            # The frontend sends selected_master_strategy = the option id (1-4).
+            pass
+
+        # Detect regime selection from the approval record dynamic options
+        regime_map = {
+            "select_regime_bullish": "BULLISH",
+            "select_regime_bearish": "BEARISH",
+            "select_regime_neutral": "NEUTRAL",
+            "select_regime_reversal": "REVERSAL",
+        }
+        chosen_regime = None
+        orig_args = finance_strategy_req.get("arguments") or finance_strategy_req.get("args") or {}
+        if orig_args.get("regimes"):
+            # Find which dynamic option was approved. The dynamic_options list was
+            # attached to finance_strategy_req before yielding. Map option id → action.
+            dynamic_opts = finance_strategy_req.get("dynamic_options", [])
+            # The approval store doesn't persist which option was clicked.
+            # We detect this via the stored selected_master_strategy field in the
+            # ApprovalActionRequest body. The codemode router puts this in the record.
+            # Fallback: use auto-detected signal from orig_args.
+            sel_strat = (resolved_rec.args or {}).get("_selected_regime") if resolved_rec else None
+            if not sel_strat:
+                # Infer from dynamic_options ordering: the recommended option maps to signal
+                auto_signal = (orig_args.get("signal") or "NEUTRAL").upper()
+                for regime_name in ["BULLISH", "BEARISH", "NEUTRAL", "REVERSAL"]:
+                    if regime_name in auto_signal:
+                        chosen_regime = regime_name
+                        break
+                if not chosen_regime:
+                    chosen_regime = "NEUTRAL"
+            else:
+                chosen_regime = str(sel_strat).upper()
+
+            # ── Emit Step 2: 5-strategy card for chosen regime ───────────────
+            regime_candidates = orig_args["regimes"].get(chosen_regime, [])
+            regime_masters = orig_args.get("regime_masters", {})
+            regime_master = regime_masters.get(chosen_regime, regime_candidates[0]["candidate_id"] if regime_candidates else "")
+            clean_sym = (orig_args.get("symbol") or "MARKET").replace("^", "").replace(".NS", "").replace("=F", "").replace("=X", "")
+
+            step2_args = {
+                "symbol": orig_args.get("symbol"),
+                "current_price": orig_args.get("current_price"),
+                "lot_size": orig_args.get("lot_size"),
+                "expiry": orig_args.get("expiry"),
+                "signal": chosen_regime,
+                "currency": orig_args.get("currency", "₹"),
+                "is_options": orig_args.get("is_options", False),
+                "master_recommended": regime_master,
+                "candidates": regime_candidates,
+                "disclaimer": orig_args.get("disclaimer", ""),
+            }
+
+            try:
+                step2_req_record = appr_store.create_request(
+                    user_id=user_id,
+                    session_id=session_id,
+                    tool_name="FinanceStrategyMasterSelection",
+                    args=step2_args,
+                    risk_level="HIGH",
+                    human_summary=f"Select {chosen_regime} Strategy for {clean_sym} ({len(regime_candidates)} strategies)",
+                    target_resource=clean_sym,
+                    timeout_seconds=120.0,
+                )
+                step2_req = step2_req_record.to_dict()
+            except Exception as step2_err:
+                logger.error("Failed creating step-2 strategy approval: %s", step2_err)
+                yield {"type": "final", "content": "Failed to generate strategy selection card."}
+                return
+
+            # Attach dynamic options (5 flat strategy options for this regime)
+            try:
+                from modules.approval_options import generate_dynamic_approval_options, detect_model_persona
+                step2_req["model_persona"] = detect_model_persona(model_override or "aarka")
+                step2_req["dynamic_options"] = generate_dynamic_approval_options(
+                    query=query,
+                    tool_name="FinanceStrategyMasterSelection",
+                    args=step2_args,
+                    model_name=model_override or "aarka"
+                )
+            except Exception as opt2_err:
+                logger.warning("Step-2 options generation failed: %s", opt2_err)
+
+            yield {"type": "approval_request", "payload": step2_req}
+            yield {"type": "status", "status": f"Select one of {len(regime_candidates)} {chosen_regime} strategies for {clean_sym}..."}
+
+            # ── Wait for step 2 resolution ────────────────────────────────────
+            start_wait2 = time.time()
+            approved = False
+            resolution_reason = "Strategy selection timed out"
+            finance_strategy_req = step2_req   # Swap to step2 req for downstream execution
+
+            while time.time() - start_wait2 < timeout_sec:
+                rec2 = appr_store.get_request(step2_req["approval_id"])
+                if not rec2:
+                    resolution_reason = "Step-2 approval record not found"
+                    break
+                if rec2.status == "APPROVED":
+                    if rec2.action_hash != step2_req["action_hash"]:
+                        approved = False
+                        resolution_reason = "Step-2 action hash mismatch"
+                    else:
+                        approved = True
+                        resolution_reason = "Strategy selected by user"
+                    break
+                elif rec2.status == "REJECTED":
+                    approved = False
+                    resolution_reason = "Strategy selection denied by user"
+                    break
+                elif rec2.status == "EXPIRED" or time.time() > rec2.expires_at:
+                    approved = False
+                    resolution_reason = "Strategy selection expired"
+                    break
+                await asyncio.sleep(0.25)
+
+            yield {
+                "type": "approval_resolved",
+                "payload": {
+                    "approval_id": step2_req["approval_id"],
+                    "status": "approved" if approved else "rejected",
+                    "resolved_at": int(time.time() * 1000)
+                }
+            }
+
+            if not approved:
+                yield {"type": "final", "content": f"Strategy selection cancelled ({resolution_reason})."}
+                return
 
     user_facts = ""
     try:

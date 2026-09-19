@@ -595,16 +595,32 @@ export function detectFinanceStrategyIntent(raw: string): {
   if (!raw) return null;
   const trimmed = raw.trim();
   const lower = trimmed.toLowerCase();
+  // Guard 1: Educational / Informational Q&A must never trigger strategy card.
+  // e.g. "what is RSI", "what are bullish stocks in NSE", "explain MACD"
+  const EDUCATIONAL_PREFIXES = [
+    'what is ', 'what are ', 'what does ', 'what do ', "what's ",
+    'who is ', 'who are ', 'explain ', 'how does ', 'how do ',
+    'how is ', 'define ', 'definition of ', 'meaning of ',
+    'tell me about ', 'formula for ', 'how to calculate ',
+    'difference between ', 'why is ', 'why does ', 'can you explain ',
+    'show me ', 'list ', 'find ', 'search ',
+  ];
+  const EXPLICIT_STRATEGY_VERBS = [
+    'execute', 'suggest strategy', 'recommend strategy', 'strategy for',
+    'give me a strategy', 'what strategy', 'which strategy', 'choose strategy',
+    'pick strategy', 'trading strategy for', 'trade plan for',
+  ];
+  const isEducationalOrScreener = (
+    EDUCATIONAL_PREFIXES.some((p) => lower.startsWith(p)) &&
+    !EXPLICIT_STRATEGY_VERBS.some((v) => lower.includes(v))
+  );
+  if (isEducationalOrScreener) return null;
 
-  // If user is explicitly executing an already chosen strategy, do not intercept for strategy selection
-  if (
-    lower.startsWith('execute ') ||
-    lower.startsWith('execute trading plan') ||
-    lower.includes('harvests predictable oscillations') ||
-    lower.includes('follow disciplined risk parameters')
-  ) {
-    return null;
-  }
+  // Guard 2: Screener-style queries ("bullish stocks in NSE", "bearish shares to buy") must
+  // reach the backend screener — they are NOT strategy-selection requests.
+  const SCREENER_PATTERN = /\b(stocks?|shares?|companies|equities|scrips?)\b/i;
+  const SCREENER_CONTEXT = /\b(in\s+nse|in\s+bse|in\s+india|to\s+buy|to\s+watch|to\s+invest|for\s+investment)\b/i;
+  if (SCREENER_PATTERN.test(lower) && SCREENER_CONTEXT.test(lower)) return null;
 
   // Financial strategy trigger signals
   const hasStrategyKeywords =
