@@ -10,9 +10,6 @@ or attribute chaining tricks.
 """
 import ast
 import os
-import subprocess
-import sys
-import tempfile
 from typing import Any, Dict, Set
 from modules.tools.base import Tool
 import config
@@ -117,43 +114,41 @@ import json
         code = params.get("code")
         if not code:
             return "Error: 'code' parameter is required for execute action."
-        
-        # SEC-H3 FIX: Use AST-based analysis instead of string matching.
-        # String-matching blocklists are trivially bypassed via string
-        # concatenation, getattr chains, and unicode normalization.
+
+        # Pre-filter: AST-based safety check before entering the sandbox.
+        # This provides fast rejection of obviously dangerous code.
         is_safe, violations = check_code_safety(code)
         if not is_safe:
             return f"Error: Code contains blocked patterns:\n" + "\n".join(f"  - {v}" for v in violations)
-                
+
+        # Prepend safe financial library imports
         full_code = self.PRE_IMPORTS + "\n" + code
-        
+
+        # Route through CodeModeExecutor for full Docker sandbox isolation.
+        # This enforces: --network=none, --cap-drop=ALL, --read-only, --pids-limit=32,
+        # -m 512m, --cpus=1.0 — same hardening as Code Mode execution.
         try:
-            safe_dir = getattr(config, "SAFE_WORK_DIR", tempfile.gettempdir())
-            if not os.path.exists(str(safe_dir)):
-                os.makedirs(str(safe_dir), exist_ok=True)
-            
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', dir=str(safe_dir), delete=False) as f:
-                f.write(full_code)
-                temp_path = f.name
-                
-            timeout = getattr(config, "BASH_TIMEOUT", 30)
-            
-            result = subprocess.run(
-                [sys.executable, temp_path],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=str(safe_dir),
+            from modules.code_mode import CodeModeExecutor, SandboxUnavailableError
+            executor = CodeModeExecutor(
+                tool_registry=None,          # Finance code does not call tools
+                workspace_dir=str(getattr(config, "SAFE_WORK_DIR", "/tmp")),
+                timeout=getattr(config, "BASH_TIMEOUT", 30),
+                max_tool_calls=0,            # No tool calls allowed from finance code
+                max_output_bytes=262144,     # 256 KB output cap
+                max_script_bytes=65536,
             )
-            
-            output = f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
-            
-        except subprocess.TimeoutExpired:
-            return "Error: Code execution timed out."
+            # Build an empty namespace — finance code runs standalone, no tool proxies
+            result = executor.execute_code_block(
+                full_code,
+                namespace={},
+                user_id=params.get("_user_id", "finance_tool"),
+                session_id=params.get("_session_id", "finance_exec")
+            )
+            if result.success:
+                return result.output if result.output else "[No output produced]"
+            else:
+                return f"Execution error: {result.error}"
+        except SandboxUnavailableError as e:
+            return f"Error: Sandbox runtime unavailable — {e}. Finance code execution requires Docker."
         except Exception as e:
-            return f"Error executing code: {e}"
-        finally:
-            if 'temp_path' in locals() and os.path.exists(temp_path):
-                os.remove(temp_path)
-                
-        return output
+            return f"Error executing finance code: {e}"

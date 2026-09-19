@@ -175,10 +175,7 @@ class SkillRegistry:
 
         skill_dir = self.skills_dir / "user-skills" / str(user_id) / name_clean
         if not skill_dir.exists():
-            # Fallback if created without namespaces
-            skill_dir = self.skills_dir / "user-skills" / name_clean
-            if not skill_dir.exists():
-                return f"Error: Skill '{name_clean}' does not exist for this user. Create it first."
+            return f"Error: Skill '{name_clean}' does not exist for user '{user_id}'. Create it first."
 
         # Increment version
         version = 1
@@ -219,10 +216,7 @@ class SkillRegistry:
 
         skill_dir = self.skills_dir / "user-skills" / str(user_id) / name_clean
         if not skill_dir.exists():
-            skill_dir = self.skills_dir / "user-skills" / name_clean
-
-        if not skill_dir.exists():
-            return f"Error: Skill '{name_clean}' does not exist."
+            return f"Error: Skill '{name_clean}' does not exist for user '{user_id}'."
 
         import shutil
         shutil.rmtree(skill_dir)
@@ -238,8 +232,6 @@ class SkillRegistry:
         """Return list of version snapshots for a user skill."""
         name_clean = name.strip().lower().replace(" ", "-")
         skill_dir = self.skills_dir / "user-skills" / str(user_id) / name_clean
-        if not skill_dir.exists():
-            skill_dir = self.skills_dir / "user-skills" / name_clean
         if not skill_dir.exists():
             return []
 

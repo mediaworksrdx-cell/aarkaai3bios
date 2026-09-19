@@ -1,0 +1,53 @@
+﻿# AARKAAI Sandbox Container Image (FIX-13)
+# ============================================================
+# This image is the hardened execution environment used by CodeModeExecutor.
+# It must be built and tagged as: aarkaa-sandbox:3.11.8-hardened
+#
+# Build:
+#   docker build -f Dockerfile.sandbox -t aarkaa-sandbox:3.11.8-hardened .
+#
+# Security posture:
+#   - Non-root user (UID/GID 10001:10001)
+#   - No shell installed (prevents shell escape from exec'd code)
+#   - Read-only root filesystem (enforced by docker run --read-only)
+#   - Network disabled (enforced by docker run --network=none)
+#   - Cap-drop=ALL (enforced by docker run --cap-drop=ALL)
+#   - Minimal Python + financial libs only (no dev tools, no compilers)
+
+FROM python:3.11.8-slim AS base
+
+# Remove shell to prevent shell escapes from within the sandbox
+RUN rm -f /bin/sh /bin/bash /bin/dash /usr/bin/env /usr/bin/python3.11
+
+# Install only the minimal financial/numeric libraries needed
+# No pip, no setuptools, no wheel in the final image
+RUN pip install --no-cache-dir \
+    pandas==2.1.4 \
+    numpy==1.26.3 \
+    scipy==1.11.4 \
+    statsmodels==0.14.1 \
+    scikit-learn==1.4.0 \
+    yfinance==0.2.37 \
+    ta==0.11.0 \
+    matplotlib==3.8.2 \
+  && pip uninstall -y pip setuptools wheel 2>/dev/null || true \
+  && find /usr/local/lib -name "*.pyc" -delete \
+  && find /usr/local/lib -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
+# Create non-root sandbox user
+RUN groupadd --gid 10001 sandbox \
+  && useradd --uid 10001 --gid 10001 --no-create-home --shell /sbin/nologin sandbox
+
+# Create workspace tmpfs mountpoint (will be mounted as tmpfs by docker run)
+RUN mkdir -p /workspace && chown 10001:10001 /workspace
+
+# Drop to non-root
+USER 10001:10001
+
+WORKDIR /workspace
+
+# Health check: verify Python is runnable (used by CI verify script)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=2s --retries=1 \
+  CMD ["/usr/local/bin/python3", "-c", "import sys; sys.exit(0)"]
+
+ENTRYPOINT ["/usr/local/bin/python3"]

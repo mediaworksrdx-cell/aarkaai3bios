@@ -13,7 +13,9 @@
 # GCP / Cloud service account keys
 *-sa-key.json
 *service_account*.json
+*-service-account*.json
 orbital-heaven-*.json
+
 
 # SSH / TLS keys
 *.pem

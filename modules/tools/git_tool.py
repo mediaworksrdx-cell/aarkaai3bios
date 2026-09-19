@@ -1,8 +1,21 @@
 import os
+import re
+import shlex
 import subprocess
 from typing import Dict, Any
 from modules.tools.base import Tool
 from config import SAFE_WORK_DIR
+
+# Allowlist of permitted git subcommands. Any subcommand not in this set is blocked.
+GIT_ALLOWED_SUBCOMMANDS = {
+    "status", "diff", "log", "branch", "show", "fetch",
+    "clone", "checkout", "add", "commit", "stash", "tag",
+    "remote", "pull", "config",
+}
+
+# Subcommands that are always blocked regardless of allowlist
+GIT_BLOCKED_SUBCOMMANDS = {"push", "reset", "clean", "gc", "reflog", "filter-branch", "filter-repo"}
+
 
 class GitCredentialsError(Exception):
     pass
@@ -33,18 +46,31 @@ class GitTool(Tool):
         args = ["git"]
         
         if raw_command:
-            # Parse raw git command string (strip leading 'git ' if present)
-            cmd_parts = raw_command.strip().split()
-            if cmd_parts[0].lower() == "git":
+            # Strip AuthParams suffix before parsing (handled separately below)
+            clean_cmd = re.sub(r'\[AuthParams:[^\]]+\]', '', raw_command).strip()
+            # Use shlex.split for correct tokenization (handles quoted arguments)
+            try:
+                cmd_parts = shlex.split(clean_cmd)
+            except ValueError as parse_err:
+                return f"Error: Failed to parse git command: {parse_err}"
+
+            # Strip leading 'git' token if present
+            if cmd_parts and cmd_parts[0].lower() == "git":
                 cmd_parts = cmd_parts[1:]
-            
-            # Block destructive operations that could wipe the repository configuration
-            blocked_args = ["clean", "reset", "push"]
-            for blocked in blocked_args:
-                if blocked in cmd_parts:
-                    return f"Error: Git command contains blocked operation '{blocked}'."
+
+            if not cmd_parts:
+                return "Error: Empty git subcommand."
+
+            # Position-aware, case-insensitive subcommand check
+            subcmd = cmd_parts[0].lower()
+            if subcmd in GIT_BLOCKED_SUBCOMMANDS:
+                return f"Error: Git subcommand '{subcmd}' is not permitted for security reasons."
+            if subcmd not in GIT_ALLOWED_SUBCOMMANDS:
+                return f"Error: Git subcommand '{subcmd}' is not in the permitted list: {sorted(GIT_ALLOWED_SUBCOMMANDS)}"
+
             args.extend(cmd_parts)
             
+
         elif operation:
             allowed_ops = ["status", "diff", "log", "branch", "show", "config"]
             if operation not in allowed_ops:
@@ -63,20 +89,12 @@ class GitTool(Tool):
         
         # Extract from raw command string if injected as a suffix (e.g. [AuthParams: username="x" token="y"])
         if raw_command and "[AuthParams:" in raw_command:
-            import re
             user_match = re.search(r'username="([^"]+)"', raw_command)
             token_match = re.search(r'token="([^"]+)"', raw_command)
             if user_match:
                 credentials_username = user_match.group(1)
             if token_match:
                 credentials_token = token_match.group(1)
-            # Strip AuthParams from raw command args
-            raw_command = re.sub(r'\[AuthParams:[^\]]+\]', '', raw_command).strip()
-            # Rebuild args without auth parameters
-            cmd_parts = raw_command.strip().split()
-            if cmd_parts[0].lower() == "git":
-                cmd_parts = cmd_parts[1:]
-            args = ["git"] + cmd_parts
             
         # If credentials parameters are not provided, raise GitCredentialsError to bypass registry execute wrapper
         if not credentials_username or not credentials_token:
@@ -90,12 +108,26 @@ class GitTool(Tool):
             # Set credentials in standard HTTPS format: https://username:token@github.com
             # Alternatively set token helper config context:
             if credentials_username:
-                args = ["git", "config", "credential.helper", f"!f() {{ echo username={credentials_username}; echo password={credentials_token}; }}; f"]
-                # Configure helper block first
+                # Write credentials to a temporary .git-credentials file instead of
+                # using a shell function literal (which allows shell injection via
+                # unvalidated username/token values).
+                import urllib.parse
+                safe_username = urllib.parse.quote(str(credentials_username), safe="")
+                safe_token = urllib.parse.quote(str(credentials_token), safe="")
+                creds_content = f"https://{safe_username}:{safe_token}@github.com\n"
+                creds_path = SAFE_WORK_DIR / ".git-credentials"
                 try:
-                    subprocess.run(args, cwd=str(SAFE_WORK_DIR), env=env, check=True)
+                    creds_path.write_text(creds_content, encoding="utf-8")
+                    creds_path.chmod(0o600)
                 except Exception as e:
-                    return f"Failed configuring credentials helper: {e}"
+                    return f"Failed writing credentials file: {e}"
+                # Configure git to use the store helper pointing to the file
+                config_args = ["git", "config", "credential.helper", f"store --file={creds_path}"]
+                try:
+                    subprocess.run(config_args, cwd=str(SAFE_WORK_DIR), env=env, check=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                except Exception as e:
+                    return f"Failed configuring credentials: {e}"
 
         try:
             result = subprocess.run(

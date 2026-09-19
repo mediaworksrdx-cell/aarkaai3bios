@@ -7,9 +7,12 @@ lifecycles, MCP process launches, authorization decisions, and policy violations
 import os
 import json
 import time
+import queue
 import hashlib
 import logging
 import threading
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -33,6 +36,56 @@ class SecurityAuditError(Exception):
     pass
 
 
+class RemoteAuditSink:
+    """Asynchronous secondary durability sink shipping audit records to a remote collector."""
+
+    def __init__(self, sink_url: str, batch_size: int = 20, flush_interval: float = 2.0):
+        self.sink_url = sink_url
+        self.batch_size = batch_size
+        self.flush_interval = flush_interval
+        self._queue: queue.Queue[Dict[str, Any]] = queue.Queue(maxsize=10000)
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(target=self._worker, daemon=True, name="RemoteAuditSinkWorker")
+        self._thread.start()
+
+    def enqueue(self, record: Dict[str, Any]) -> None:
+        try:
+            self._queue.put_nowait(record)
+        except queue.Full:
+            logger.warning("RemoteAuditSink queue full; audit record dropped from remote forwarder.")
+
+    def _worker(self) -> None:
+        batch: list[Dict[str, Any]] = []
+        last_flush = time.time()
+        while not self._stop_event.is_set():
+            try:
+                timeout = max(0.1, self.flush_interval - (time.time() - last_flush))
+                record = self._queue.get(timeout=timeout)
+                batch.append(record)
+            except queue.Empty:
+                pass
+
+            if batch and (len(batch) >= self.batch_size or (time.time() - last_flush) >= self.flush_interval):
+                self._send_batch(batch)
+                batch = []
+                last_flush = time.time()
+
+    def _send_batch(self, batch: list) -> None:
+        try:
+            data = json.dumps(batch).encode("utf-8")
+            req = urllib.request.Request(
+                self.sink_url,
+                data=data,
+                headers={"Content-Type": "application/json", "User-Agent": "AARKAAI-Audit-Sink/1.0"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.status >= 300:
+                    logger.warning("RemoteAuditSink: HTTP %s from sink URL %s", resp.status, self.sink_url)
+        except Exception as e:
+            logger.warning("RemoteAuditSink delivery error: %s", e)
+
+
 class SecurityAuditLogger:
     _instance = None
     _lock = threading.RLock()
@@ -48,7 +101,10 @@ class SecurityAuditLogger:
         self.fail_closed = fail_closed
         self._last_hash = "0" * 64
         self._rate_window: list[float] = []
+        sink_url = os.getenv("AARKAAI_AUDIT_SINK_URL", "").strip()
+        self._remote_sink: Optional[RemoteAuditSink] = RemoteAuditSink(sink_url) if sink_url else None
         self._init_storage()
+
 
     @classmethod
     def get_instance(cls) -> "SecurityAuditLogger":
@@ -212,8 +268,13 @@ class SecurityAuditLogger:
                 # 2. Append to local external anchor spool
                 self._append_to_spool(record)
 
+                # 3. Asynchronously dispatch to durable remote sink if configured
+                if self._remote_sink:
+                    self._remote_sink.enqueue(record)
+
                 self._last_hash = record_hash
                 return record_hash
+
             except Exception as e:
                 if self.fail_closed:
                     raise SecurityAuditError(f"Failed to record security audit event '{event_type}': {e}") from e

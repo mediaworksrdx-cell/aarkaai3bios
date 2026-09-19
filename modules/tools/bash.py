@@ -22,60 +22,20 @@ from typing import Any, Dict, Tuple
 
 from config import BASH_TIMEOUT, SAFE_WORK_DIR
 from modules.tools.base import Tool
+from modules.security_policy import (
+    BASH_ALLOWED_COMMANDS as ALLOWED_COMMANDS,
+    BASH_ALWAYS_BLOCKED as _COMPILED_BLOCKED,
+    validate_bash_command,
+    validate_python_ast as _validate_python_ast_policy,
+)
 
 logger = logging.getLogger(__name__)
 
-# ─── Allowlist: Only these base commands are permitted ────────────────────────
-ALLOWED_COMMANDS = {
-    # Node.js
-    "node", "npm", "npx",
-    # Read-only file inspection
-    "cat", "head", "tail", "wc", "grep", "find", "ls", "pwd", "echo",
-    "sort", "uniq", "tr", "cut", "awk", "sed",
-    "file", "stat", "du", "df", "tree",
-    # Version control
-    "git", "diff",
-    # Network (read-only)
-    "curl", "wget",
-    # Dev tools
-    "python", "python3", "pytest", "ruff", "mypy", "black", "flake8", "isort",
-    "make", "cmake",
-    # Directory operations
-    "mkdir", "touch", "cp", "mv",
-}
+# Maximum output bytes returned from a single command (prevents pipe-buffer exhaustion)
+MAX_OUTPUT_BYTES = 524288  # 512 KB
 
-# ─── Dangerous patterns: ALWAYS blocked regardless of allowlist ───────────
-ALWAYS_BLOCKED_PATTERNS = [
-    r'\|\s*(?:bash|sh|zsh|dash|csh|ksh)\b',  # pipe to shell
-    r'[`]',                                      # backtick command substitution
-    r'\$\(',                                    # $() command substitution
-    r'\beval\b',                                 # eval
-    r'\bexec\b',                                 # exec
-    r'\bsudo\b',                                 # privilege escalation
-    r'\bsu\b\s',                                # switch user
-    r'\brm\s+(-[rRf]+\s+)?/',                  # rm from root
-    r'\brm\s+-[rRf]*\s',                        # any rm -rf
-    r'\bchmod\b.*\b777\b',                      # world-writable
-    r'\bchown\b',                                # ownership change
-    r'\bmkfs\b',                                 # format disk
-    r'\bdd\s+if=',                               # disk write
-    r'>\s*/dev/',                                 # write to devices
-    r'\bshutdown\b',                             # shutdown
-    r'\breboot\b',                               # reboot
-    r'\bpoweroff\b',                             # poweroff
-    r'\bsystemctl\b',                            # service management
-    r'\bkill\b\s+-9',                           # force kill
-    r'\bkillall\b',                              # kill all processes
-    r'\bnc\b.*-[le]',                            # netcat listen
-    r'\btelnet\b',                               # telnet
-    r'\bssh\b',                                  # ssh
-    r'\bscp\b',                                  # scp
-    r':\(\)\{',                                  # fork bomb
-    r'/etc/(?:passwd|shadow|sudoers)',            # sensitive system files
-    r'\bwget\b.*-O\s*-\s*\|',                  # wget pipe to shell
-    r'\bcurl\b.*\|\s*(?:bash|sh)',              # curl pipe to shell
-    r'\b(?:pip|pip3)(?:\.\d+)?\b',              # raw host package manager execution prohibited
-]
+# Re-export for backward compatibility with any external callers
+ALWAYS_BLOCKED_PATTERNS = [p.pattern for p in _COMPILED_BLOCKED]
 
 
 def _validate_python_ast(code: str) -> Tuple[bool, str]:
@@ -177,8 +137,9 @@ def _validate_command(command: str) -> Tuple[bool, str]:
                     except Exception as e:
                         return False, f"Failed reading script: {e}"
                 else:
-                    # Script in workspace relative path
-                    continue
+                    # Script not found in workspace — block execution.
+                    # Never allow python execution of scripts outside the workspace boundary.
+                    return False, f"Blocked: script '{script_args[0]}' not found in workspace directory. Python execution requires scripts to exist within the sandboxed workspace."
             if "-c" in tokens:
                 c_idx = tokens.index("-c")
                 if c_idx + 1 < len(tokens):
@@ -275,6 +236,12 @@ class BashTool(Tool):
                 output += f"[stderr]\n{result.stderr}\n"
 
             output += f"Exit code: {result.returncode}"
+
+            # Enforce output size cap to prevent pipe-buffer exhaustion
+            if len(output.encode("utf-8")) > MAX_OUTPUT_BYTES:
+                output = output.encode("utf-8")[:MAX_OUTPUT_BYTES].decode("utf-8", errors="replace")
+                output += f"\n...[output truncated at {MAX_OUTPUT_BYTES // 1024} KB]"
+
             return output
         except subprocess.TimeoutExpired:
             return f"Error: Command execution timed out after {BASH_TIMEOUT} seconds."

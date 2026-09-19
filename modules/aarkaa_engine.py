@@ -1020,11 +1020,12 @@ def _guard_token_stream(raw_stream, prompt_requests_code: bool = False, user_que
             pre = buf[:earliest].rstrip()
             # Roll back to the last complete sentence or paragraph boundary before the closing phrase
             last_boundary = -1
-            for end_m in re.finditer(r'[\.!\?](?:\s+|\n)|(?:\n\s*\n)', pre):
+            for end_m in re.finditer(r'[\.!\?](?:\s+|\n|$)|(?:\n\s*\n)', pre):
                 char_pos = end_m.start()
                 if pre[char_pos] == '.' and char_pos > 0 and pre[char_pos-1].isdigit():
                     continue
                 last_boundary = end_m.end()
+
 
             if last_boundary != -1:
                 valid_tail = pre[:last_boundary].rstrip()

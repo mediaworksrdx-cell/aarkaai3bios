@@ -173,8 +173,23 @@ def execute(plan: Dict[str, Any], goal_id: int, user_id: str, session_id: str) -
                         else:
                             log_audit_event(user_id, session_id, tool_name, tool_params, perm_level, "ALLOWED_BY_USER", "User approved interactive prompt.")
                     else:
-                        logger.warning("Running USER_CONFIRM action in headless context: %s %s", tool_name, tool_params)
-                        log_audit_event(user_id, session_id, tool_name, tool_params, perm_level, "ALLOWED_BY_DEFAULT", "Headless context auto-approved.")
+                        # Headless context: never auto-approve mutating operations.
+                        # USER_CONFIRM in a non-interactive context must fail closed.
+                        log_audit_event(
+                            user_id, session_id, tool_name, tool_params, perm_level,
+                            "BLOCKED", "Headless context: USER_CONFIRM requires interactive session or approval token."
+                        )
+                        logger.error(
+                            "SECURITY: Blocked headless auto-approval attempt for tool=%s params=%s",
+                            tool_name, tool_params
+                        )
+                        result = (
+                            f"Error: Tool '{tool_name}' requires explicit user approval and cannot be "
+                            f"auto-approved in a non-interactive (headless) context. "
+                            f"Use an interactive session or provide a valid CI approval token."
+                        )
+                        success = False
+                        break
                 else:
                     log_audit_event(user_id, session_id, tool_name, tool_params, perm_level, "ALLOWED", "Safe read execution.")
 

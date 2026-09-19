@@ -105,7 +105,8 @@ class CreateSkillTool(Tool):
             return "Error: 'name' parameter is required."
         if not content:
             return "Error: 'content' parameter is required."
-        return _registry.create_skill(name, content, user_id="default_user")
+        user_id = kwargs.get("user_id") or kwargs.get("_user_id") or "default_user"
+        return _registry.create_skill(name, content, user_id=user_id)
 
 
 class UpdateSkillTool(Tool):
@@ -129,7 +130,8 @@ class UpdateSkillTool(Tool):
             return "Error: 'name' parameter is required."
         if not content:
             return "Error: 'content' parameter is required."
-        return _registry.update_skill(name, content, user_id="default_user")
+        user_id = kwargs.get("user_id") or kwargs.get("_user_id") or "default_user"
+        return _registry.update_skill(name, content, user_id=user_id)
 
 
 class DeleteSkillTool(Tool):
@@ -149,7 +151,8 @@ class DeleteSkillTool(Tool):
         name = kwargs.get("name", "")
         if not name:
             return "Error: 'name' parameter is required."
-        return _registry.delete_skill(name, user_id="default_user")
+        user_id = kwargs.get("user_id") or kwargs.get("_user_id") or "default_user"
+        return _registry.delete_skill(name, user_id=user_id)
 
 
 class ValidateSkillTool(Tool):

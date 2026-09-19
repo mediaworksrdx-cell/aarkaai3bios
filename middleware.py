@@ -27,7 +27,19 @@ from config import (
     RESPONSE_CACHE_TTL,
 )
 
+import os
+
 logger = logging.getLogger(__name__)
+
+
+def validate_api_key_config() -> None:
+    """Called at startup. Raises if production mode is active but API_KEY is not set."""
+    if IS_PRODUCTION and not API_KEY:
+        raise RuntimeError(
+            "SECURITY: IS_PRODUCTION=True but AARKAAI_API_KEY is not set. "
+            "The API is completely unauthenticated. Set AARKAAI_API_KEY or "
+            "set AARKAAI_ENV=development to disable this guard."
+        )
 
 
 # ─── API Key Authentication ──────────────────────────────────────────────────
@@ -57,9 +69,22 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         # Validate key or Authorization header
         provided_key = request.headers.get(API_KEY_HEADER, "")
         auth_header = request.headers.get("Authorization", "")
-        has_bearer = auth_header.startswith("Bearer ")
 
-        if provided_key != API_KEY and not has_bearer:
+        # Validate X-API-Key header
+        key_valid = bool(API_KEY) and (provided_key == API_KEY)
+
+        # Validate Bearer token: must match API_KEY exactly, or a dedicated
+        # ADMIN_BEARER_TOKEN if configured. Never accept arbitrary Bearer values.
+        bearer_valid = False
+        if auth_header.startswith("Bearer "):
+            bearer_token = auth_header[7:].strip()
+            admin_bearer = os.getenv("AARKAAI_ADMIN_BEARER_TOKEN", "")
+            bearer_valid = bool(bearer_token) and (
+                bearer_token == API_KEY or
+                (bool(admin_bearer) and bearer_token == admin_bearer)
+            )
+
+        if not key_valid and not bearer_valid:
             logger.warning(
                 "Unauthorized request to %s from %s",
                 request.url.path,

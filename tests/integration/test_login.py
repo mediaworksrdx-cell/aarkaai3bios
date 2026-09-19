@@ -15,5 +15,10 @@ def post(path, payload):
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read().decode())
 
-status, body = post("/auth/login", {"email": "visitor@aarkaai.com", "password": "VisitorSecurePassword123!"})
-print(f"LOGIN: {status} -> {str(body)[:300]}")
+if __name__ == "__main__":
+    try:
+        status, body = post("/auth/login", {"email": "visitor@aarkaai.com", "password": "VisitorSecurePassword123!"})
+        print(f"LOGIN: {status} -> {str(body)[:300]}")
+    except Exception as e:
+        print(f"Login failed: {e}")
+

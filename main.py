@@ -1134,7 +1134,12 @@ async def upload_file(
         )
 
     safe_dir = Path(SAFE_WORK_DIR).resolve()
-    target_path = safe_dir / filename
+    user_dir = safe_dir / str(current_user.id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    target_path = user_dir / filename
+    # Path traversal guard: ensure target stays within user directory
+    if not target_path.resolve().is_relative_to(user_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid filename: path traversal detected.")
     total_bytes = 0
 
     try:
@@ -1160,6 +1165,7 @@ async def upload_file(
         "filename": filename,
         "size_bytes": total_bytes,
         "path": f"/download/{filename}",
+        "user_isolated": True,
     }
 
 
@@ -1725,78 +1731,15 @@ async def get_screener_provenance(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-# ─── Code Mode & Human Approval Gates ─────────────────────────────────────────
-import pydantic
+# ─── Modular Routers (FIX-18) ─────────────────────────────────────────────────
+from routers.health import router as health_router
+from routers.codemode import router as codemode_router
+from routers.mcp import router as mcp_router
 
-class ApprovalActionRequest(pydantic.BaseModel):
-    approval_id: str
-    decision: str  # "APPROVED" | "REJECTED"
-    selected_master_strategy: str | None = None
+app.include_router(health_router)
+app.include_router(codemode_router)
+app.include_router(mcp_router)
 
-
-@app.post("/codemode/approve", tags=["codemode"])
-async def codemode_approve(
-    req: ApprovalActionRequest,
-    current_user=fastapi.Depends(modules.auth.get_optional_user)
-):
-    """
-    Resolves an in-flight tool approval gate (Approve or Reject).
-    Atomic Compare-And-Swap resolution across multi-worker deployments.
-    """
-    from modules.approval_store import get_approval_store
-    store = get_approval_store()
-    user_id = getattr(current_user, "id", "default") if current_user else "default"
-    clean_decision = req.decision.upper()
-    if clean_decision in ("APPROVE", "APPROVED"):
-        normalized = "APPROVED"
-    elif clean_decision in ("DENY", "DENIED", "REJECT", "REJECTED"):
-        normalized = "REJECTED"
-    else:
-        normalized = req.decision
-    resp = store.resolve_request(req.approval_id, user_id=user_id, decision=normalized)
-    if resp.status == "unauthorized":
-        raise HTTPException(status_code=403, detail=resp.message)
-    if resp.status == "invalid":
-        raise HTTPException(status_code=400, detail=resp.message)
-    return {
-        "approval_id": resp.approval_id,
-        "status": resp.status,
-        "message": resp.message,
-        "action_hash": resp.action_hash
-    }
-
-
-# ─── Model Context Protocol (MCP) Management ──────────────────────────────────
-
-class McpToggleRequest(pydantic.BaseModel):
-    server_id: str
-    enabled: bool
-
-
-@app.get("/mcp/servers", tags=["mcp"])
-async def get_mcp_servers(
-    current_user=fastapi.Depends(modules.auth.get_optional_user)
-):
-    """Returns active MCP server registry, connection statuses, and tool permissions."""
-    from modules.mcp_client import get_mcp_client
-    client = get_mcp_client()
-    return {"servers": client.get_server_manifests()}
-
-
-@app.post("/mcp/toggle", tags=["mcp"])
-async def toggle_mcp_server(
-    req: McpToggleRequest,
-    current_user=fastapi.Depends(modules.auth.get_optional_user)
-):
-    """Dynamically enables or disables an MCP server with RBAC and active execution locks."""
-    from modules.mcp_client import get_mcp_client
-    client = get_mcp_client()
-    success, msg = client.toggle_server(req.server_id, req.enabled)
-    if not success:
-        if "active execution" in msg.lower():
-            raise HTTPException(status_code=409, detail=msg)
-        raise HTTPException(status_code=400, detail=msg)
-    return {"success": success, "message": msg, "server_id": req.server_id, "enabled": req.enabled}
 
 
 if __name__ == "__main__":

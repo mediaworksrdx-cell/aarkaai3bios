@@ -72,6 +72,19 @@ def create_archive():
             tar.add("modules", arcname="modules", filter=filter_pycache)
             print("  + Added directory: modules/")
 
+        if os.path.exists("routers"):
+            tar.add("routers", arcname="routers", filter=filter_pycache)
+            print("  + Added directory: routers/")
+
+        if os.path.exists("skills"):
+            tar.add("skills", arcname="skills", filter=filter_pycache)
+            print("  + Added directory: skills/")
+
+        if os.path.exists("Dockerfile.sandbox"):
+            tar.add("Dockerfile.sandbox", arcname="Dockerfile.sandbox")
+            print("  + Added file: Dockerfile.sandbox")
+
+
         # Frontend source & public files
         def filter_frontend(tarinfo):
             if any(x in tarinfo.name for x in ["node_modules", ".next", ".git"]):

@@ -20,6 +20,25 @@ known-first-party = ["modules", "config", "database", "schemas", "middleware"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --tb=short"
+markers = [
+    "unit: Unit tests runnable in any environment without external services",
+    "integration: Integration tests requiring running backend or network",
+    "manual: Manual and staging tests requiring live external infrastructure",
+    "requires_docker: Tests requiring Docker daemon",
+    "requires_model: Tests requiring local weights or model inference engine",
+]
+norecursedirs = [
+    "manual",
+    "integration",
+    "scripts",
+    "scratch",
+    "archive",
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+]
+
 
 [tool.coverage.run]
 source = ["modules", "config.py", "database.py", "schemas.py", "middleware.py", "pipeline.py", "main.py"]

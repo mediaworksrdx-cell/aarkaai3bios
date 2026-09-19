@@ -3,9 +3,12 @@ AARKAAI – Hierarchical Permission & Security Layer
 Determines if tool invocations should be AUTO_ALLOW, USER_CONFIRM (interactive gate), or STRICT_BLOCK.
 Also implements Git Safety Guards.
 """
+import logging
 import re
 from typing import Dict, Any, Tuple
 from config import BASH_BLOCKLIST
+
+logger = logging.getLogger(__name__)
 
 # Git destructive actions to guard against
 GIT_DESTRUCTIVE_PATTERNS = [
@@ -38,30 +41,23 @@ def verify_permission(tool_name: str, params: Dict[str, Any]) -> Tuple[str, str]
     if tool_name == "BashTool":
         command = params.get("command", "")
         cmd_lower = command.lower().strip()
-        
-        # Check central BASH_BLOCKLIST
+
+        # 1. ALWAYS check chaining operators first — before any safe-read bypass.
+        # A safe command prefix does not sanitize a chained dangerous suffix.
+        chaining_operators = [";", "&&", "||", "|", "$(", "`"]
+        for op in chaining_operators:
+            if op in command:
+                return PermissionLevel.STRICT_BLOCK, f"Command chaining operator '{op}' is not permitted."
+
+        # 2. Check central BASH_BLOCKLIST
         for pattern in BASH_BLOCKLIST:
             if pattern.lower() in cmd_lower:
                 return PermissionLevel.STRICT_BLOCK, f"Command contains blocked pattern: '{pattern}'"
-                
-        # Check Git destructive patterns
+
+        # 3. Check Git destructive patterns
         if is_git_destructive(command):
             return PermissionLevel.STRICT_BLOCK, "Git destructive action blocked for safety."
 
-        # Check command chaining and injection operators
-        chaining_operators = [";", "&&", "||", "|", "$(", "`"]
-        is_safe_read = False
-        safe_bash_patterns = [
-            r"^(git status|git diff|git log|ls|pwd|cat|grep|find|dir|echo)\b"
-        ]
-        if any(re.match(p, command.strip()) for p in safe_bash_patterns):
-            is_safe_read = True
-
-        if not is_safe_read:
-            for op in chaining_operators:
-                if op in command:
-                    return PermissionLevel.STRICT_BLOCK, f"Command chaining operator '{op}' blocked in non-read path."
-            
     # 2. AUTO_ALLOW Checks
     # FileReadTool and WebSearchTool are always safe.
     if tool_name in ["FileReadTool", "WebSearchTool"]:
@@ -192,8 +188,14 @@ def check_tool_access(user_id: str, tool_name: str, user_tier: str = "free") -> 
     """
     tool_config = TOOL_PERMISSIONS.get(tool_name)
     if tool_config is None:
-        # Unknown tool — allow by default (it might be a system tool)
-        return {"allowed": True, "reason": "Unknown tool, default allow", "remaining_calls": -1}
+        # Unknown tool — deny by default. Unregistered tools must be explicitly
+        # added to TOOL_PERMISSIONS before they can be invoked.
+        logger.warning("Access denied: unregistered tool '%s' requested by user '%s'", tool_name, user_id)
+        return {
+            "allowed": False,
+            "reason": f"Tool '{tool_name}' is not registered in the permission matrix. Access denied by default.",
+            "remaining_calls": 0
+        }
 
     # Tier check
     required_tier = tool_config["tier"]

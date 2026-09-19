@@ -209,15 +209,17 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
         code_block = _extract_python_code(code_block)
         if code_block:
             from modules.code_mode import CodeModeExecutor
+            approval_context = {"user_id": user_id, "session_id": session_id}
             executor = CodeModeExecutor(
                 tool_registry=registry,
                 workspace_dir=str(config.SAFE_WORK_DIR),
                 timeout=config.CODE_MODE_TIMEOUT,
                 max_tool_calls=config.CODE_MODE_MAX_TOOL_CALLS,
                 max_output_bytes=config.CODE_MODE_MAX_OUTPUT_BYTES,
+                approval_context=approval_context,
             )
             namespace = executor.build_tool_namespace([name for name in registry.tools])
-            result = executor.execute_code_block(code_block, namespace, user_id="system", session_id="code_mode")
+            result = executor.execute_code_block(code_block, namespace, user_id=user_id, session_id=session_id)
             if result.success:
                 yield "final", result.format_final_answer()
                 return

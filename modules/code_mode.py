@@ -26,6 +26,7 @@ from typing import Dict, Any, Optional, Tuple, List, Set
 
 from modules.security_audit import audit_event, SecurityAuditError
 from modules.ci_nonce_store import CINonceStore, verify_ci_approval_token
+from modules.security_policy import validate_python_ast as _sp_validate_python_ast
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,16 @@ class CodeModeExecutor:
             return False
 
     def build_tool_namespace(self, allowed_tools: list[str]) -> dict:
+        # Import gateway here to avoid circular imports at module load time
+        from modules.tool_gateway import ToolGateway
+        gateway = ToolGateway(
+            registry=self.registry,
+            approval_context=self.approval_context,
+            user_id=self.approval_context.get("user_id", "system"),
+            session_id=self.approval_context.get("session_id", "code_mode"),
+            workspace_dir=self.workspace_dir,
+        )
+
         namespace = {}
         for name in allowed_tools:
             def make_proxy(tool_name):
@@ -166,14 +177,16 @@ class CodeModeExecutor:
                     if self.call_count > self.max_tool_calls:
                         raise RuntimeError(f"Max tool calls ({self.max_tool_calls}) exceeded")
 
-                    # Mutating tool approval enforcement
-                    if tool_name in MUTATING_TOOLS:
-                        self._enforce_approval(tool_name, kwargs)
-
-                    return self.registry.execute_tool(tool_name, kwargs)
+                    # Route ALL tool calls through the gateway.
+                    # The gateway enforces per-class isolation:
+                    #   READ_ONLY  → direct execution with scope validation
+                    #   EXEC       → secondary Docker sandbox (no host subprocess bypass)
+                    #   MUTATING   → ApprovalStore gate before any side effect
+                    return gateway.dispatch(tool_name, kwargs)
                 return proxy
             namespace[name] = make_proxy(name)
         return namespace
+
 
     def _enforce_approval(self, tool_name: str, args: Dict[str, Any]):
         """Verify human operator approval or cryptographically valid CI token."""

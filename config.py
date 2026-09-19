@@ -289,6 +289,8 @@ MCP_SSRF_BLOCKED_CIDRS = [
     "fd00::/8", "169.254.169.254/32"
 ]
 
-# ─── Environment Governance (Production Release Enabled) ───────────────────
-# All 5 Production Readiness Gates (Gate 1 through Gate 5) successfully passed.
-IS_PRODUCTION = True
+# ─── Environment Governance ────────────────────────────────────────────────
+# IS_PRODUCTION is derived from AARKAAI_ENV at the top of this file (line 16).
+# Do NOT hard-code this value here — it prevents dev/staging environments from
+# operating safely and disables hot-reload in local development.
+# Set AARKAAI_ENV=production in the deployment environment to enable production mode.
