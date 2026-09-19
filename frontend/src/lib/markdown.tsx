@@ -77,8 +77,8 @@ function CodeBlockComponent({ className, children, ...props }: any) {
 
       {/* Code Body */}
       <div className="p-4 overflow-x-auto text-xs sm:text-sm font-mono text-[var(--text-primary)] leading-relaxed">
-        <pre className="!bg-transparent !p-0 !m-0 !border-none !shadow-none">
-          <code className={className} {...props}>
+        <pre className="!bg-transparent !p-0 !m-0 !border-none !shadow-none whitespace-pre-wrap break-words break-all">
+          <code className={`${className || ''} whitespace-pre-wrap break-words break-all`} {...props}>
             {children}
           </code>
         </pre>
@@ -113,7 +113,7 @@ export function MarkdownRenderer({ content, className = '', isStreaming = false 
           ),
         }}
       >
-        {content}
+        {cleanContent}
       </ReactMarkdown>
       {isStreaming && (
         <span className="inline-block w-1.5 h-4 ml-1 align-middle bg-[var(--accent-primary)] animate-pulse" />

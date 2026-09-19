@@ -226,15 +226,19 @@ _LANG_NAMES = {
 }
 
 _GGUF_CANDIDATES = [
-    # 7B Model (Highest Reasoning Quality) -- priority 1
+    # 7B Primary Model (Highest Reasoning Quality & High Speed) -- priority 1
+    Path(MODEL_PATH).parent / "aarkaa-7b-q8.gguf",
     Path(MODEL_PATH).parent / "aarkaa-7b-f16.gguf",
     Path(MODEL_PATH).parent / "aarkaa-7b-q16.gguf",
+    Path(MODEL_PATH) / "aarkaa-7b-q8.gguf",
     Path(MODEL_PATH) / "aarkaa-7b-f16.gguf",
     Path(MODEL_PATH) / "aarkaa-7b-q16.gguf",
-    # 3B Models -- priority 2
+    # 3B Models -- priority 2 (fallback only)
+    Path(MODEL_PATH).parent / "aarkaa-3b-q8.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-f16.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-q16.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-f32.gguf",
+    Path(MODEL_PATH) / "aarkaa-3b-q8.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-f16.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-q16.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-f32.gguf",
@@ -491,9 +495,33 @@ def _find_repetition_pos(text: str) -> int | None:
     if not text or len(text) < 50:
         return None
 
-    import re
+    # 1. Post-conclusion loop restart check:
+    # If a formal concluding sentence ("In conclusion,...", "To conclude,...", "In summary,...")
+    # has been output, and the model then tries to output another header or restart from the beginning,
+    # immediately terminate at the conclusion boundary.
+    conc_match = re.search(
+        r'(?i)(?:\n\s*|^)(?:In conclusion|To conclude|In summary),([^\n]+?[\.!\?])(?:\s*\n+)(?=\*\*|#{1,4}|[A-Z0-9])',
+        text
+    )
+    if conc_match:
+        return conc_match.end()
 
-    # 1. Duplicate numbered bold headers (e.g. **1. Revenue Growth and EPS:**)
+    # 2. Duplicate bold or markdown headers (numbered or unnumbered)
+    # Catches unnumbered headers repeating (e.g. **What Is RSI?**, **How Does it Work?**)
+    # or identical section headers appearing twice.
+    all_headers = list(re.finditer(r'(?i)(?:^|\n)\s*(?:\*{2}|#{1,4})\s*([^\n*#]{3,80}?)\s*(?:\*{2}|$)', text))
+    if len(all_headers) >= 1:
+        seen_headers = {}
+        for m in all_headers:
+            h_clean = m.group(1).lower().strip()
+            # If header asks a question starting with 'what is', 'how does', 'definition' after pos 100
+            if m.start() > 100 and any(h_clean.startswith(p) for p in ["what is", "what are", "how does", "how to", "definition of", "overview of"]):
+                return m.start()
+            if h_clean in seen_headers:
+                return m.start()
+            seen_headers[h_clean] = m.start()
+
+    # 3. Duplicate numbered bold headers (e.g. **1. Revenue Growth and EPS:**)
     header_matches = list(re.finditer(r'(?i)\*\*(\d+\.\s*[^*\n]{3,100}?):?\*\*', text))
     if len(header_matches) >= 2:
         seen = {}
@@ -529,7 +557,22 @@ def _find_repetition_pos(text: str) -> int | None:
         words = [m.group(0).lower() for m in words_matches]
         n = len(words)
 
-        # 2. Multi-scale consecutive repetition windows
+        # 4. Opening phrase recurrence check:
+        # If any 10-word sequence from the first 50 words reappears later (after pos 50 words),
+        # the model has restarted the answer from the top.
+        if n >= 60:
+            first_50 = words[:min(50, n)]
+            for w_len in range(10, 7, -1):
+                found_recurrence = False
+                for i in range(len(first_50) - w_len + 1):
+                    prefix_seq = tuple(first_50[i:i+w_len])
+                    for j in range(50, n - w_len + 1):
+                        if tuple(words[j:j+w_len]) == prefix_seq:
+                            return words_matches[j].start()
+                if found_recurrence:
+                    break
+
+        # 5. Multi-scale consecutive repetition windows
         # For medium/long spans (w >= 16 words), require 2 consecutive repeats
         for w in range(16, min(800, n // 2 + 1)):
             if words[-w:] == words[-2*w:-w]:
@@ -541,7 +584,7 @@ def _find_repetition_pos(text: str) -> int | None:
             if words[-w:] == words[-2*w:-w] == words[-3*w:-2*w]:
                 return words_matches[n - 2*w].start()
 
-        # 3. Non-consecutive multi-sentence paragraph repetition (45+ words, detects whole paragraph cyclical restarts
+        # 6. Non-consecutive multi-sentence paragraph repetition (45+ words, detects whole paragraph cyclical restarts
         # without false-positives on single repeated definition sentences or source descriptions)
         if n >= 90:
             tail_45 = tuple(words[-45:])
@@ -749,7 +792,7 @@ _modal_breaker_failures = 0
 _modal_breaker_cooldown_until = 0.0
 
 
-def _stream_modal_gpu(prompt, max_new_tokens=3800, stop=None, temperature=0.7, model_name="7b"):
+def _stream_modal_gpu(prompt, max_new_tokens=16384, stop=None, temperature=0.7, model_name="7b"):
     """Stream tokens directly from the serverless Modal GPU endpoint with automatic fallback."""
     global _modal_breaker_failures, _modal_breaker_cooldown_until
     import json
@@ -1206,7 +1249,7 @@ def benchmark_prefix_ttft(runs: int = 2) -> dict:
     }
 
 
-def _generate_stream(prompt, max_new_tokens=3800, stop=None, temperature=0.7, force_general=False):
+def _generate_stream(prompt, max_new_tokens=16384, stop=None, temperature=0.7, force_general=False):
     """Run generation via Modal GPU (primary) or local llama.cpp (fallback), yielding tokens with repetition guard."""
     import time
     t_start = time.perf_counter()
@@ -1344,7 +1387,7 @@ def generate_raw(prompt, max_new_tokens=300, stop=None):
     # Dynamic context limit calculation
     ctx_limit = getattr(model_instance, "n_ctx", lambda: MODEL_CONTEXT_WINDOW)() if callable(getattr(model_instance, "n_ctx", None)) else MODEL_CONTEXT_WINDOW
     from config import RESERVED_OUTPUT_TOKENS as _reserved_out
-    max_tokens = max(1, min(max_new_tokens or 3800, ctx_limit - prompt_len - _reserved_out))
+    max_tokens = max(1, min(max_new_tokens or 16384, ctx_limit - prompt_len - _reserved_out))
         
     with _model_lock:
         stream = model_instance(
@@ -2619,6 +2662,7 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     "Trading & Technical Analysis:\n"
                     "- Understand technical analysis, market structure, liquidity, order blocks, fair value gaps (FVG), break of structure (BOS), change of character (CHOCH), market structure shift (MSS), Smart Money Concepts (SMC), order flow, liquidity sweeps, and price action.\n"
                     "- In trading, financial markets, and technical chart analysis, 'SMC' stands for Smart Money Concepts -- a methodology focused on tracking institutional order flow, smart money accumulation/distribution, order blocks (OB), fair value gaps (FVG), liquidity pools/sweeps, and structural breaks (BOS/CHoCH).\n"
+                    "- Technical Indicator Origins: The Relative Strength Index (RSI) was created and developed by J. Welles Wilder Jr. in 1978. The Moving Average Convergence Divergence (MACD) was created by Gerald Appel in the late 1970s. Bollinger Bands were created by John Bollinger. Do not confuse their inventors or creators.\n"
                     "- Explain trading concepts objectively, comprehensively, and with clear market structure mechanics.\n"
                     "- Never guarantee profits or future market outcomes.\n\n"
                     "Coding:\n"
@@ -2662,8 +2706,22 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
                     ])
                 )
                 is_tutor_or_concise = (not is_screener_query) and any(w in query.lower() for w in ["tutor", "concise", "brief", "2 paragraph", "in two", "short", "quick", "explain in", "context: lesson", "lesson", "user question:"])
+                is_simple_qa = (
+                    not is_screener_query
+                    and not is_tutor_or_concise
+                    and any(query.lower().strip().startswith(p) for p in [
+                        "what is ", "what are ", "what does ", "what do ", "who is ", "who was ",
+                        "define ", "definition of ", "meaning of ", "difference between "
+                    ])
+                    and not any(w in query.lower() for w in [
+                        "detailed", "deep dive", "comprehensive", "full report", "essay", "in depth",
+                        "in-depth", "complete guide", "step by step", "architecture"
+                    ])
+                )
                 if is_tutor_or_concise:
                     tokens = min(tokens, 600)
+                elif is_simple_qa:
+                    tokens = min(tokens, 1200)
                 elif is_screener_query:
                     tokens = max(tokens, 3800)
                 is_step_by_step = any(w in query.lower() for w in ["step by step", "recipe", "detailed", "how to make", "how to build", "guide"])
