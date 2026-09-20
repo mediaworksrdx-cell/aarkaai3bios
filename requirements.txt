@@ -18,7 +18,7 @@ pyjwt==2.13.0
 passlib==1.7.4
 bcrypt==4.0.1
 cryptography==49.0.0
-redis>=5.0.0
+redis>=8.1.0
 
 # ML / Inference
 llama-cpp-python==0.3.34
