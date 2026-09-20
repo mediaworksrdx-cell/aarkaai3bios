@@ -484,9 +484,12 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
         yield "status", f"Running {action_name}..."
         logger.info(f"Executing tool {action_name} with params {params}")
 
-        # Intercept mutating tools with human-in-the-loop approval gate
-        from modules.code_mode import MUTATING_TOOLS
-        if action_name in MUTATING_TOOLS:
+        # Intercept mutating tools + BashTool with human-in-the-loop approval gate
+        from modules.tool_gateway import is_mutating_tool, ToolGateway, ToolGatewayError
+        requires_approval = is_mutating_tool(action_name) or action_name == "BashTool"
+        approval_id = None
+
+        if requires_approval:
             from modules.approval_store import get_approval_store
             store = get_approval_store()
             summary = f"Execute mutating tool: {action_name}"
@@ -504,6 +507,9 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
             elif action_name == "DeployTool":
                 target_res = str(params.get("target", ""))
                 summary = f"Deploy application to: {target_res}"
+            else:
+                target_res = str(params.get("path", params.get("name", params.get("target", ""))))
+                summary = f"Execute action: {action_name} on {target_res}" if target_res else f"Execute action: {action_name}"
 
             risk = "CRITICAL" if action_name in ["DeployTool", "DeleteSkillTool"] else "HIGH"
 
@@ -556,10 +562,28 @@ def stream_task(query: str, context: str = "", user_id: str = "default", session
                 yield "final", f"Operation cancelled: Execution of `{action_name}` was not approved by the operator ({resolution_reason}). No changes were made to the workspace."
                 return
 
+            approval_id = record.approval_id
+
+        # Route tool execution exclusively through ToolGateway
         try:
-            observation = registry.execute_tool(action_name, params)
+            gateway_approval_ctx = {
+                "human_approved": True if requires_approval else False,
+                "approval_id": approval_id,
+                "force_exec_fallback": getattr(config, "ALLOW_EXEC_HOST_FALLBACK", False),
+            }
+            gateway = ToolGateway(
+                registry=registry,
+                approval_context=gateway_approval_ctx,
+                user_id=user_id,
+                session_id=session_id,
+                workspace_dir=str(config.SAFE_WORK_DIR),
+            )
+            raw_obs = gateway.dispatch(action_name, params)
+            observation = str(raw_obs) if raw_obs is not None else ""
             if not observation.startswith("Error") and not observation.startswith("Write blocked"):
                 executed_actions.add(action_key)
+        except ToolGatewayError as tge:
+            observation = f"Error: ToolGateway policy violation: {tge}"
         except Exception as exc:
             # Check if this is the credentials trigger exception we raised
             from modules.tools.git_tool import GitCredentialsError

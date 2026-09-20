@@ -30,8 +30,16 @@ from modules.security_policy import validate_python_ast as _sp_validate_python_a
 
 logger = logging.getLogger(__name__)
 
+from modules.tool_gateway import (
+    TOOL_CLASSIFICATIONS,
+    ToolClass,
+    OperationNotPermittedError,
+    ToolGatewayError,
+)
+
 MUTATING_TOOLS: Set[str] = {
-    "BashTool", "FileEditTool", "DeleteSkillTool", "DeployTool", "DbMigrateTool"
+    name for name, cls in TOOL_CLASSIFICATIONS.items()
+    if cls == ToolClass.MUTATING
 }
 
 SAFE_FALLBACK_TOOLS: Set[str] = {
@@ -41,11 +49,6 @@ SAFE_FALLBACK_TOOLS: Set[str] = {
 
 class SandboxUnavailableError(Exception):
     """Raised when the isolated container runtime is unreachable, enforcing zero host fallback."""
-    pass
-
-
-class OperationNotPermittedError(Exception):
-    """Raised when an unapproved mutating tool is invoked in Code Mode."""
     pass
 
 
@@ -187,118 +190,6 @@ class CodeModeExecutor:
             namespace[name] = make_proxy(name)
         return namespace
 
-
-    def _enforce_approval(self, tool_name: str, args: Dict[str, Any]):
-        """Verify human operator approval or cryptographically valid CI token."""
-        # 1. Check explicit human approval flag
-        if self.approval_context.get("human_approved", False):
-            audit_event("approval.decided", tool=tool_name, outcome="approved", type="human")
-            return
-
-        # 2. Check CI token
-        ci_token = self.approval_context.get("ci_token")
-        signing_key = self.approval_context.get("ci_signing_key") or os.getenv("AARKAAI_CI_SIGNING_KEY", "")
-        if ci_token and signing_key:
-            from config import BASE_DIR
-            nonce_db = Path(self.approval_context.get("ci_nonce_db") or (BASE_DIR / "var" / "ci_nonces.db"))
-            store = CINonceStore(nonce_db)
-            repo = self.approval_context.get("repo", "mediaworksrdx-cell/aarkaai3bios")
-            commit = self.approval_context.get("commit_sha", "")
-
-            valid, reason = verify_ci_approval_token(
-                token=ci_token,
-                signing_keys={"k1": signing_key},
-                expected_repo=repo,
-                expected_commit=commit,
-                nonce_store=store
-            )
-            if valid:
-                audit_event("approval.decided", tool=tool_name, outcome="approved", type="ci_token")
-                return
-            else:
-                audit_event("approval.decided", tool=tool_name, outcome="rejected", reason=reason)
-                raise OperationNotPermittedError(f"CI approval token verification failed: {reason}")
-
-        # 3. Dynamic Human Approval Gate via ApprovalStore
-        if self.approval_context.get("interactive_approval", False):
-            from modules.approval_store import get_approval_store
-            store = get_approval_store()
-            user_id = self.approval_context.get("user_id", "default")
-            session_id = self.approval_context.get("session_id", "default")
-            workspace_id = self.approval_context.get("workspace_id", "default")
-            
-            cmd_preview = args.get("command", args.get("cmd", ""))
-            diff_preview = args.get("diff", args.get("content", ""))
-            target_res = args.get("path", args.get("target", ""))
-            
-            if tool_name == "BashTool":
-                summary = f"Execute shell command: {cmd_preview[:80]}"
-            elif tool_name == "FileEditTool":
-                summary = f"Modify file: {target_res}"
-            elif tool_name == "DeployTool":
-                summary = f"Deploy application to: {target_res}"
-            else:
-                summary = f"Execute mutating tool: {tool_name}"
-
-            risk = "CRITICAL" if tool_name in ["DeployTool", "DeleteSkillTool"] else "HIGH"
-
-            record = store.create_request(
-                user_id=user_id,
-                session_id=session_id,
-                tool_name=tool_name,
-                args=args,
-                risk_level=risk,
-                human_summary=summary,
-                workspace_id=workspace_id,
-                target_resource=target_res,
-                diff_preview=diff_preview if diff_preview else None,
-                command_preview=cmd_preview if cmd_preview else None,
-                timeout_seconds=float(self.approval_context.get("approval_timeout", 60.0))
-            )
-
-            # Emit event to client if event emitter callback is present
-            emitter = self.approval_context.get("event_emitter")
-            if callable(emitter):
-                try:
-                    record_dict = record.to_dict()
-                    try:
-                        from modules.approval_options import generate_dynamic_approval_options, detect_model_persona
-                        m_name = self.approval_context.get("model_name", "aarka")
-                        record_dict["model_persona"] = detect_model_persona(m_name)
-                        record_dict["dynamic_options"] = generate_dynamic_approval_options(
-                            query=self.approval_context.get("query", ""),
-                            tool_name=tool_name,
-                            args=kwargs,
-                            model_name=m_name
-                        )
-                    except Exception as opt_err:
-                        logger.warning("Dynamic options formulation failed in code_mode: %s", opt_err)
-
-                    emitter({
-                        "type": "approval_request",
-                        "payload": record_dict
-                    })
-                except Exception as emit_err:
-                    logger.warning("Failed emitting approval_request event: %s", emit_err)
-
-            # Await resolution
-            approved, resolution_reason = store.await_resolution(
-                approval_id=record.approval_id,
-                expected_action_hash=record.action_hash,
-                timeout_seconds=float(self.approval_context.get("approval_timeout", 60.0))
-            )
-
-            if approved:
-                audit_event("approval.decided", tool=tool_name, outcome="approved", type="human_ui", approval_id=record.approval_id)
-                return
-            else:
-                audit_event("approval.decided", tool=tool_name, outcome="rejected", reason=resolution_reason, approval_id=record.approval_id)
-                raise OperationNotPermittedError(f"Mutating tool '{tool_name}' was not approved: {resolution_reason}")
-
-        audit_event("operation.denied", tool=tool_name, reason="missing_operator_approval")
-        raise OperationNotPermittedError(
-            f"Mutating tool '{tool_name}' requires explicit operator confirmation or valid CI token."
-        )
 
     def _check_workspace_quotas(self, dir_path: Path):
         """Enforce file count and dynamic statvfs block availability."""

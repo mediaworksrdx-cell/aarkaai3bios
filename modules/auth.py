@@ -29,8 +29,8 @@ from database import get_session, UserAccount, SessionLocal
 logger = logging.getLogger(__name__)
 
 # ─── Token Expiry Configuration ──────────────────────────────────────────────
-# Access token: short-lived (30 min for security)
-ACCESS_TOKEN_MINUTES = int(os.getenv("AARKAAI_ACCESS_TOKEN_MINUTES", "30"))
+# Access token: default to ACCESS_TOKEN_EXPIRE_MINUTES (7 days) for session continuity
+ACCESS_TOKEN_MINUTES = int(os.getenv("AARKAAI_ACCESS_TOKEN_MINUTES", str(ACCESS_TOKEN_EXPIRE_MINUTES)))
 # Refresh token: long-lived (default 30 days)
 REFRESH_TOKEN_DAYS = int(os.getenv("AARKAAI_REFRESH_TOKEN_DAYS", "30"))
 

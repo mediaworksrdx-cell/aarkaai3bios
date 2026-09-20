@@ -38,11 +38,18 @@ android {
         }
     }
 
+    val releaseStorePassword = (project.findProperty("RELEASE_STORE_PASSWORD") as String? ?: System.getenv("AARKAAI_RELEASE_STORE_PASSWORD") ?: "").trim()
+    val hasReleaseKey = releaseStorePassword.isNotEmpty()
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (hasReleaseKey) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

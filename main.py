@@ -1189,11 +1189,23 @@ def upgrade_user_subscription(current_user=fastapi.Depends(modules.auth.require_
 
 
 @app.get("/metrics", tags=["info"])
-async def metrics(current_user=fastapi.Depends(modules.auth.require_admin)):
-    """Operational metrics for monitoring (requires auth)."""
+async def metrics(request: Request, current_user=fastapi.Depends(modules.auth.require_admin)):
+    """Operational metrics for monitoring (requires auth, supports Prometheus & JSON)."""
     import threading
+    from fastapi.responses import Response
     from modules.aarkaa_engine import get_status_metadata
-    
+    from modules.observability import REGISTRY
+
+    accept_header = request.headers.get("accept", "")
+    req_format = request.query_params.get("format", "")
+
+    # Expose standard Prometheus exposition format if requested
+    if "text/plain" in accept_header or req_format.lower() == "prometheus":
+        return Response(
+            content=REGISTRY.generate_latest(),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
+
     total = _metrics["requests_total"]
     failed = _metrics["requests_failed"]
     avg_time = (

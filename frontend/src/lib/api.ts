@@ -2,9 +2,35 @@ import { StreamChunk, EffortLevel, ToolApprovalRequest, McpServerInfo } from '@/
 
 const API_BASE = '/api';
 
+export function isTokenExpired(token: string | null): boolean {
+  if (!token) return true;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      (typeof atob === 'function' ? atob(base64) : Buffer.from(base64, 'base64').toString('binary'))
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const payload = JSON.parse(jsonPayload);
+    if (!payload.exp) return false;
+    return payload.exp * 1000 <= Date.now() + 5000;
+  } catch {
+    return false;
+  }
+}
+
 export function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem('aarka-token') || localStorage.getItem('aarkaa-token');
+  const token = localStorage.getItem('aarka-token') || localStorage.getItem('aarkaa-token');
+  if (token && isTokenExpired(token)) {
+    clearToken();
+    return null;
+  }
+  return token;
 }
 
 export function storeToken(token: string): void {
@@ -789,10 +815,21 @@ export function exportToMarkdown(title: string, content: string) {
 }
 
 /**
- * Fetch User Settings from Backend
+ * Fetch User Settings from Backend with automatic 401 recovery
  */
 export async function fetchSettingsApi(): Promise<any> {
-  const token = getStoredToken();
+  let token = getStoredToken();
+  if (!token) {
+    try {
+      const visitor = await fetchVisitorToken();
+      if (visitor?.access_token) {
+        token = visitor.access_token;
+        storeToken(token);
+      }
+    } catch {
+      return {};
+    }
+  }
   if (!token) {
     return {};
   }
@@ -802,10 +839,26 @@ export async function fetchSettingsApi(): Promise<any> {
   };
 
   try {
-    const res = await fetch('/api/settings', {
+    let res = await fetch('/api/settings', {
       method: 'GET',
       headers,
     });
+
+    if (res.status === 401) {
+      clearToken();
+      try {
+        const visitor = await fetchVisitorToken();
+        if (visitor?.access_token) {
+          token = visitor.access_token;
+          storeToken(token);
+          headers['Authorization'] = `Bearer ${token}`;
+          res = await fetch('/api/settings', {
+            method: 'GET',
+            headers,
+          });
+        }
+      } catch {}
+    }
 
     if (!res.ok) {
       return {};
@@ -818,23 +871,54 @@ export async function fetchSettingsApi(): Promise<any> {
 }
 
 /**
- * Update User Settings in Backend
+ * Update User Settings in Backend with automatic 401 retry and fallback
  */
 export async function updateSettingsApi(settings: Record<string, any>): Promise<any> {
-  const token = getStoredToken();
+  let token = getStoredToken();
   if (!token) {
-    throw new Error('Not authenticated. Settings saved locally only.');
+    try {
+      const visitor = await fetchVisitorToken();
+      if (visitor?.access_token) {
+        token = visitor.access_token;
+        storeToken(token);
+      }
+    } catch (e) {
+      console.warn('Fallback visitor token fetch failed for settings update:', e);
+    }
   }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
   };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
 
-  const res = await fetch('/api/settings', {
+  let res = await fetch('/api/settings', {
     method: 'PUT',
     headers,
     body: JSON.stringify(settings),
   });
+
+  // If token is expired or unauthorized (401), automatically fetch fresh visitor token and retry once
+  if (res.status === 401) {
+    clearToken();
+    try {
+      const visitor = await fetchVisitorToken();
+      if (visitor?.access_token) {
+        token = visitor.access_token;
+        storeToken(token);
+        headers['Authorization'] = `Bearer ${token}`;
+        res = await fetch('/api/settings', {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify(settings),
+        });
+      }
+    } catch (refreshErr) {
+      console.warn('Auto token refresh on 401 failed for updateSettingsApi:', refreshErr);
+    }
+  }
 
   if (!res.ok) {
     const errorBody = await res.text().catch(() => 'Unknown error');

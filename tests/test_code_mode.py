@@ -39,18 +39,34 @@ def test_validate_code_syntax_error():
     assert not is_valid
     assert "Syntax Error" in err
 
-def test_build_tool_namespace():
+def test_build_tool_namespace(tmp_path, monkeypatch):
+    from modules.approval_store import SQLiteApprovalStore
+    store = SQLiteApprovalStore(tmp_path / "test_approvals.db")
+    monkeypatch.setattr("modules.approval_store.get_approval_store", lambda: store)
+
     mock_registry = MagicMock()
     mock_registry.execute_tool.return_value = "Success"
     
+    rec = store.create_request(
+        user_id="user1",
+        session_id="sess1",
+        tool_name="BashTool",
+        args={"command": "ls"},
+        risk_level="HIGH",
+        human_summary="Run ls",
+    )
+    store.resolve_request(rec.approval_id, "user1", "APPROVED")
+
     executor = CodeModeExecutor(
-        mock_registry, "/tmp", 10, 5, 1024,
+        mock_registry, str(tmp_path), 10, 5, 1024,
         approval_context={
             "human_approved": True,
+            "approval_id": rec.approval_id,
             # force_exec_fallback=True bypasses the Docker requirement for EXEC tools
-            # in test environments where Docker is unavailable. Never set this in
-            # production without explicitly verifying host hardening.
+            # in test environments where Docker is unavailable.
             "force_exec_fallback": True,
+            "user_id": "user1",
+            "session_id": "sess1",
         }
     )
     namespace = executor.build_tool_namespace(["BashTool", "FileEditTool"])
@@ -62,19 +78,20 @@ def test_build_tool_namespace():
     assert result == "Success"
     mock_registry.execute_tool.assert_called_with("BashTool", {"command": "ls"})
 
-def test_tool_call_counter_limit():
+def test_tool_call_counter_limit(tmp_path):
     mock_registry = MagicMock()
+    mock_registry.execute_tool.return_value = "Success"
     executor = CodeModeExecutor(
-        mock_registry, "/tmp", 10, 2, 1024,
+        mock_registry, str(tmp_path), 10, 2, 1024,
         approval_context={"human_approved": True, "force_exec_fallback": True}
     )
-    namespace = executor.build_tool_namespace(["BashTool"])
+    namespace = executor.build_tool_namespace(["FileReadTool"])
     
-    namespace["BashTool"](command="ls")
-    namespace["BashTool"](command="ls")
+    namespace["FileReadTool"](path=str(tmp_path / "f1.txt"))
+    namespace["FileReadTool"](path=str(tmp_path / "f2.txt"))
     
     with pytest.raises(RuntimeError, match="Max tool calls \\(2\\) exceeded"):
-        namespace["BashTool"](command="ls")
+        namespace["FileReadTool"](path=str(tmp_path / "f3.txt"))
 
 
 def test_code_mode_result_format():

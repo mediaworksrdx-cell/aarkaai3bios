@@ -13,7 +13,6 @@ from modules import task_memory
 
 def check_python_script_safety(command: str) -> tuple[bool, str]:
     """Parse command to check safety of any referenced Python script AST."""
-    import ast
     import re
     from pathlib import Path
     
@@ -25,37 +24,21 @@ def check_python_script_safety(command: str) -> tuple[bool, str]:
     try:
         from modules.tools.fs import _resolve_safe_path
         resolved_path = _resolve_safe_path(script_name)
-    except Exception:
-        return True, ""
+    except Exception as e:
+        return False, f"Script path '{script_name}' cannot be resolved safely: {e}"
         
     if not resolved_path.is_file():
-        return True, ""
+        return False, f"Script '{script_name}' does not exist within the workspace boundary."
         
     try:
         content = resolved_path.read_text(encoding="utf-8", errors="ignore")
-        tree = ast.parse(content)
     except Exception as e:
-        return False, f"Failed to parse python script AST: {e}"
-        
-    blocked_imports = {"subprocess", "pty", "shutil"}
-    blocked_calls = {"system", "popen", "spawn", "rmtree", "eval", "exec"}
-    
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name in blocked_imports:
-                    return False, f"Blocked import: '{alias.name}'"
-        elif isinstance(node, ast.ImportFrom):
-            if node.module in blocked_imports:
-                return False, f"Blocked import from: '{node.module}'"
-        elif isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Attribute):
-                if node.func.attr in blocked_calls:
-                    return False, f"Blocked function attribute call: '{node.func.attr}'"
-            elif isinstance(node.func, ast.Name):
-                if node.func.id in blocked_calls:
-                    return False, f"Blocked function call: '{node.func.id}'"
-                    
+        return False, f"Failed to read python script: {e}"
+
+    from modules.security_policy import validate_python_ast
+    is_safe, reason = validate_python_ast(content)
+    if not is_safe:
+        return False, f"Security policy AST violation: {reason}"
     return True, ""
 
 logger = logging.getLogger(__name__)
@@ -154,6 +137,7 @@ def execute(plan: Dict[str, Any], goal_id: int, user_id: str, session_id: str) -
                         perm_level = PermissionLevel.STRICT_BLOCK
                         perm_msg = f"Script analysis blocked: {script_msg}"
 
+                approval_context: Dict[str, Any] = {"human_approved": False}
                 if perm_level == PermissionLevel.STRICT_BLOCK:
                     result = f"Error: Command blocked by safety layer. {perm_msg}"
                     logger.error("Blocked command execution: %s for %s", tool_params, tool_name)
@@ -171,6 +155,22 @@ def execute(plan: Dict[str, Any], goal_id: int, user_id: str, session_id: str) -
                             success = False
                             break
                         else:
+                            from modules.approval_store import get_approval_store
+                            appr_store = get_approval_store()
+                            appr_record = appr_store.create_request(
+                                user_id=user_id,
+                                session_id=session_id,
+                                tool_name=tool_name,
+                                args=tool_params,
+                                risk_level="HIGH",
+                                human_summary=f"TTY approved: {tool_name}",
+                                timeout_seconds=60.0
+                            )
+                            appr_store.resolve_request(appr_record.approval_id, user_id, "APPROVED")
+                            approval_context = {
+                                "human_approved": True,
+                                "approval_id": appr_record.approval_id,
+                            }
                             log_audit_event(user_id, session_id, tool_name, tool_params, perm_level, "ALLOWED_BY_USER", "User approved interactive prompt.")
                     else:
                         # Headless context: never auto-approve mutating operations.
@@ -193,7 +193,24 @@ def execute(plan: Dict[str, Any], goal_id: int, user_id: str, session_id: str) -
                 else:
                     log_audit_event(user_id, session_id, tool_name, tool_params, perm_level, "ALLOWED", "Safe read execution.")
 
-                result = registry.execute_tool(tool_name, tool_params)
+                import config
+                from modules.tool_gateway import ToolGateway, ToolGatewayError
+                gateway_ctx = {
+                    **approval_context,
+                    "force_exec_fallback": getattr(config, "ALLOW_EXEC_HOST_FALLBACK", False),
+                }
+                gateway = ToolGateway(
+                    registry=registry,
+                    approval_context=gateway_ctx,
+                    user_id=user_id,
+                    session_id=session_id,
+                    workspace_dir=str(config.SAFE_WORK_DIR),
+                )
+                try:
+                    raw_result = gateway.dispatch(tool_name, tool_params)
+                    result = str(raw_result) if raw_result is not None else ""
+                except ToolGatewayError as tge:
+                    result = f"Error: ToolGateway blocked execution: {tge}"
                 log_audit_event(user_id, session_id, tool_name, tool_params, perm_level, "EXECUTED", f"Exit status or length: {len(result)}")
                 
                 if "Error" not in result:

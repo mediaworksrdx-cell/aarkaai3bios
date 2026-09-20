@@ -1,4 +1,4 @@
-﻿"""
+"""
 AARKAAI - Tool Gateway (FIX-9)
 
 Resolves the Code Mode sandbox boundary violation: tool calls originating
@@ -24,6 +24,12 @@ from enum import Enum
 from typing import Any, Dict, Optional
 
 from modules.security_audit import audit_event
+from modules.observability import (
+    GATEWAY_REQUESTS,
+    GATEWAY_DENIALS,
+    APPROVALS_PROCESSED,
+    SANDBOX_DURATION,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +71,7 @@ TOOL_CLASSIFICATIONS: Dict[str, ToolClass] = {
     "WebSearchTool":            ToolClass.READ_ONLY,
     "FinancialDataTool":        ToolClass.READ_ONLY,
     "SnapshotTool":             ToolClass.READ_ONLY,
+    "DocumentParserTool":       ToolClass.READ_ONLY,
 
     # Exec tools — spawn subprocesses; routed through secondary sandbox
     "BashTool":                 ToolClass.EXEC,
@@ -102,6 +109,11 @@ class ToolGatewayError(Exception):
     pass
 
 
+class OperationNotPermittedError(ToolGatewayError):
+    """Raised when a tool operation is not permitted or approval fails."""
+    pass
+
+
 class ToolGateway:
     """
     Host-side gateway that enforces isolation policy before executing any tool
@@ -124,11 +136,57 @@ class ToolGateway:
         self.approval_context = approval_context or {}
         self.user_id = user_id
         self.session_id = session_id
-        self.workspace_dir = workspace_dir
+        if not workspace_dir:
+            try:
+                import config
+                workspace_dir = str(getattr(config, "SAFE_WORK_DIR", ""))
+            except Exception:
+                workspace_dir = ""
+        self.workspace_dir = str(workspace_dir).strip()
 
     def classify(self, tool_name: str) -> ToolClass:
         """Return the isolation class for a tool. Defaults to MUTATING (deny-by-default)."""
         return TOOL_CLASSIFICATIONS.get(tool_name, ToolClass.MUTATING)
+
+    def _verify_and_consume_approval(self, tool_name: str, args: Dict[str, Any]) -> None:
+        """
+        Verify that a claimed human approval is backed by a valid, unexpired,
+        un-tampered, and un-consumed record in ApprovalStore, then atomically consume it.
+        Raises ToolGatewayError if verification fails.
+        """
+        approval_id = self.approval_context.get("approval_id")
+        if not approval_id:
+            audit_event("gateway.approval_missing", tool=tool_name, user_id=self.user_id)
+            raise ToolGatewayError(
+                f"Tool '{tool_name}' claimed human approval without approval_id in approval_context."
+            )
+
+        from modules.approval_store import get_approval_store
+        store = get_approval_store()
+        valid, reason = store.consume_approval(
+            approval_id=approval_id,
+            tool_name=tool_name,
+            args=args,
+            user_id=self.user_id,
+            session_id=self.session_id,
+            workspace_id=self.approval_context.get("workspace_id", "default"),
+        )
+        if not valid:
+            audit_event(
+                "gateway.approval_rejected",
+                tool=tool_name,
+                approval_id=approval_id,
+                reason=reason,
+                user_id=self.user_id,
+            )
+            raise ToolGatewayError(f"Approval validation failed for '{tool_name}': {reason}")
+
+        audit_event(
+            "gateway.pre_approved_verified",
+            tool=tool_name,
+            approval_id=approval_id,
+            user_id=self.user_id,
+        )
 
     def dispatch(self, tool_name: str, args: Dict[str, Any]) -> Any:
         """
@@ -140,8 +198,15 @@ class ToolGateway:
 
         All calls produce an audit trail entry.
         """
+        if not self.workspace_dir:
+            GATEWAY_DENIALS.inc(tool=tool_name, reason="empty_workspace_dir")
+            audit_event("gateway.blocked", tool=tool_name, reason="empty_workspace_dir", user_id=self.user_id)
+            raise ToolGatewayError("ToolGateway requires a non-empty workspace_dir to enforce directory boundaries.")
+
+        self._validate_path_args(args)
         tool_class = self.classify(tool_name)
 
+        GATEWAY_REQUESTS.inc(tool=tool_name, classification=tool_class.value, status="dispatched")
         audit_event(
             "gateway.dispatch",
             tool=tool_name,
@@ -161,13 +226,14 @@ class ToolGateway:
 
     def _dispatch_read_only(self, tool_name: str, args: Dict[str, Any]) -> Any:
         """Execute read-only tool directly. Validates path arguments are workspace-scoped."""
-        self._validate_path_args(args)
         try:
             result = self.registry.execute_tool(tool_name, args)
+            GATEWAY_REQUESTS.inc(tool=tool_name, classification="READ_ONLY", status="success")
             audit_event("gateway.executed", tool=tool_name, classification="READ_ONLY",
                         user_id=self.user_id, status="success")
             return result
         except Exception as e:
+            GATEWAY_REQUESTS.inc(tool=tool_name, classification="READ_ONLY", status="error")
             audit_event("gateway.error", tool=tool_name, error=str(e)[:200],
                         user_id=self.user_id)
             raise
@@ -181,9 +247,110 @@ class ToolGateway:
         This ensures that subprocess-spawning tools (BashTool, FinanceCodeTool, etc.)
         run inside a container, not on the host application process.
 
+        Security gate: EXEC tools require valid operator approval, CI token, or
+        interactive approval. Without valid approval/delegation, EXEC fails closed immediately.
+
         Falls back to direct execution with a SECURITY WARNING if Docker is unavailable
         and force_exec_fallback is set in approval_context. Otherwise fails closed.
         """
+        has_approval = self.approval_context.get("human_approved", False) or bool(self.approval_context.get("approval_id"))
+        ci_token = self.approval_context.get("ci_token")
+        interactive_approval = self.approval_context.get("interactive_approval", False)
+
+        # Fail closed immediately if no authorization mechanism is provided
+        if not (has_approval or ci_token or interactive_approval):
+            GATEWAY_DENIALS.inc(tool=tool_name, reason="no_approval_mechanism")
+            audit_event("gateway.blocked", tool=tool_name,
+                        reason="no_approval_mechanism", user_id=self.user_id)
+            raise OperationNotPermittedError(
+                f"EXEC tool '{tool_name}' requires explicit operator confirmation, approval gate, or CI token. "
+                f"Set human_approved=True with approval_id, provide a ci_token, or enable interactive_approval "
+                f"in the approval_context."
+            )
+
+        # Enforce defense-in-depth: If human_approved is claimed or an approval_id is supplied,
+        # verify and atomically consume it before running the tool in the container.
+        if has_approval:
+            self._verify_and_consume_approval(tool_name, args)
+
+        # Check CI token if provided
+        ci_token = self.approval_context.get("ci_token")
+        signing_key = self.approval_context.get("ci_signing_key", "")
+        if ci_token and signing_key:
+            try:
+                from modules.ci_nonce_store import verify_ci_approval_token, CINonceStore
+                from pathlib import Path
+                nonce_db = Path(self.approval_context.get("ci_nonce_db", "var/ci_nonces.db"))
+                store = CINonceStore(nonce_db)
+                valid, reason = verify_ci_approval_token(
+                    token=ci_token,
+                    signing_keys={"k1": signing_key},
+                    expected_repo=self.approval_context.get("repo", ""),
+                    expected_commit=self.approval_context.get("commit_sha", ""),
+                    nonce_store=store,
+                )
+                if valid:
+                    audit_event("gateway.ci_approved", tool=tool_name, user_id=self.user_id)
+                    return self.registry.execute_tool(tool_name, args)
+                else:
+                    audit_event("gateway.ci_rejected", tool=tool_name, reason=reason, user_id=self.user_id)
+                    raise OperationNotPermittedError(f"CI approval token rejected for '{tool_name}': {reason}")
+            except ToolGatewayError:
+                raise
+            except Exception as e:
+                logger.warning("CI token verification error: %s", e)
+
+        # Interactive approval if configured
+        if self.approval_context.get("interactive_approval", False):
+            from modules.approval_store import get_approval_store
+            approval_store = get_approval_store()
+
+            cmd_preview = args.get("command", args.get("cmd", ""))
+            summary = f"Execute shell command: {cmd_preview[:80]}" if tool_name == "BashTool" else f"Execute {tool_name}"
+
+            record = approval_store.create_request(
+                user_id=self.user_id,
+                session_id=self.session_id,
+                tool_name=tool_name,
+                args=args,
+                risk_level="HIGH",
+                human_summary=summary,
+                workspace_id=self.approval_context.get("workspace_id", "default"),
+                command_preview=cmd_preview or None,
+                timeout_seconds=float(self.approval_context.get("approval_timeout", 60.0)),
+            )
+
+            emitter = self.approval_context.get("event_emitter")
+            if callable(emitter):
+                try:
+                    emitter({"type": "approval_request", "payload": record.to_dict()})
+                except Exception as emit_err:
+                    logger.warning("Failed emitting approval_request: %s", emit_err)
+
+            approved, reason = approval_store.await_resolution(
+                approval_id=record.approval_id,
+                expected_action_hash=record.action_hash,
+                timeout_seconds=float(self.approval_context.get("approval_timeout", 60.0)),
+            )
+
+            if approved:
+                audit_event("gateway.approved", tool=tool_name, user_id=self.user_id, approval_id=record.approval_id)
+                consumed, c_reason = approval_store.consume_approval(
+                    approval_id=record.approval_id,
+                    tool_name=tool_name,
+                    args=args,
+                    user_id=self.user_id,
+                    session_id=self.session_id,
+                    workspace_id=self.approval_context.get("workspace_id", "default"),
+                )
+                if not consumed:
+                    audit_event("gateway.consumption_failed", tool=tool_name, reason=c_reason, approval_id=record.approval_id)
+                    raise OperationNotPermittedError(f"Approval consumption failed for '{tool_name}': {c_reason}")
+                return self.registry.execute_tool(tool_name, args)
+            else:
+                audit_event("gateway.denied", tool=tool_name, user_id=self.user_id, reason=reason, approval_id=record.approval_id)
+                raise OperationNotPermittedError(f"EXEC tool '{tool_name}' was not approved: {reason}")
+
         force_fallback = self.approval_context.get("force_exec_fallback", False)
 
         try:
@@ -201,8 +368,8 @@ class ToolGateway:
                 else:
                     audit_event("gateway.blocked", tool=tool_name, reason="docker_unavailable",
                                 user_id=self.user_id)
-                    raise ToolGatewayError(
-                        f"EXEC tool '{tool_name}' requires Docker sandbox. "
+                    raise OperationNotPermittedError(
+                        f"EXEC tool '{tool_name}' requires explicit operator confirmation, approval gate, or Docker sandbox. "
                         f"Docker is not available. Set force_exec_fallback=True in approval_context "
                         f"only if you have verified the host is sufficiently hardened."
                     )
@@ -260,7 +427,8 @@ class ToolGateway:
         Fails closed if approval is denied or times out.
         """
         # Check pre-approved flag
-        if self.approval_context.get("human_approved", False):
+        if self.approval_context.get("human_approved", False) or self.approval_context.get("approval_id"):
+            self._verify_and_consume_approval(tool_name, args)
             audit_event("gateway.pre_approved", tool=tool_name, user_id=self.user_id)
             return self.registry.execute_tool(tool_name, args)
 
@@ -286,7 +454,7 @@ class ToolGateway:
                 else:
                     audit_event("gateway.ci_rejected", tool=tool_name,
                                 reason=reason, user_id=self.user_id)
-                    raise ToolGatewayError(f"CI approval token rejected for '{tool_name}': {reason}")
+                    raise OperationNotPermittedError(f"CI approval token rejected for '{tool_name}': {reason}")
             except ToolGatewayError:
                 raise
             except Exception as e:
@@ -339,6 +507,17 @@ class ToolGateway:
             if approved:
                 audit_event("gateway.approved", tool=tool_name, user_id=self.user_id,
                             approval_id=record.approval_id)
+                consumed, c_reason = approval_store.consume_approval(
+                    approval_id=record.approval_id,
+                    tool_name=tool_name,
+                    args=args,
+                    user_id=self.user_id,
+                    session_id=self.session_id,
+                    workspace_id=self.approval_context.get("workspace_id", "default"),
+                )
+                if not consumed:
+                    audit_event("gateway.consumption_failed", tool=tool_name, reason=c_reason, approval_id=record.approval_id)
+                    raise ToolGatewayError(f"Approval consumption failed for '{tool_name}': {c_reason}")
                 result = self.registry.execute_tool(tool_name, args)
                 audit_event("gateway.executed", tool=tool_name, classification="MUTATING",
                             user_id=self.user_id, status="success")
@@ -351,11 +530,12 @@ class ToolGateway:
                 )
 
         # No approval mechanism configured — fail closed
+        GATEWAY_DENIALS.inc(tool=tool_name, reason="no_approval_mechanism")
         audit_event("gateway.blocked", tool=tool_name,
                     reason="no_approval_mechanism", user_id=self.user_id)
-        raise ToolGatewayError(
-            f"Mutating tool '{tool_name}' requires an approval gate. "
-            f"Set human_approved=True, provide a ci_token, or enable interactive_approval "
+        raise OperationNotPermittedError(
+            f"Mutating tool '{tool_name}' requires explicit operator confirmation, approval gate, or CI token. "
+            f"Set human_approved=True with approval_id, provide a ci_token, or enable interactive_approval "
             f"in the approval_context."
         )
 
@@ -370,7 +550,7 @@ class ToolGateway:
             return
         from pathlib import Path
         workspace = Path(self.workspace_dir).resolve()
-        for key in ("path", "file", "filepath", "target", "src", "dst"):
+        for key in ("path", "file", "filepath", "file_path", "filename", "target", "src", "dst", "source", "destination"):
             val = args.get(key)
             if val and isinstance(val, str):
                 try:
@@ -386,3 +566,18 @@ class ToolGateway:
                     raise
                 except Exception:
                     pass  # Non-path values may fail resolve safely
+
+
+def is_mutating_tool(tool_name: str) -> bool:
+    """Return True if tool is classified as MUTATING (or unregistered, defaulting to MUTATING)."""
+    return TOOL_CLASSIFICATIONS.get(tool_name, ToolClass.MUTATING) == ToolClass.MUTATING
+
+
+def is_exec_tool(tool_name: str) -> bool:
+    """Return True if tool is classified as EXEC."""
+    return TOOL_CLASSIFICATIONS.get(tool_name) == ToolClass.EXEC
+
+
+def is_read_only_tool(tool_name: str) -> bool:
+    """Return True if tool is classified as READ_ONLY."""
+    return TOOL_CLASSIFICATIONS.get(tool_name) == ToolClass.READ_ONLY

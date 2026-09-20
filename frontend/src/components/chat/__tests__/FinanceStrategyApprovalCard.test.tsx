@@ -98,9 +98,8 @@ describe('FinanceStrategyApprovalCard Component', () => {
         'approve',
         'Bull Call Spread (Defined Risk)'
       );
+      expect(screen.getByText('Resolved: APPROVED')).toBeInTheDocument();
     });
-
-    expect(screen.getByText('Resolved: APPROVED')).toBeInTheDocument();
   });
 
   it('submits rejection when Reject Strategy is clicked', async () => {
@@ -116,8 +115,7 @@ describe('FinanceStrategyApprovalCard Component', () => {
         'deny',
         'Bull Call Spread (Defined Risk)'
       );
+      expect(screen.getByText('Resolved: REJECTED')).toBeInTheDocument();
     });
-
-    expect(screen.getByText('Resolved: REJECTED')).toBeInTheDocument();
   });
 });

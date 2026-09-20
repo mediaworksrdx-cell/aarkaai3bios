@@ -127,18 +127,55 @@ def test_mutating_tool_requires_approval(mock_registry, tmp_path):
             namespace[tool_name](command="ls")
 
 
-def test_mutating_tool_approved_with_human_flag(mock_registry, tmp_path):
-    """Mutating tools succeed when human_approved=True is in approval_context."""
+def test_mutating_tool_approved_with_human_flag(mock_registry, tmp_path, monkeypatch):
+    """Mutating tools succeed when human_approved=True with valid approval_id in approval_context."""
+    from modules.approval_store import SQLiteApprovalStore
+    store = SQLiteApprovalStore(tmp_path / "approvals.db")
+    monkeypatch.setattr("modules.approval_store.get_approval_store", lambda: store)
+
+    rec1 = store.create_request(
+        user_id="user1", session_id="sess1",
+        tool_name="BashTool", args={"command": "echo safe"},
+        risk_level="HIGH", human_summary="Safe echo"
+    )
+    store.resolve_request(rec1.approval_id, "user1", "APPROVED")
+
     executor = CodeModeExecutor(
         tool_registry=mock_registry,
         workspace_dir=str(tmp_path),
-        approval_context={"human_approved": True}
+        approval_context={
+            "human_approved": True,
+            "approval_id": rec1.approval_id,
+            "force_exec_fallback": True,
+            "user_id": "user1",
+            "session_id": "sess1",
+        }
     )
-    namespace = executor.build_tool_namespace(["BashTool", "FileEditTool"])
+    namespace = executor.build_tool_namespace(["BashTool"])
 
     res1 = namespace["BashTool"](command="echo safe")
     assert res1 == "Tool execution output"
-    res2 = namespace["FileEditTool"](path="foo.txt", content="bar")
+
+    target_file = tmp_path / "foo.txt"
+    rec2 = store.create_request(
+        user_id="user1", session_id="sess1",
+        tool_name="FileEditTool", args={"path": str(target_file), "content": "bar"},
+        risk_level="HIGH", human_summary="Edit file"
+    )
+    store.resolve_request(rec2.approval_id, "user1", "APPROVED")
+
+    executor2 = CodeModeExecutor(
+        tool_registry=mock_registry,
+        workspace_dir=str(tmp_path),
+        approval_context={
+            "human_approved": True,
+            "approval_id": rec2.approval_id,
+            "user_id": "user1",
+            "session_id": "sess1",
+        }
+    )
+    namespace2 = executor2.build_tool_namespace(["FileEditTool"])
+    res2 = namespace2["FileEditTool"](path=str(target_file), content="bar")
     assert res2 == "Tool execution output"
 
 

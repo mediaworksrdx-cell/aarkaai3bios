@@ -125,7 +125,7 @@ RATE_LIMIT_ENABLED = IS_PRODUCTION or os.getenv("AARKAAI_RATE_LIMIT_ENABLED", "f
 
 # ─── Input Validation & Generation Limits ──────────────────────────────────
 MAX_QUERY_LENGTH = int(os.getenv("AARKAAI_MAX_QUERY_LENGTH", "32000"))
-MAX_TOKENS = int(os.getenv("AARKAAI_MAX_TOKENS", "8192"))
+MAX_TOKENS = int(os.getenv("AARKAAI_MAX_TOKENS", "16384"))
 TEMPERATURE = float(os.getenv("AARKAAI_TEMPERATURE", "0.7"))
 RESPONSE_CACHE_TTL = int(os.getenv("AARKAAI_RESPONSE_CACHE_TTL", "60"))
 VERIFIER_ENABLED = os.getenv("AARKAAI_VERIFIER_ENABLED", "false").lower() == "true"

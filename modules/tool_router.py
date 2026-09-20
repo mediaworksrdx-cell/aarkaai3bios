@@ -395,12 +395,20 @@ class ToolRouterPipeline:
             self._logger.error("3B router failed: %s", e)
             return []
 
-    def check_permissions(self, user_id: str, intents: List[ToolIntent], user_tier: str = "free") -> Tuple[List[ToolIntent], List[str]]:
+    def check_permissions(
+        self,
+        user_id: str,
+        intents: List[ToolIntent],
+        user_tier: str = "free",
+        is_autonomous: bool = True,
+        approval_context: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[ToolIntent], List[str]]:
         """Step 2: Validate permissions for each tool intent."""
         from modules.permissions import verify_permission, check_tool_access
 
         allowed = []
         denied_messages = []
+        approval_ctx = approval_context or {}
 
         for intent in intents:
             # Check tool-level ACL
@@ -419,36 +427,108 @@ class ToolRouterPipeline:
                 denied_messages.append(f"{intent.tool_name}/{intent.action}: {reason}")
                 continue
 
+            if perm_level == "USER_CONFIRM":
+                # In autonomous or unattended pipelines, USER_CONFIRM operations must fail closed
+                # unless pre-approved delegation (CI token or approved approval_id) is provided.
+                has_delegation = bool(
+                    approval_ctx.get("ci_token")
+                    or (approval_ctx.get("human_approved") and approval_ctx.get("approval_id"))
+                    or approval_ctx.get("approval_id")
+                )
+                if is_autonomous and not has_delegation:
+                    denied_msg = (
+                        f"{intent.tool_name}/{intent.action}: Autonomous pipeline blocked USER_CONFIRM "
+                        f"operation without pre-approved delegation token or CI token: {reason}"
+                    )
+                    self._logger.warning("Autonomous execution blocked: %s", denied_msg)
+                    denied_messages.append(denied_msg)
+                    continue
+
             allowed.append(intent)
 
         return allowed, denied_messages
 
-    def execute_tools(self, intents: List[ToolIntent]) -> List[ToolResult]:
-        """Step 3: Execute each tool and collect results."""
+    def execute_tools(
+        self,
+        intents: List[ToolIntent],
+        user_id: str = "default",
+        session_id: str = "pipeline",
+        approval_context: Optional[Dict[str, Any]] = None,
+        workspace_dir: Optional[str] = None,
+    ) -> List[ToolResult]:
+        """Step 3: Execute each tool via ToolGateway and collect results."""
         from datetime import datetime, timezone
+        from modules.tool_gateway import ToolGateway, ToolGatewayError, OperationNotPermittedError
 
         results = []
+        app_ctx = approval_context or {}
+
+        # Resolve workspace directory from config if not explicitly passed
+        ws_dir = workspace_dir
+        if not ws_dir:
+            try:
+                import config
+                ws_dir = str(getattr(config, "SAFE_WORK_DIR", ""))
+            except Exception:
+                ws_dir = ""
+
+        try:
+            gateway = ToolGateway(
+                registry=self._registry,
+                approval_context=app_ctx,
+                user_id=user_id,
+                session_id=session_id,
+                workspace_dir=ws_dir,
+            )
+        except Exception as gw_init_err:
+            self._logger.error("Failed to initialize ToolGateway: %s", gw_init_err)
+            for intent in intents:
+                results.append(ToolResult(
+                    tool_name=intent.tool_name,
+                    action=intent.action,
+                    data="",
+                    is_valid=False,
+                    error=f"Gateway initialization error: {gw_init_err}",
+                    execution_time_ms=0.0,
+                    timestamp=datetime.now(timezone.utc).isoformat()
+                ))
+            return results
+
         for intent in intents:
             start_time = time.perf_counter()
             try:
-                # Build params with action
                 params = {"action": intent.action, **intent.params}
-                output = self._registry.execute_tool(intent.tool_name, params)
+                # Dispatch through canonical ToolGateway: enforces path traversal validation,
+                # Docker sandbox (EXEC), and ApprovalStore verification (MUTATING).
+                output = gateway.dispatch(intent.tool_name, params)
 
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
                 results.append(ToolResult(
                     tool_name=intent.tool_name,
                     action=intent.action,
-                    data=output,
+                    data=str(output) if output is not None else "",
                     is_valid=True,
                     execution_time_ms=elapsed_ms,
                     source="tool",
                     timestamp=datetime.now(timezone.utc).isoformat()
                 ))
                 self._logger.info(
-                    "Tool %s/%s executed in %.1fms",
+                    "Tool %s/%s executed via ToolGateway in %.1fms",
                     intent.tool_name, intent.action, elapsed_ms
                 )
+
+            except (ToolGatewayError, OperationNotPermittedError) as sec_err:
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                self._logger.warning("Gateway blocked tool %s/%s: %s", intent.tool_name, intent.action, sec_err)
+                results.append(ToolResult(
+                    tool_name=intent.tool_name,
+                    action=intent.action,
+                    data="",
+                    is_valid=False,
+                    error=f"Security Gateway Blocked: {sec_err}",
+                    execution_time_ms=elapsed_ms,
+                    timestamp=datetime.now(timezone.utc).isoformat()
+                ))
 
             except Exception as e:
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -465,7 +545,14 @@ class ToolRouterPipeline:
 
         return results
 
-    def execute_tool_chain(self, chain: List[ToolIntent]) -> List[ToolResult]:
+    def execute_tool_chain(
+        self,
+        chain: List[ToolIntent],
+        user_id: str = "default",
+        session_id: str = "pipeline",
+        approval_context: Optional[Dict[str, Any]] = None,
+        workspace_dir: Optional[str] = None,
+    ) -> List[ToolResult]:
         """Execute a chain of tools where each tool's output feeds the next.
 
         Unlike execute_tools() which runs tools independently, this method
@@ -485,7 +572,13 @@ class ToolRouterPipeline:
             if accumulated_context:
                 intent.params["_prior_context"] = accumulated_context
 
-            step_results = self.execute_tools([intent])
+            step_results = self.execute_tools(
+                [intent],
+                user_id=user_id,
+                session_id=session_id,
+                approval_context=approval_context,
+                workspace_dir=workspace_dir,
+            )
             results.extend(step_results)
 
             for r in step_results:
@@ -569,7 +662,17 @@ Using the verified data above, provide a comprehensive answer to the user's ques
                 temperature=0.3
             )
 
-    def process(self, query: str, user_id: str = "default", user_tier: str = "free", model_override: str = None) -> PipelineResult:
+    def process(
+        self,
+        query: str,
+        user_id: str = "default",
+        user_tier: str = "free",
+        model_override: str = None,
+        session_id: str = "pipeline",
+        approval_context: Optional[Dict[str, Any]] = None,
+        workspace_dir: Optional[str] = None,
+        is_autonomous: bool = True,
+    ) -> PipelineResult:
         """Execute the full pipeline: 3B Route → Permission → Tool → Validate → 7B Answer."""
         pipeline_start = time.perf_counter()
 
@@ -582,8 +685,14 @@ Using the verified data above, provide a comprehensive answer to the user's ques
                 total_time_ms=(time.perf_counter() - pipeline_start) * 1000
             )
 
-        # Step 2: Permission check
-        allowed_intents, denied = self.check_permissions(user_id, intents, user_tier)
+        # Step 2: Permission check with autonomous fail-closed enforcement
+        allowed_intents, denied = self.check_permissions(
+            user_id=user_id,
+            intents=intents,
+            user_tier=user_tier,
+            is_autonomous=is_autonomous,
+            approval_context=approval_context,
+        )
         if not allowed_intents and denied:
             return PipelineResult(
                 final_answer="",
@@ -593,8 +702,14 @@ Using the verified data above, provide a comprehensive answer to the user's ques
                 total_time_ms=(time.perf_counter() - pipeline_start) * 1000
             )
 
-        # Step 3: Execute tools
-        results = self.execute_tools(allowed_intents)
+        # Step 3: Execute tools via canonical ToolGateway
+        results = self.execute_tools(
+            allowed_intents,
+            user_id=user_id,
+            session_id=session_id,
+            approval_context=approval_context,
+            workspace_dir=workspace_dir,
+        )
 
         # Step 4: Validate results
         validated = self.validate_results(results)

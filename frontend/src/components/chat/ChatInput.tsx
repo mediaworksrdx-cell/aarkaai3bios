@@ -1,13 +1,53 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import { ArrowUp, Square, Sparkles, ArrowRight } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { ArrowUp, Square, Sparkles, ArrowRight, Plus, Mic, MicOff, X, FileText } from 'lucide-react';
 import { ModelSwitcher } from './ModelSwitcher';
 import { EffortLevel, ToolApprovalRequest, CandidateFinanceStrategy } from '@/types';
 import { SKILL_CATEGORIES } from '@/components/skills/SkillsModal';
 import { isTerminalCommand, detectSubmissionApproval } from '@/lib/commandDetection';
 import { FloatingApprovalDrawer } from './FloatingApprovalDrawer';
 import { useChatContext } from '@/context/ChatContext';
+
+export interface AttachedFile {
+  id: string;
+  file: File;
+  name: string;
+  size: number;
+  type: string;
+  previewUrl?: string;
+  textContent?: string;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isTextLikeFile(file: File): boolean {
+  if (file.type.startsWith('text/')) return true;
+  const name = file.name.toLowerCase();
+  const textExtensions = [
+    '.txt', '.md', '.json', '.csv', '.py', '.ts', '.tsx', '.js', '.jsx',
+    '.html', '.css', '.scss', '.yaml', '.yml', '.xml', '.sql', '.sh',
+    '.bash', '.env', '.log', '.rs', '.go', '.java', '.c', '.cpp', '.h'
+  ];
+  return textExtensions.some((ext) => name.endsWith(ext));
+}
+
+const readTextFileContent = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    if (file.size > 500 * 1024) {
+      resolve(`[File content omitted: ${file.name} is larger than 500KB]`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string) || '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
+};
 
 const ALL_SKILLS = SKILL_CATEGORIES.flatMap((cat) =>
   cat.skills.map((s) => ({
@@ -41,7 +81,11 @@ export function ChatInput({
   const [dismissedMention, setDismissedMention] = useState(false);
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState<ToolApprovalRequest | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [isListening, setIsListening] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   // Consume backend SSE approval requests from context
   const { activeApprovalRequest } = useChatContext();
@@ -106,7 +150,161 @@ export function ChatInput({
   };
 
   const effectiveInput = input || (textareaRef.current ? textareaRef.current.value : '');
-  const hasContent = Boolean(effectiveInput.trim());
+  const hasContent = Boolean(effectiveInput.trim()) || attachedFiles.length > 0;
+
+  // Cleanup object URLs and speech recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          // ignore
+        }
+      }
+      attachedFiles.forEach((af) => {
+        if (af.previewUrl) {
+          URL.revokeObjectURL(af.previewUrl);
+        }
+      });
+    };
+  }, []);
+
+  const toggleListening = () => {
+    if (typeof window === 'undefined') return;
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {
+          console.warn('Error stopping speech recognition:', e);
+        }
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert('Speech recognition is not supported in this browser. Please use Google Chrome, Edge, or a Chromium-based browser.');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      let lastFinalTranscript = '';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onresult = (event: any) => {
+        let interimTranscript = '';
+        let currentFinal = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            currentFinal += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
+        }
+
+        const newText = (currentFinal || interimTranscript).trim();
+        if (newText && newText !== lastFinalTranscript) {
+          setInput((prev) => {
+            const separator = prev && !prev.endsWith(' ') ? ' ' : '';
+            return `${prev}${separator}${newText}`;
+          });
+          lastFinalTranscript = newText;
+          adjustHeight();
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn('Speech recognition error:', event.error);
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err) {
+      console.error('Failed to initialize speech recognition:', err);
+      setIsListening(false);
+    }
+  };
+
+  const handleFileClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const newAttachments: AttachedFile[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const isImg = file.type.startsWith('image/');
+      let previewUrl: string | undefined;
+
+      if (isImg && typeof window !== 'undefined') {
+        try {
+          previewUrl = URL.createObjectURL(file);
+        } catch {
+          // ignore
+        }
+      }
+
+      let textContent: string | undefined;
+      if (isTextLikeFile(file)) {
+        try {
+          textContent = await readTextFileContent(file);
+        } catch (err) {
+          console.warn('Failed to read file content:', err);
+        }
+      }
+
+      newAttachments.push({
+        id: `file-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
+        file,
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        previewUrl,
+        textContent,
+      });
+    }
+
+    setAttachedFiles((prev) => [...prev, ...newAttachments]);
+
+    // Reset input element value so the same file can be re-attached if removed
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const removeAttachedFile = (id: string) => {
+    setAttachedFiles((prev) => {
+      const target = prev.find((f) => f.id === id);
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return prev.filter((f) => f.id !== id);
+    });
+  };
 
   const handleCancelApproval = () => {
     setPendingApproval(null);
@@ -156,23 +354,50 @@ export function ChatInput({
 
   const handleSubmit = () => {
     const textToSend = effectiveInput.trim();
-    if (!textToSend || isStreaming) return;
+    if ((!textToSend && attachedFiles.length === 0) || isStreaming) return;
 
     // Intent detection step: intercept commands, file edits, and finance strategies before execution
-    try {
-      const interceptedApproval = detectSubmissionApproval(textToSend, selectedModel);
-      if (interceptedApproval) {
-        console.log('[Aarka Intent Intercepted]', interceptedApproval);
-        setPendingCommand(textToSend);
-        setPendingApproval(interceptedApproval);
-        return;
+    // Interception applies only if user submitted pure text without attachments
+    if (textToSend && attachedFiles.length === 0) {
+      try {
+        const interceptedApproval = detectSubmissionApproval(textToSend, selectedModel);
+        if (interceptedApproval) {
+          console.log('[Aarka Intent Intercepted]', interceptedApproval);
+          setPendingCommand(textToSend);
+          setPendingApproval(interceptedApproval);
+          return;
+        }
+      } catch (err) {
+        console.warn('[Aarka Intent Interception Warning]', err);
       }
-    } catch (err) {
-      console.warn('[Aarka Intent Interception Warning]', err);
+    }
+
+    // Format message with any attached files
+    let finalMessage = textToSend;
+    if (attachedFiles.length > 0) {
+      const fileHeaders: string[] = [];
+      attachedFiles.forEach((af) => {
+        if (af.textContent !== undefined) {
+          fileHeaders.push(`[Attached File: ${af.name} (${formatFileSize(af.size)})]\n\`\`\`\n${af.textContent}\n\`\`\``);
+        } else {
+          fileHeaders.push(`[Attached ${af.type.startsWith('image/') ? 'Photo' : 'File'}: ${af.name} (${formatFileSize(af.size)})]`);
+        }
+      });
+
+      const attachmentsBlock = fileHeaders.join('\n\n');
+      finalMessage = textToSend ? `${attachmentsBlock}\n\n${textToSend}` : attachmentsBlock;
+
+      // Clean up object URLs
+      attachedFiles.forEach((af) => {
+        if (af.previewUrl) {
+          URL.revokeObjectURL(af.previewUrl);
+        }
+      });
+      setAttachedFiles([]);
     }
 
     // Normal conversational text flow
-    onSend(textToSend);
+    onSend(finalMessage);
     setInput('');
     setDismissedMention(false);
     if (textareaRef.current) {
@@ -273,6 +498,50 @@ export function ChatInput({
 
         {/* Floating Input Container */}
         <div className="flex flex-col bg-[var(--bg-secondary)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-lg)] focus-within:border-[var(--border-accent)] focus-within:shadow-[var(--shadow-float)] transition-all duration-200 p-2 sm:p-3">
+          {/* Attached Files Preview Strip */}
+          {attachedFiles.length > 0 && (
+            <div
+              className="flex flex-wrap gap-2 mb-2 pb-2 border-b border-[var(--border)]/40 max-h-36 overflow-y-auto px-1"
+              data-testid="attached-files-container"
+            >
+              {attachedFiles.map((af) => {
+                const isImg = Boolean(af.previewUrl);
+                return (
+                  <div
+                    key={af.id}
+                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)] text-xs text-[var(--text-primary)] group shadow-sm transition-all"
+                    data-testid={`attachment-chip-${af.id}`}
+                  >
+                    {isImg ? (
+                      <img
+                        src={af.previewUrl}
+                        alt={af.name}
+                        className="w-6 h-6 object-cover rounded-md border border-[var(--border)]"
+                      />
+                    ) : (
+                      <FileText className="w-4 h-4 text-[var(--accent-primary)] flex-shrink-0" />
+                    )}
+                    <span className="font-medium max-w-[140px] truncate" title={af.name}>
+                      {af.name}
+                    </span>
+                    <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
+                      {formatFileSize(af.size)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachedFile(af.id)}
+                      className="text-[var(--text-tertiary)] hover:text-red-400 p-0.5 rounded-full hover:bg-[var(--bg-primary)] transition-colors cursor-pointer"
+                      title="Remove attachment"
+                      data-testid={`remove-attachment-${af.id}`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* Textarea */}
           <textarea
             ref={textareaRef}
@@ -294,7 +563,7 @@ export function ChatInput({
               }
             }}
             onKeyDown={handleKeyDown}
-            placeholder={isStreaming ? "Type your next message or instructions..." : "Ask Aarka anything... (Enter to send, Shift+Enter for new line)"}
+            placeholder={isListening ? "Listening... speak now..." : isStreaming ? "Type your next message or instructions..." : "Ask Aarka anything... (Enter to send, Shift+Enter for new line)"}
             disabled={false}
             rows={1}
             style={{ overflowY: 'hidden' }}
@@ -312,6 +581,58 @@ export function ChatInput({
                 onEffortChange={onEffortChange}
                 direction="up"
               />
+
+              {/* Hidden File Input for Attachments */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,.pdf,.doc,.docx,.txt,.csv,.json,.py,.ts,.tsx,.js,.jsx,.html,.css,.md,.log,.xml,.yaml,.yml"
+                onChange={handleFileChange}
+                className="hidden"
+                data-testid="chat-file-input"
+              />
+
+              {/* Attach '+' Button */}
+              <button
+                type="button"
+                onClick={handleFileClick}
+                className="h-8 px-2.5 flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] bg-[var(--bg-primary)]/50 border border-[var(--border)] rounded-lg transition-colors cursor-pointer shadow-xs"
+                title="Attach photos or files (+)"
+                data-testid="attach-files-button"
+              >
+                <Plus className="w-4 h-4 text-[var(--text-secondary)] hover:text-[var(--text-primary)]" />
+                <span className="hidden sm:inline text-[11px] font-medium">Attach</span>
+              </button>
+
+              {/* Microphone Voice-to-Text Button */}
+              <button
+                type="button"
+                onClick={toggleListening}
+                className={`
+                  h-8 px-2.5 flex items-center gap-1.5 text-xs font-medium border rounded-lg transition-all cursor-pointer shadow-xs
+                  ${
+                    isListening
+                      ? 'bg-red-500/15 border-red-500/50 text-red-400 animate-pulse shadow-sm shadow-red-500/20'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] bg-[var(--bg-primary)]/50 border-[var(--border)]'
+                  }
+                `}
+                title={isListening ? 'Stop voice recording' : 'Voice input (Microphone)'}
+                data-testid="microphone-button"
+              >
+                {isListening ? (
+                  <>
+                    <MicOff className="w-4 h-4 text-red-400" />
+                    <span className="hidden sm:inline text-[11px] text-red-400 font-medium">Listening...</span>
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-ping ml-0.5 hidden sm:inline-block" />
+                  </>
+                ) : (
+                  <>
+                    <Mic className="w-4 h-4" />
+                    <span className="hidden sm:inline text-[11px] font-medium">Voice</span>
+                  </>
+                )}
+              </button>
             </div>
 
             <div className="flex items-center gap-2">

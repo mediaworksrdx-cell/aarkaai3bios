@@ -3,6 +3,7 @@ import {
   getStoredToken,
   storeToken,
   clearToken,
+  isTokenExpired,
   fetchVisitorToken,
   streamChat,
   submitToolApproval,
@@ -30,6 +31,27 @@ describe('Frontend Auth Token Persistence', () => {
     clearToken();
     expect(getStoredToken()).toBeNull();
     expect(localStorage.removeItem).toHaveBeenCalledWith('aarka-token');
+  });
+
+  it('detects expired JWT tokens and automatically purges them', () => {
+    // Construct an expired token with exp in the past (e.g. 1000 seconds ago)
+    const expiredPayload = { sub: 'user123', exp: Math.floor(Date.now() / 1000) - 1000 };
+    const expiredJwt = `header.${btoa(JSON.stringify(expiredPayload))}.signature`;
+
+    // Construct an active token with exp in the future (e.g. 3600 seconds in future)
+    const activePayload = { sub: 'user123', exp: Math.floor(Date.now() / 1000) + 3600 };
+    const activeJwt = `header.${btoa(JSON.stringify(activePayload))}.signature`;
+
+    expect(isTokenExpired(expiredJwt)).toBe(true);
+    expect(isTokenExpired(activeJwt)).toBe(false);
+
+    // Storing expired token should be purged when getStoredToken is called
+    storeToken(expiredJwt);
+    expect(getStoredToken()).toBeNull();
+
+    // Storing active token should be retrieved normally
+    storeToken(activeJwt);
+    expect(getStoredToken()).toBe(activeJwt);
   });
 });
 

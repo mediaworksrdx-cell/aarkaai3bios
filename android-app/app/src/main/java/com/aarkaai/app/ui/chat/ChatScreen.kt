@@ -4,8 +4,11 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
@@ -16,6 +19,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -427,6 +431,63 @@ fun AarkaWelcomeScreen(
 //  COMPACT FLOATING COMPOSER CARD WITH @ SKILL MENTION AUTOCOMPLETE
 // ====================================================================
 
+data class AttachedFile(
+    val id: String = UUID.randomUUID().toString(),
+    val uri: Uri,
+    val name: String,
+    val size: Long,
+    val mimeType: String,
+    val isImage: Boolean,
+    val textContent: String? = null
+)
+
+fun formatChatFileSize(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    if (bytes < 1024 * 1024) return String.format(Locale.US, "%.1f KB", bytes / 1024f)
+    return String.format(Locale.US, "%.1f MB", bytes / (1024f * 1024f))
+}
+
+fun parseChatFileMetadata(context: Context, uri: Uri): AttachedFile {
+    var displayName = "file"
+    var fileSize = 0L
+    try {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+            if (cursor.moveToFirst()) {
+                if (nameIndex != -1) displayName = cursor.getString(nameIndex) ?: "file"
+                if (sizeIndex != -1) fileSize = cursor.getLong(sizeIndex)
+            }
+        }
+    } catch (e: Exception) {
+        displayName = uri.lastPathSegment ?: "file"
+    }
+
+    val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+    val isImage = mimeType.startsWith("image/") || displayName.endsWith(".png", true) || displayName.endsWith(".jpg", true) || displayName.endsWith(".jpeg", true) || displayName.endsWith(".webp", true)
+
+    var textContent: String? = null
+    val isText = mimeType.startsWith("text/") || displayName.endsWith(".txt", true) || displayName.endsWith(".py", true) || displayName.endsWith(".json", true) || displayName.endsWith(".csv", true) || displayName.endsWith(".md", true) || displayName.endsWith(".kt", true) || displayName.endsWith(".js", true) || displayName.endsWith(".ts", true)
+    if (isText && fileSize in 1..300_000L) {
+        try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                textContent = stream.bufferedReader().readText()
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
+
+    return AttachedFile(
+        uri = uri,
+        name = displayName,
+        size = fileSize,
+        mimeType = mimeType,
+        isImage = isImage,
+        textContent = textContent
+    )
+}
+
 @Composable
 fun AarkaFloatingChatInput(
     isTyping: Boolean,
@@ -436,9 +497,35 @@ fun AarkaFloatingChatInput(
     onSend: (String) -> Unit,
     onStop: () -> Unit
 ) {
+    val context = LocalContext.current
     var text by remember { mutableStateOf("") }
     var isFocused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+    var attachedFiles by remember { mutableStateOf<List<AttachedFile>>(emptyList()) }
+
+    // Activity launcher for photo/file picker
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            val newFiles = uris.map { uri -> parseChatFileMetadata(context, uri) }
+            attachedFiles = attachedFiles + newFiles
+        }
+    }
+
+    // Activity launcher for Google Speech-to-Text Recognition
+    val speechRecognizerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val spokenText = result.data
+                ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+            if (!spokenText.isNullOrBlank()) {
+                text = if (text.isBlank()) spokenText else "$text $spokenText"
+            }
+        }
+    }
 
     // Flatten all 19 skills for @ and / mention auto-completion
     val allSkills = remember {
@@ -704,15 +791,133 @@ fun AarkaFloatingChatInput(
                 // Hairline divider
                 Divider(color = BorderColor.copy(alpha = 0.35f), thickness = 0.5.dp)
 
-                Spacer(modifier = Modifier.height(4.dp))
+                // Attached Files Preview Strip
+                if (attachedFiles.isNotEmpty()) {
+                    LazyRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(attachedFiles, key = { it.id }) { file ->
+                            Surface(
+                                color = BgPrimary,
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(0.8.dp, BorderColor)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (file.isImage) Icons.Outlined.Image else Icons.Outlined.Description,
+                                        contentDescription = null,
+                                        tint = AccentPrimary,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = file.name,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.widthIn(max = 110.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = formatChatFileSize(file.size),
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = TextTertiary
+                                    )
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Remove file",
+                                        tint = TextTertiary,
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .clip(CircleShape)
+                                            .clickable {
+                                                attachedFiles = attachedFiles.filter { it.id != file.id }
+                                            }
+                                            .padding(1.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
 
-                // Unified Typing Space Row: Text Field on the left + Beautiful Send Button directly on the right!
+                Spacer(modifier = Modifier.height(3.dp))
+
+                // Unified Typing Space Row: [+] [Mic] [Text Area] [Send]
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 2.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
+                    // Attach '+' Button for Photos and Files
+                    Surface(
+                        onClick = { filePickerLauncher.launch("*/*") },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .shadow(elevation = 1.dp, shape = CircleShape),
+                        shape = CircleShape,
+                        color = BgPrimary,
+                        border = androidx.compose.foundation.BorderStroke(0.8.dp, BorderColor)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Attach photos or files",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    // Microphone Voice-to-Text Button
+                    Surface(
+                        onClick = {
+                            val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                putExtra(
+                                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                                )
+                                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                                putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Speak to Aarka AI...")
+                            }
+                            try {
+                                speechRecognizerLauncher.launch(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Speech recognition not available on this device", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .shadow(elevation = 1.dp, shape = CircleShape),
+                        shape = CircleShape,
+                        color = BgPrimary,
+                        border = androidx.compose.foundation.BorderStroke(0.8.dp, BorderColor)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Outlined.Mic,
+                                contentDescription = "Voice input",
+                                tint = AccentPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(5.dp))
+
                     // Multiline Input Text Area
                     BasicTextField(
                         value = text,
@@ -720,7 +925,7 @@ fun AarkaFloatingChatInput(
                         modifier = Modifier
                             .weight(1f)
                             .heightIn(min = 38.dp, max = 120.dp)
-                            .padding(horizontal = 6.dp, vertical = 7.dp)
+                            .padding(horizontal = 4.dp, vertical = 7.dp)
                             .focusRequester(focusRequester)
                             .onFocusChanged { isFocused = it.isFocused },
                         textStyle = TextStyle(
@@ -734,9 +939,9 @@ fun AarkaFloatingChatInput(
                             Box(contentAlignment = Alignment.CenterStart) {
                                 if (text.isEmpty()) {
                                     Text(
-                                        text = "Ask Aarka anything... (@ for skills)",
+                                        text = "Ask Aarka anything... (@ skills)",
                                         color = TextTertiary,
-                                        fontSize = 13.sp,
+                                        fontSize = 12.5.sp,
                                         lineHeight = 18.sp
                                     )
                                 }
@@ -771,7 +976,7 @@ fun AarkaFloatingChatInput(
                             }
                         }
                     } else {
-                        val canSend = text.isNotBlank()
+                        val canSend = text.isNotBlank() || attachedFiles.isNotEmpty()
                         val buttonScale by animateFloatAsState(
                             targetValue = if (canSend) 1f else 0.94f,
                             animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium),
@@ -781,8 +986,22 @@ fun AarkaFloatingChatInput(
                         Surface(
                             onClick = {
                                 if (canSend) {
-                                    onSend(text.trim())
+                                    val finalPayload = if (attachedFiles.isNotEmpty()) {
+                                        val fileHeaders = attachedFiles.joinToString("\n\n") { file ->
+                                            if (file.textContent != null) {
+                                                "[Attached File: ${file.name} (${formatChatFileSize(file.size)})]\n```\n${file.textContent}\n```"
+                                            } else {
+                                                "[Attached ${if (file.isImage) "Photo" else "File"}: ${file.name} (${formatChatFileSize(file.size)})]"
+                                            }
+                                        }
+                                        if (text.isNotBlank()) "$fileHeaders\n\n${text.trim()}" else fileHeaders
+                                    } else {
+                                        text.trim()
+                                    }
+
+                                    onSend(finalPayload)
                                     text = ""
+                                    attachedFiles = emptyList()
                                 }
                             },
                             enabled = canSend,

@@ -126,16 +126,26 @@ class CognitiveSubagent:
                 temperature=temp, force_general=True
             )
 
-    def _invoke_tools(self, tool_intents: list) -> list:
-        """Execute tools via the ToolRouterPipeline.
+    def _invoke_tools(self, tool_intents: list, context: Optional[Dict[str, Any]] = None) -> list:
+        """Execute tools via the ToolRouterPipeline with full security and gateway validation.
 
         Args:
             tool_intents: List of (tool_name, action, params) tuples.
+            context: Optional context dict containing user_id, session_id,
+                     approval_context, workspace_dir, user_tier.
 
         Returns:
             List of ToolResult objects.
         """
-        from modules.tool_router import get_pipeline, ToolIntent
+        from datetime import datetime, timezone
+        from modules.tool_router import get_pipeline, ToolIntent, ToolResult
+
+        ctx = context or {}
+        user_id = ctx.get("user_id", "default")
+        session_id = ctx.get("session_id", f"subagent_{self.name}")
+        approval_context = ctx.get("approval_context", {})
+        workspace_dir = ctx.get("workspace_dir")
+        user_tier = ctx.get("user_tier", "free")
 
         pipeline = get_pipeline()
         intents = []
@@ -157,7 +167,39 @@ class CognitiveSubagent:
         if not intents:
             return []
 
-        results = pipeline.execute_tools(intents)
+        # Validate permissions with autonomous fail-closed enforcement
+        allowed_intents, denied = pipeline.check_permissions(
+            user_id=user_id,
+            intents=intents,
+            user_tier=user_tier,
+            is_autonomous=True,
+            approval_context=approval_context,
+        )
+
+        results = []
+        if denied:
+            for denied_msg in denied:
+                logger.warning("Subagent %s tool blocked: %s", self.name, denied_msg)
+                results.append(ToolResult(
+                    tool_name="permission_gate",
+                    action="block",
+                    data="",
+                    is_valid=False,
+                    error=f"Permission Denied: {denied_msg}",
+                    execution_time_ms=0.0,
+                    timestamp=datetime.now(timezone.utc).isoformat()
+                ))
+
+        if allowed_intents:
+            exec_results = pipeline.execute_tools(
+                allowed_intents,
+                user_id=user_id,
+                session_id=session_id,
+                approval_context=approval_context,
+                workspace_dir=workspace_dir,
+            )
+            results.extend(exec_results)
+
         return pipeline.validate_results(results)
 
     def __repr__(self) -> str:

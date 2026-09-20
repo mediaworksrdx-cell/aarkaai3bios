@@ -76,7 +76,7 @@ class ToolApprovalRecord:
     human_summary: str
     diff_preview: Optional[str]
     command_preview: Optional[str]
-    status: str  # "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED"
+    status: str  # "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "CONSUMED"
     created_at: float
     expires_at: float
     resolved_at: Optional[float] = None
@@ -90,8 +90,6 @@ class ToolApprovalRecord:
             d["expires_at"] = int(d["expires_at"] * 1000)
         if d.get("resolved_at") and d["resolved_at"] < 1e11:
             d["resolved_at"] = int(d["resolved_at"] * 1000)
-        if "status" in d and isinstance(d["status"], str):
-            d["status"] = d["status"].lower()
         if "risk_level" in d and isinstance(d["risk_level"], str):
             d["mutation_risk"] = d["risk_level"].lower()
         d["arguments"] = d.get("args") or {}
@@ -101,7 +99,7 @@ class ToolApprovalRecord:
 @dataclass
 class ApprovalResponse:
     approval_id: str
-    status: str  # "approved" | "rejected" | "expired" | "invalid" | "unauthorized"
+    status: str  # "approved" | "rejected" | "expired" | "invalid" | "unauthorized" | "consumed"
     message: str
     action_hash: Optional[str] = None
 
@@ -140,6 +138,18 @@ class ApprovalStoreInterface(ABC):
         pass
 
     @abstractmethod
+    def consume_approval(
+        self,
+        approval_id: str,
+        tool_name: str,
+        args: Dict[str, Any],
+        user_id: str,
+        session_id: str,
+        workspace_id: str = "default",
+    ) -> Tuple[bool, str]:
+        pass
+
+    @abstractmethod
     def await_resolution(
         self,
         approval_id: str,
@@ -171,7 +181,106 @@ class SQLiteApprovalStore(ApprovalStoreInterface):
         conn.execute("PRAGMA busy_timeout=5000;")
         return conn
 
+    def _migrate_schema_if_needed(self) -> None:
+        """
+        Idempotent schema migration for SQLite tool_approvals table.
+        Ensures CHECK constraint includes 'CONSUMED' status without data loss.
+        Uses a dedicated connection and strict transaction to prevent nesting issues.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tool_approvals';")
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                return  # Table does not exist yet; _init_db will create it fresh
+
+            table_sql = row[0]
+            # Idempotency guard: do not re-run if already migrated
+            if "'CONSUMED'" in table_sql or '"CONSUMED"' in table_sql:
+                return
+
+            logger.info("Migrating tool_approvals schema to support 'CONSUMED' status...")
+            conn.execute("PRAGMA foreign_keys = OFF;")
+            conn.execute("BEGIN IMMEDIATE;")
+            try:
+                # 1. Rename existing table
+                conn.execute("ALTER TABLE tool_approvals RENAME TO _tool_approvals_old;")
+
+                # 2. Create target table with updated CHECK constraint
+                conn.execute("""
+                    CREATE TABLE tool_approvals (
+                        approval_id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        session_id TEXT NOT NULL,
+                        workspace_id TEXT NOT NULL,
+                        tool_name TEXT NOT NULL,
+                        args_json TEXT NOT NULL,
+                        action_hash TEXT NOT NULL,
+                        policy_version TEXT NOT NULL,
+                        mcp_server_id TEXT NOT NULL,
+                        target_resource TEXT NOT NULL,
+                        risk_level TEXT NOT NULL CHECK(risk_level IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+                        human_summary TEXT NOT NULL,
+                        diff_preview TEXT,
+                        command_preview TEXT,
+                        status TEXT NOT NULL CHECK(status IN ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED', 'CONSUMED')),
+                        created_at REAL NOT NULL,
+                        expires_at REAL NOT NULL,
+                        resolved_at REAL,
+                        resolved_by TEXT
+                    );
+                """)
+
+                # 3. Copy rows from old table using explicit column mappings
+                conn.execute("""
+                    INSERT INTO tool_approvals (
+                        approval_id, user_id, session_id, workspace_id, tool_name,
+                        args_json, action_hash, policy_version, mcp_server_id,
+                        target_resource, risk_level, human_summary, diff_preview,
+                        command_preview, status, created_at, expires_at,
+                        resolved_at, resolved_by
+                    )
+                    SELECT 
+                        approval_id, user_id, session_id, workspace_id, tool_name,
+                        args_json, action_hash, policy_version, mcp_server_id,
+                        target_resource, risk_level, human_summary, diff_preview,
+                        command_preview, status, created_at, expires_at,
+                        resolved_at, resolved_by
+                    FROM _tool_approvals_old;
+                """)
+
+                # 4. Verify row counts match before dropping old table
+                cursor.execute("SELECT COUNT(*) FROM _tool_approvals_old;")
+                old_count = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM tool_approvals;")
+                new_count = cursor.fetchone()[0]
+
+                if old_count != new_count:
+                    raise RuntimeError(
+                        f"Row count mismatch during schema migration: old={old_count}, new={new_count}. Aborting."
+                    )
+
+                # 5. Drop old table
+                conn.execute("DROP TABLE _tool_approvals_old;")
+
+                # 6. Recreate indexes
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_approvals_user ON tool_approvals(user_id, status);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_approvals_expiry ON tool_approvals(expires_at);")
+
+                conn.commit()
+                logger.info("tool_approvals migration successfully committed. Transferred %d records.", new_count)
+            except Exception as e:
+                conn.rollback()
+                logger.error("Migration failed, rolled back changes: %s", e)
+                raise
+            finally:
+                conn.execute("PRAGMA foreign_keys = ON;")
+        finally:
+            conn.close()
+
     def _init_db(self):
+        self._migrate_schema_if_needed()
         with self._get_connection() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS tool_approvals (
@@ -189,7 +298,7 @@ class SQLiteApprovalStore(ApprovalStoreInterface):
                     human_summary TEXT NOT NULL,
                     diff_preview TEXT,
                     command_preview TEXT,
-                    status TEXT NOT NULL CHECK(status IN ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED')),
+                    status TEXT NOT NULL CHECK(status IN ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED', 'CONSUMED')),
                     created_at REAL NOT NULL,
                     expires_at REAL NOT NULL,
                     resolved_at REAL,
@@ -409,6 +518,65 @@ class SQLiteApprovalStore(ApprovalStoreInterface):
         finally:
             conn.close()
 
+    def consume_approval(
+        self,
+        approval_id: str,
+        tool_name: str,
+        args: Dict[str, Any],
+        user_id: str,
+        session_id: str,
+        workspace_id: str = "default",
+    ) -> Tuple[bool, str]:
+        """
+        Atomically verifies and consumes an approved request:
+        1. Recomputes action hash over live tool_name and args to prevent parameter tampering / args-swap.
+        2. Enforces expiration time (now <= expires_at).
+        3. Performs an atomic CAS update (status 'APPROVED' -> 'CONSUMED') to guarantee single-use.
+        """
+        rec = self.get_request(approval_id)
+        if not rec:
+            return False, f"Approval record '{approval_id}' not found"
+
+        now = time.time()
+        if rec.status == "CONSUMED":
+            return False, f"Approval '{approval_id}' has already been consumed (replay attempt blocked)"
+        if rec.status != "APPROVED":
+            return False, f"Approval '{approval_id}' is not approved (status: {rec.status})"
+        if now > rec.expires_at:
+            self._mark_expired(approval_id, now)
+            return False, f"Approval '{approval_id}' has expired"
+
+        # Recompute live action hash with record's bound context
+        live_hash = compute_action_hash(
+            tool_name=tool_name,
+            args=args,
+            user_id=user_id,
+            session_id=session_id,
+            workspace_id=rec.workspace_id,
+            policy_version=rec.policy_version,
+            mcp_server_id=rec.mcp_server_id,
+            target_resource=rec.target_resource,
+        )
+        if live_hash != rec.action_hash:
+            audit_event("approval.tamper_detected", approval_id=approval_id, expected=rec.action_hash, actual=live_hash)
+            return False, "Action hash verification failed: arguments or parameters altered after approval"
+
+        # Atomic CAS update: APPROVED -> CONSUMED
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE tool_approvals SET status = 'CONSUMED', resolved_at = ? "
+                "WHERE approval_id = ? AND status = 'APPROVED' AND action_hash = ?;",
+                (now, approval_id, live_hash)
+            )
+            conn.commit()
+            if cursor.rowcount != 1:
+                return False, "Concurrent resolution or replay detected: approval could not be consumed atomically"
+            return True, "Approval verified and consumed"
+        finally:
+            conn.close()
+
     def await_resolution(
         self,
         approval_id: str,
@@ -436,7 +604,7 @@ class SQLiteApprovalStore(ApprovalStoreInterface):
             elif rec.status == "REJECTED":
                 return False, "Action denied by user"
             elif rec.status == "EXPIRED" or now > rec.expires_at:
-                if rec.status == "PENDING":
+                if rec.status in ("PENDING", "APPROVED"):
                     self._mark_expired(approval_id, now)
                 return False, "Approval request expired"
 
@@ -453,7 +621,7 @@ class SQLiteApprovalStore(ApprovalStoreInterface):
             conn.execute("""
                 UPDATE tool_approvals
                 SET status = 'EXPIRED', resolved_at = ?, resolved_by = 'system_timeout'
-                WHERE approval_id = ? AND status = 'PENDING';
+                WHERE approval_id = ? AND status IN ('PENDING', 'APPROVED');
             """, (now, approval_id))
             conn.commit()
             audit_event("approval.expired", approval_id=approval_id)

@@ -293,3 +293,150 @@ describe('ChatInput Command & Intent Permission Flow - Multi-Asset & Regimes', (
     expect(textarea.value).toBe('df -h');
   });
 });
+
+describe('ChatInput Attach & Microphone Features', () => {
+  beforeEach(() => {
+    if (!global.URL.createObjectURL) {
+      global.URL.createObjectURL = vi.fn(() => 'blob:http://localhost/mock-preview');
+    }
+    if (!global.URL.revokeObjectURL) {
+      global.URL.revokeObjectURL = vi.fn();
+    }
+  });
+
+  it('renders the "+" attach button and microphone button with correct accessibility titles', () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        isStreaming={false}
+        selectedModel="aarka-2.0"
+        onModelChange={vi.fn()}
+      />
+    );
+
+    const attachBtn = screen.getByTestId('attach-files-button');
+    expect(attachBtn).toBeInTheDocument();
+    expect(attachBtn).toHaveAttribute('title', 'Attach photos or files (+)');
+
+    const micBtn = screen.getByTestId('microphone-button');
+    expect(micBtn).toBeInTheDocument();
+    expect(micBtn).toHaveAttribute('title', 'Voice input (Microphone)');
+  });
+
+  it('attaches a text file and an image, renders preview chips, and allows removing a chip', async () => {
+    const revokeSpy = vi.spyOn(global.URL, 'revokeObjectURL');
+
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        isStreaming={false}
+        selectedModel="aarka-2.0"
+        onModelChange={vi.fn()}
+      />
+    );
+
+    const fileInput = screen.getByTestId('chat-file-input') as HTMLInputElement;
+
+    const scriptFile = new File(['print("hello aarka")'], 'script.py', { type: 'text/x-python' });
+    const imageFile = new File(['image-bytes'], 'chart.png', { type: 'image/png' });
+
+    fireEvent.change(fileInput, {
+      target: { files: [scriptFile, imageFile] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('attached-files-container')).toBeInTheDocument();
+      expect(screen.getByText('script.py')).toBeInTheDocument();
+      expect(screen.getByText('chart.png')).toBeInTheDocument();
+    });
+
+    // Find remove button for script.py
+    const removeButtons = screen.getAllByTitle('Remove attachment');
+    expect(removeButtons.length).toBe(2);
+
+    // Remove the first file (script.py)
+    fireEvent.click(removeButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.queryByText('script.py')).not.toBeInTheDocument();
+      expect(screen.getByText('chart.png')).toBeInTheDocument();
+    });
+  });
+
+  it('submits message with attached files formatted properly', async () => {
+    const onSend = vi.fn();
+    render(
+      <ChatInput
+        onSend={onSend}
+        isStreaming={false}
+        selectedModel="aarka-2.0"
+        onModelChange={vi.fn()}
+      />
+    );
+
+    const fileInput = screen.getByTestId('chat-file-input') as HTMLInputElement;
+    const testFile = new File(['def calculate_yield(): return 0.08'], 'yield.py', { type: 'text/plain' });
+
+    fireEvent.change(fileInput, {
+      target: { files: [testFile] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('yield.py')).toBeInTheDocument();
+    });
+
+    const textarea = screen.getByPlaceholderText(/Ask Aarka anything/i);
+    fireEvent.change(textarea, { target: { value: 'Review this code' } });
+
+    const sendBtn = screen.getByTitle(/Send message/i);
+    fireEvent.click(sendBtn);
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledTimes(1);
+      const sentPayload = onSend.mock.calls[0][0];
+      expect(sentPayload).toContain('[Attached File: yield.py');
+      expect(sentPayload).toContain('def calculate_yield(): return 0.08');
+      expect(sentPayload).toContain('Review this code');
+    });
+
+    // Attachment chips should be cleared after sending
+    expect(screen.queryByTestId('attached-files-container')).not.toBeInTheDocument();
+  });
+
+  it('toggles microphone recording state when Web Speech API is present', () => {
+    const mockStart = vi.fn();
+    const mockStop = vi.fn();
+
+    class MockSpeechRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = '';
+      start = mockStart;
+      stop = mockStop;
+      abort = vi.fn();
+      onstart: (() => void) | null = null;
+      onresult: ((event: any) => void) | null = null;
+      onerror: ((event: any) => void) | null = null;
+      onend: (() => void) | null = null;
+    }
+
+    (window as any).SpeechRecognition = MockSpeechRecognition;
+
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        isStreaming={false}
+        selectedModel="aarka-2.0"
+        onModelChange={vi.fn()}
+      />
+    );
+
+    const micBtn = screen.getByTestId('microphone-button');
+    fireEvent.click(micBtn);
+
+    expect(mockStart).toHaveBeenCalledTimes(1);
+
+    delete (window as any).SpeechRecognition;
+  });
+});
+

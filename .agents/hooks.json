@@ -1,0 +1,17 @@
+{
+  "zero-discovery-guard": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/guard_system.js",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

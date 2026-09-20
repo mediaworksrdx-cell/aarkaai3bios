@@ -7,12 +7,17 @@ Unit tests for FastAPI endpoints:
 import pytest
 from fastapi.testclient import TestClient
 from main import app
+from database import UserAccount
+from modules.auth import get_current_user
 from modules.approval_store import get_approval_store
 
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    fake_user = UserAccount(id="test-user-id", email="test@aarkaai.com", name="Test User", role="user", is_active=1)
+    app.dependency_overrides[get_current_user] = lambda: fake_user
+    yield TestClient(app)
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_mcp_servers_endpoint(client):

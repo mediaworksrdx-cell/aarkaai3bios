@@ -58,10 +58,11 @@ def verify_permission(tool_name: str, params: Dict[str, Any]) -> Tuple[str, str]
         if is_git_destructive(command):
             return PermissionLevel.STRICT_BLOCK, "Git destructive action blocked for safety."
 
+    from modules.tool_gateway import is_mutating_tool, is_read_only_tool
+
     # 2. AUTO_ALLOW Checks
-    # FileReadTool and WebSearchTool are always safe.
-    if tool_name in ["FileReadTool", "WebSearchTool"]:
-        return PermissionLevel.AUTO_ALLOW, "Safe read operation allowed."
+    if is_read_only_tool(tool_name):
+        return PermissionLevel.AUTO_ALLOW, f"Safe read operation allowed for {tool_name}."
         
     # Check if it is a read-only BashTool command
     if tool_name == "BashTool":
@@ -74,12 +75,14 @@ def verify_permission(tool_name: str, params: Dict[str, Any]) -> Tuple[str, str]
             return PermissionLevel.AUTO_ALLOW, "Safe bash read operation allowed."
 
     # 3. USER_CONFIRM (Interactive Gate) Checks
-    # Any write operations (like FileEditTool) or general execution (like typical scripts/tests)
-    if tool_name in ["FileEditTool", "BashTool", "DeleteSkillTool", "UpdateSkillTool"]:
-        return PermissionLevel.USER_CONFIRM, f"Requires user confirmation for action: {tool_name}"
+    if is_mutating_tool(tool_name):
+        return PermissionLevel.USER_CONFIRM, f"Requires user confirmation for mutating action: {tool_name}"
+
+    if tool_name == "BashTool":
+        return PermissionLevel.USER_CONFIRM, "Requires user confirmation for shell command execution."
 
     # Default fallback
-    return PermissionLevel.USER_CONFIRM, "Requires verification check."
+    return PermissionLevel.USER_CONFIRM, f"Requires verification check for {tool_name}."
 
 
 # ─── Tool-Level Access Control Matrix ─────────────────────────────────────────
@@ -172,6 +175,36 @@ TOOL_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "rate_limit_per_hour": 20,
         "description": "User access and permission checks"
     },
+    "BashTool": {
+        "tier": "enterprise",
+        "permissions": ["execute"],
+        "rate_limit_per_hour": 50,
+        "description": "Shell execution sandbox"
+    },
+    "DeployTool": {
+        "tier": "enterprise",
+        "permissions": ["write", "execute"],
+        "rate_limit_per_hour": 10,
+        "description": "Deployment actions"
+    },
+    "FileEditTool": {
+        "tier": "enterprise",
+        "permissions": ["write"],
+        "rate_limit_per_hour": 100,
+        "description": "File editing"
+    },
+    "FileReadTool": {
+        "tier": "free",
+        "permissions": ["read"],
+        "rate_limit_per_hour": 200,
+        "description": "Read file contents"
+    },
+    "SearchTool": {
+        "tier": "free",
+        "permissions": ["read"],
+        "rate_limit_per_hour": 100,
+        "description": "Code and file search"
+    },
 }
 
 # In-memory rate limit tracker
@@ -199,10 +232,13 @@ def check_tool_access(user_id: str, tool_name: str, user_tier: str = "free") -> 
 
     # Tier check
     required_tier = tool_config["tier"]
-    if required_tier == "premium" and user_tier != "premium":
+    tier_hierarchy = {"free": 0, "premium": 1, "enterprise": 2, "admin": 3}
+    user_level = tier_hierarchy.get(str(user_tier).lower(), 0)
+    req_level = tier_hierarchy.get(str(required_tier).lower(), 0)
+    if user_level < req_level:
         return {
             "allowed": False,
-            "reason": f"{tool_name} requires premium subscription. Upgrade to access {tool_config['description']}.",
+            "reason": f"{tool_name} requires {required_tier} subscription or privileges. Upgrade to access {tool_config['description']}.",
             "remaining_calls": 0
         }
 

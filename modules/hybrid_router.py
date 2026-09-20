@@ -401,7 +401,11 @@ class _SourceHandlers:
                     confidence=0.95,
                 )]
 
-            results = pipeline.execute_tools(intents)
+            results = pipeline.execute_tools(
+                intents,
+                user_id="hybrid_router",
+                session_id="hybrid_session",
+            )
             validated = pipeline.validate_results(results)
 
             valid_results = [r for r in validated if r.is_valid]

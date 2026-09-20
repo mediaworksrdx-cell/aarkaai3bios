@@ -30,7 +30,7 @@ models_volume = modal.Volume.from_name("aarkaa-models")
 # ─── Request Schemas ────────────────────────────────────────────────────────
 class GenerateRequest(BaseModel):
     prompt: str
-    max_tokens: int = 3800
+    max_tokens: int = 16384
     temperature: float = 0.7
     top_p: float = 0.9
     repeat_penalty: float = 1.15
@@ -68,14 +68,24 @@ class AarkaaGPU:
                 break
 
         if path_7b:
-            print(f"Loading primary 7B model {path_7b} with n_gpu_layers=99, n_ctx=8192...")
-            self.models["7b"] = Llama(
-                model_path=path_7b,
-                n_gpu_layers=99,
-                n_ctx=8192,
-                verbose=False
-            )
-            print(f"Aarkaa 7B ({os.path.basename(path_7b)}) successfully loaded to GPU VRAM.")
+            print(f"Loading primary 7B model {path_7b} with n_gpu_layers=99, n_ctx=16384...")
+            try:
+                self.models["7b"] = Llama(
+                    model_path=path_7b,
+                    n_gpu_layers=99,
+                    n_ctx=16384,
+                    verbose=False
+                )
+                print(f"Aarkaa 7B ({os.path.basename(path_7b)}) successfully loaded to GPU VRAM with n_ctx=16384.")
+            except Exception as e:
+                print(f"Notice: load with n_ctx=16384 returned {e}, retrying with n_ctx=8192...")
+                self.models["7b"] = Llama(
+                    model_path=path_7b,
+                    n_gpu_layers=99,
+                    n_ctx=8192,
+                    verbose=False
+                )
+                print(f"Aarkaa 7B ({os.path.basename(path_7b)}) successfully loaded to GPU VRAM with n_ctx=8192.")
 
     def _get_model(self, model_name: str):
         import os
@@ -115,25 +125,35 @@ class AarkaaGPU:
                     self.models[model_key] = Llama(
                         model_path=target_path,
                         n_gpu_layers=99,
-                        n_ctx=8192,
+                        n_ctx=16384,
                         verbose=False
                     )
                     return self.models[model_key]
                 except Exception as load_err:
-                    print(f"Notice: load with n_ctx=8192 returned {load_err}, retrying with n_ctx=4096...")
-                    self.models[model_key] = Llama(
-                        model_path=target_path,
-                        n_gpu_layers=99,
-                        n_ctx=4096,
-                        verbose=False
-                    )
-                    return self.models[model_key]
+                    print(f"Notice: load with n_ctx=16384 returned {load_err}, retrying with n_ctx=8192...")
+                    try:
+                        self.models[model_key] = Llama(
+                            model_path=target_path,
+                            n_gpu_layers=99,
+                            n_ctx=8192,
+                            verbose=False
+                        )
+                        return self.models[model_key]
+                    except Exception as load_err2:
+                        print(f"Notice: load with n_ctx=8192 returned {load_err2}, retrying with n_ctx=4096...")
+                        self.models[model_key] = Llama(
+                            model_path=target_path,
+                            n_gpu_layers=99,
+                            n_ctx=4096,
+                            verbose=False
+                        )
+                        return self.models[model_key]
 
         # Fallback to 7B if available
         return self.models.get("7b")
 
     @modal.method()
-    def generate(self, prompt: str, max_tokens: int = 3800, temperature: float = 0.7,
+    def generate(self, prompt: str, max_tokens: int = 16384, temperature: float = 0.7,
                  top_p: float = 0.9, repeat_penalty: float = 1.15, stop: list = None,
                  model: str = "7b") -> str:
         llm = self._get_model(model)
@@ -171,7 +191,7 @@ class AarkaaGPU:
         return output["choices"][0]["text"].strip()
 
     @modal.method()
-    def stream_generate(self, prompt: str, max_tokens: int = 3800, temperature: float = 0.7,
+    def stream_generate(self, prompt: str, max_tokens: int = 16384, temperature: float = 0.7,
                         top_p: float = 0.9, repeat_penalty: float = 1.15, stop: list = None,
                         model: str = "7b"):
         llm = self._get_model(model)

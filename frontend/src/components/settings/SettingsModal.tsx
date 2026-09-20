@@ -171,7 +171,13 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
       });
       setSaveError(null);
     } catch (err: any) {
-      const msg = err?.message || 'Failed to save settings to server. Changes saved locally only.';
+      const rawMsg = err?.message || '';
+      let msg = 'Failed to save settings to server. Changes saved locally only.';
+      if (rawMsg.includes('Token has expired') || rawMsg.includes('401') || rawMsg.includes('expired')) {
+        msg = 'Session expired. Preferences saved locally. Please sign in again.';
+      } else if (rawMsg) {
+        msg = rawMsg;
+      }
       setSaveError(msg);
       setTimeout(() => setSaveError(null), 4000);
     }
