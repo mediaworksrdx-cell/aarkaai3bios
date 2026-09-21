@@ -388,15 +388,15 @@ export const PDF_TEMPLATES: Record<PdfTemplateId, PdfTemplateConfig> = {
   },
 };
 
-function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_TEMPLATES.gold): string {
+function markdownToSimpleHtml(markdown: string, _theme: PdfTemplateConfig = PDF_TEMPLATES.gold): string {
   if (!markdown) return '';
 
-  // Extract and preserve code blocks safely
+  // Extract and preserve code blocks safely with pre-wrap to eliminate horizontal scrollbars in PDF
   const codeBlocks: string[] = [];
   let html = markdown.replace(/```(\w+)?\n([\s\S]*?)```/g, (_m, _lang, code) => {
     const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
     codeBlocks.push(
-      `<pre style="background: ${theme.codeBg} !important; color: #000000 !important; padding: 14px; border-radius: 8px; font-family: Consolas, Monaco, monospace; font-size: 12px; overflow-x: auto; margin: 16px 0; border: 1px solid ${theme.codeBorder};"><code style="color: #000000 !important;">${escapeHtml(code.trim())}</code></pre>`
+      `<pre style="background: #f8fafc !important; color: #000000 !important; padding: 12px 14px; border-radius: 6px; font-family: Consolas, Monaco, monospace; font-size: 11.5px; white-space: pre-wrap !important; word-break: break-word !important; overflow-wrap: break-word !important; margin: 14px 0; border: 1px solid #cbd5e1; page-break-inside: avoid;"><code style="color: #000000 !important; font-family: inherit; font-size: inherit;">${escapeHtml(code.trim())}</code></pre>`
     );
     return placeholder;
   });
@@ -406,7 +406,7 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
   html = html.replace(/`([^`]+)`/g, (_m, code) => {
     const placeholder = `__INLINE_CODE_${inlineCodes.length}__`;
     inlineCodes.push(
-      `<code style="background: ${theme.codeBg} !important; color: #000000 !important; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; border: 1px solid ${theme.codeBorder}; font-weight: 600;">${escapeHtml(code)}</code>`
+      `<code style="background: #f1f5f9 !important; color: #000000 !important; padding: 2px 5px; border-radius: 4px; font-family: Consolas, Monaco, monospace; font-size: 0.9em; border: 1px solid #e2e8f0; font-weight: 600;">${escapeHtml(code)}</code>`
     );
     return placeholder;
   });
@@ -427,34 +427,34 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
         r.split('|').slice(1, -1).map(c => c.trim());
 
       const headers = parseCells(rows[0]);
-      const headerHtml = `<thead><tr>${headers.map(h => `<th style="background:${theme.tableHeaderBg} !important; color:#000000 !important; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; border-bottom:2px solid #cbd5e1; text-align:left;">${h}</th>`).join('')}</tr></thead>`;
+      const headerHtml = `<thead><tr>${headers.map(h => `<th style="background:#f1f5f9 !important; color:#000000 !important; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; border-bottom:2px solid #94a3b8; text-align:left;">${h}</th>`).join('')}</tr></thead>`;
 
       const bodyRows = rows.slice(2).filter(r => r.trim().startsWith('|'));
       const bodyHtml = `<tbody>${bodyRows.map(r => {
         const cells = parseCells(r);
-        return `<tr>${cells.map(c => `<td style="padding:7px 10px; font-size:12px; color:#1e293b !important; border-bottom:1px solid ${theme.cardBorder};">${c}</td>`).join('')}</tr>`;
+        return `<tr>${cells.map(c => `<td style="padding:7px 10px; font-size:12px; color:#111827 !important; border-bottom:1px solid #e2e8f0;">${c}</td>`).join('')}</tr>`;
       }).join('')}</tbody>`;
 
-      return `<div style="overflow-x:auto; margin:16px 0; border:1px solid ${theme.cardBorder}; border-radius:8px;"><table style="width:100%; border-collapse:collapse;">${headerHtml}${bodyHtml}</table></div>`;
+      return `<div style="overflow-x:auto; margin:16px 0; border:1px solid #e2e8f0; border-radius:6px;"><table style="width:100%; border-collapse:collapse;">${headerHtml}${bodyHtml}</table></div>`;
     }
   );
 
   // Headers
   html = html.replace(/^### (.*$)/gim, `<h3 style="color: #000000 !important; font-size: 14px; font-weight: 700; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: 0.5px;">$1</h3>`);
-  html = html.replace(/^## (.*$)/gim, `<h2 style="color: #000000 !important; font-size: 18px; font-weight: 700; margin: 22px 0 10px; border-bottom: 1px solid ${theme.cardBorder}; padding-bottom: 6px;">$1</h2>`);
-  html = html.replace(/^# (.*$)/gim, `<h1 style="color: #000000 !important; font-size: 22px; font-weight: 800; margin: 26px 0 12px; border-bottom: 2px solid #0f172a; padding-bottom: 8px;"><span style="color:#000000 !important;">$1</span></h1>`);
+  html = html.replace(/^## (.*$)/gim, `<h2 style="color: #000000 !important; font-size: 18px; font-weight: 700; margin: 22px 0 10px; border-bottom: 1.5px solid #e2e8f0; padding-bottom: 6px;">$1</h2>`);
+  html = html.replace(/^# (.*$)/gim, `<h1 style="color: #000000 !important; font-size: 22px; font-weight: 800; margin: 26px 0 12px; border-bottom: 2px solid #000000; padding-bottom: 8px;">$1</h1>`);
 
   // Blockquotes
-  html = html.replace(/^&gt; (.*$)/gim, `<blockquote style="border-left: 4px solid #0f172a !important; background: ${theme.blockquoteBg} !important; color: #1e293b !important; padding: 10px 14px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 12.5px;">$1</blockquote>`);
+  html = html.replace(/^&gt; (.*$)/gim, `<blockquote style="border-left: 4px solid #000000 !important; background: #f8fafc !important; color: #1f2937 !important; padding: 10px 14px; margin: 14px 0; border-radius: 0 4px 4px 0; font-size: 12.5px;">$1</blockquote>`);
 
   // Bold & Italic
   html = html.replace(/\*\*([^*]+)\*\*/g, `<strong style="color: #000000 !important; font-weight: 700;">$1</strong>`);
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
 
   // Lists
-  html = html.replace(/^\s*-\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:#1e293b !important;">$1</li>`);
-  html = html.replace(/^\s*\*\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:#1e293b !important;">$1</li>`);
-  html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:#1e293b !important;">$2</li>`);
+  html = html.replace(/^\s*-\s+(.*$)/gim, `<li style="margin-bottom: 5px; color:#111827 !important; line-height: 1.6;">$1</li>`);
+  html = html.replace(/^\s*\*\s+(.*$)/gim, `<li style="margin-bottom: 5px; color:#111827 !important; line-height: 1.6;">$1</li>`);
+  html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, `<li style="margin-bottom: 5px; color:#111827 !important; line-height: 1.6;">$2</li>`);
 
   // Wrap lists
   html = html.replace(/(<li[\s\S]*<\/li>)/gm, '<ul style="padding-left: 24px; margin: 12px 0;">$1</ul>');
@@ -468,7 +468,7 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
       if (trimmed.startsWith('<h') || trimmed.startsWith('<pre') || trimmed.startsWith('<ul') || trimmed.startsWith('<blockquote') || trimmed.startsWith('<div') || trimmed.startsWith('__CODE_BLOCK_')) {
         return trimmed;
       }
-      return `<p style="margin: 0 0 12px; line-height: 1.7; color: #1e293b !important; font-size: 13px;">${trimmed.replace(/\n/g, '<br/>')}</p>`;
+      return `<p style="margin: 0 0 12px; line-height: 1.7; color: #111827 !important; font-size: 13px;">${trimmed.replace(/\n/g, '<br/>')}</p>`;
     })
     .join('\n');
 
@@ -484,7 +484,7 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
 }
 
 /**
- * Export response to PDF with customizable template style
+ * Export response to PDF with clean white background and black text
  */
 export function exportToPdf(options: {
   title: string;
@@ -493,24 +493,18 @@ export function exportToPdf(options: {
   timestamp?: number | string;
   template?: PdfTemplateId;
 }) {
-  const selectedTemplate = options.template || 'gold';
-  const theme = PDF_TEMPLATES[selectedTemplate] || PDF_TEMPLATES.gold;
-
   const dateStr = new Date(options.timestamp || Date.now()).toLocaleString('en-US', {
     dateStyle: 'medium',
     timeStyle: 'short',
   });
 
-  const bodyHtml = markdownToSimpleHtml(options.content, theme);
+  const bodyHtml = markdownToSimpleHtml(options.content);
 
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
     alert('Please allow popups to export the PDF document.');
     return;
   }
-
-  // Determine if this is a dark theme (bg is dark) — needed for print fallback
-  const isDarkTheme = theme.bg !== '#ffffff';
 
   const documentHtml = `<!DOCTYPE html>
 <html>
@@ -521,7 +515,8 @@ export function exportToPdf(options: {
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
     @page {
       size: A4;
-      margin: 14mm 15mm 14mm 15mm;
+      margin: 12mm 15mm;
+      background: #ffffff;
     }
     * {
       box-sizing: border-box;
@@ -531,12 +526,10 @@ export function exportToPdf(options: {
       print-color-adjust: exact !important;
       color-adjust: exact !important;
     }
-    html {
-      background: #ffffff !important;
-    }
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    html, body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       color: #000000 !important;
+      background-color: #ffffff !important;
       background: #ffffff !important;
       line-height: 1.65;
       padding: 0;
@@ -546,6 +539,7 @@ export function exportToPdf(options: {
       color-adjust: exact !important;
     }
     .page-wrapper {
+      background-color: #ffffff !important;
       background: #ffffff !important;
       color: #000000 !important;
       min-height: 100vh;
@@ -554,9 +548,9 @@ export function exportToPdf(options: {
       margin: 0 auto;
     }
     .header {
-      border-bottom: 1.5px solid #e2e8f0;
-      padding-bottom: 16px;
-      margin-bottom: 24px;
+      border-bottom: 2px solid #000000;
+      padding-bottom: 14px;
+      margin-bottom: 20px;
     }
     .brand {
       display: flex;
@@ -566,33 +560,28 @@ export function exportToPdf(options: {
     }
     .brand-title {
       font-size: 18px;
-      font-weight: 800;
+      font-weight: 900;
       letter-spacing: 1.5px;
-      color: #0f172a !important;
+      color: #000000 !important;
       text-transform: uppercase;
     }
     .badge {
       display: inline-block;
       padding: 3px 9px;
-      border-radius: 9999px;
-      font-size: 8px;
+      border-radius: 4px;
+      font-size: 9px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       background: #f1f5f9 !important;
-      color: #334155 !important;
+      color: #000000 !important;
       border: 1px solid #cbd5e1;
     }
-    .divider {
-      height: 2px;
-      background: #0f172a !important;
-      margin: 8px 0 16px;
-    }
     .doc-title {
-      font-size: 22px;
+      font-size: 24px;
       font-weight: 800;
       color: #000000 !important;
-      margin: 0 0 6px 0;
+      margin: 10px 0 6px 0;
       letter-spacing: -0.5px;
     }
     .meta-row {
@@ -603,59 +592,99 @@ export function exportToPdf(options: {
       color: #475569 !important;
     }
     .meta-tag {
-      background: #f8fafc !important;
+      background: #f1f5f9 !important;
       padding: 2px 8px;
-      border-radius: 6px;
+      border-radius: 4px;
       border: 1px solid #e2e8f0;
-      color: #0f172a !important;
+      color: #000000 !important;
       font-weight: 600;
       font-size: 10px;
     }
     .content {
-      font-size: 13px;
-      color: #1e293b !important;
-    }
-    .content p {
-      color: #1e293b !important;
+      font-size: 13.5px;
+      color: #111827 !important;
       line-height: 1.7;
     }
-    .content h1, .content h2, .content h3 {
-      color: #000000 !important;
+    .content p {
+      color: #111827 !important;
+      margin: 0 0 12px;
+      line-height: 1.7;
     }
-    .content strong {
+    .content h1, .content h2, .content h3, .content h4 {
       color: #000000 !important;
-      font-weight: 700;
+      font-weight: 700 !important;
+    }
+    .content strong, .content b {
+      color: #000000 !important;
+      font-weight: 700 !important;
     }
     .content li {
-      color: #1e293b !important;
+      color: #111827 !important;
     }
     .content pre {
+      background-color: #f8fafc !important;
       background: #f8fafc !important;
       color: #000000 !important;
       border: 1px solid #cbd5e1 !important;
-      border-radius: 8px;
-      padding: 12px;
+      border-radius: 6px !important;
+      padding: 12px 14px !important;
+      font-family: Consolas, Monaco, monospace !important;
+      font-size: 11.5px !important;
+      line-height: 1.5 !important;
+      white-space: pre-wrap !important;
+      word-break: break-word !important;
+      overflow-wrap: break-word !important;
+      overflow: visible !important;
+      margin: 14px 0 !important;
+      page-break-inside: avoid !important;
     }
     .content code {
       color: #000000 !important;
-      font-family: Consolas, Monaco, monospace;
+      background-color: #f1f5f9 !important;
+      background: #f1f5f9 !important;
+      padding: 2px 5px !important;
+      border-radius: 4px !important;
+      border: 1px solid #e2e8f0 !important;
+      font-family: Consolas, Monaco, monospace !important;
+      font-size: 0.9em !important;
+      font-weight: 600 !important;
+    }
+    .content pre code {
+      background: transparent !important;
+      border: none !important;
+      padding: 0 !important;
+      color: #000000 !important;
+      font-weight: normal !important;
     }
     .content blockquote {
+      background-color: #f8fafc !important;
       background: #f8fafc !important;
-      color: #1e293b !important;
-      border-left: 4px solid #0f172a !important;
+      color: #1f2937 !important;
+      border-left: 4px solid #000000 !important;
+      padding: 10px 14px !important;
+      margin: 14px 0 !important;
+      border-radius: 0 4px 4px 0 !important;
+    }
+    .content table {
+      width: 100% !important;
+      border-collapse: collapse !important;
+      margin: 16px 0 !important;
     }
     .content table th {
+      background-color: #f1f5f9 !important;
       background: #f1f5f9 !important;
       color: #000000 !important;
-      border-bottom: 2px solid #cbd5e1 !important;
+      font-weight: 700 !important;
+      border-bottom: 2px solid #94a3b8 !important;
+      padding: 8px 10px !important;
     }
     .content table td {
-      color: #1e293b !important;
+      color: #111827 !important;
       border-bottom: 1px solid #e2e8f0 !important;
+      padding: 7px 10px !important;
     }
     .footer {
-      margin-top: 40px;
+      margin-top: 36px;
       border-top: 1px solid #e2e8f0;
       padding-top: 12px;
       font-size: 9.5px;
@@ -665,8 +694,14 @@ export function exportToPdf(options: {
       align-items: center;
     }
     @media print {
+      @page {
+        size: A4;
+        margin: 12mm 15mm;
+        background: #ffffff;
+      }
       html, body {
         background: #ffffff !important;
+        background-color: #ffffff !important;
         color: #000000 !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
@@ -674,13 +709,28 @@ export function exportToPdf(options: {
       }
       .page-wrapper {
         background: #ffffff !important;
+        background-color: #ffffff !important;
         color: #000000 !important;
-        padding: 0;
+        padding: 0 !important;
+        max-width: 100% !important;
       }
       .content p, .content li, .content td, .content blockquote {
-        color: #1e293b !important;
+        color: #111827 !important;
       }
-      .content h1, .content h2, .content h3, .content strong {
+      .content h1, .content h2, .content h3, .content h4, .content strong, .content b {
+        color: #000000 !important;
+      }
+      .content pre {
+        background-color: #f8fafc !important;
+        background: #f8fafc !important;
+        color: #000000 !important;
+        border: 1px solid #cbd5e1 !important;
+        white-space: pre-wrap !important;
+        word-break: break-word !important;
+        overflow: visible !important;
+        page-break-inside: avoid !important;
+      }
+      .content pre code {
         color: #000000 !important;
       }
       table, pre, blockquote { page-break-inside: avoid; }
@@ -692,15 +742,14 @@ export function exportToPdf(options: {
   <div class="page-wrapper">
     <div class="header">
       <div class="brand">
-        <div class="brand-title">AARKAAI · ${escapeHtml(theme.name)}</div>
-        <div class="badge">${escapeHtml(theme.badge)}</div>
+        <div class="brand-title">AARKAA AI</div>
+        <div class="badge">OFFICIAL REPORT</div>
       </div>
-      <div class="divider"></div>
       <h1 class="doc-title">${escapeHtml(options.title)}</h1>
       <div class="meta-row">
         <span>Generated: ${escapeHtml(dateStr)}</span>
         <span>•</span>
-        <span class="meta-tag">${escapeHtml(options.modelUsed || 'Aarka AI 2.0')}</span>
+        <span class="meta-tag">${escapeHtml(options.modelUsed || 'Aarka AI 3.0')}</span>
         <span>•</span>
         <span>Verified Autonomous Delivery</span>
       </div>
