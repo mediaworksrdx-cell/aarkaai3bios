@@ -84,7 +84,7 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
       const saved = localStorage.getItem('aarka_user_settings_v2');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.language) setLanguage(parsed.language);
+        setLanguage('en');
         if (parsed.density) setDensity(parsed.density);
         if (parsed.enterToSend !== undefined) setEnterToSend(parsed.enterToSend);
         if (parsed.showTimestamps !== undefined) setShowTimestamps(parsed.showTimestamps);
@@ -105,7 +105,7 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
     fetchSettingsApi()
       .then((backendSettings) => {
         if (backendSettings && !backendSettings.error) {
-          if (backendSettings.language) setLanguage(backendSettings.language);
+          setLanguage('en');
           if (backendSettings.default_model) setDefaultModel(backendSettings.default_model);
           if (backendSettings.streaming_enabled !== undefined) setStreamingResponses(backendSettings.streaming_enabled);
           if (backendSettings.web_search_enabled !== undefined) setWebSearchEnabled(backendSettings.web_search_enabled);
@@ -293,25 +293,6 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-xs font-semibold text-[var(--text-primary)] block mb-1.5">Primary Language</label>
-                  <select
-                    value={language}
-                    onChange={(e) => setLanguage(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
-                  >
-                    <option value="en">English (US / Global)</option>
-                    <option value="hi">Hindi (हिंदी)</option>
-                    <option value="ta">Tamil (தமிழ்)</option>
-                    <option value="te">Telugu (తెలుగు)</option>
-                    <option value="kn">Kannada (ಕನ್ನಡ)</option>
-                    <option value="ml">Malayalam (മലയാളം)</option>
-                    <option value="mr">Marathi (मराठी)</option>
-                    <option value="bn">Bengali (বাংলা)</option>
-                    <option value="gu">Gujarati (ગુજરાતી)</option>
-                    <option value="pa">Punjabi (ਪੰਜਾਬੀ)</option>
-                  </select>
-                </div>
 
                 <div>
                   <label className="text-xs font-semibold text-[var(--text-primary)] block mb-1.5">Message Density</label>
