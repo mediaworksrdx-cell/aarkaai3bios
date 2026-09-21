@@ -1,0 +1,5 @@
+-keepattributes Signature
+-keepattributes *Annotation*
+-keep class com.aarkaa.ai.data.api.** { *; }
+-dontwarn okhttp3.**
+-dontwarn retrofit2.**

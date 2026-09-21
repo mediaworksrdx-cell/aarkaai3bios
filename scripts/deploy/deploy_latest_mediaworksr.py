@@ -49,6 +49,7 @@ def create_archive():
         # Backend root files
         root_files = [
             "pipeline.py",
+            "_pipeline_legacy.py",
             "aarkaa_engine.py",
             "config.py",
             "schemas.py",
@@ -67,6 +68,10 @@ def create_archive():
             if "__pycache__" in tarinfo.name or tarinfo.name.endswith((".pyc", ".pyo")):
                 return None
             return tarinfo
+
+        if os.path.exists("pipeline"):
+            tar.add("pipeline", arcname="pipeline", filter=filter_pycache)
+            print("  + Added directory: pipeline/")
 
         if os.path.exists("modules"):
             tar.add("modules", arcname="modules", filter=filter_pycache)

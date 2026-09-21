@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   aarkaai:
     build: .
@@ -8,8 +6,8 @@ services:
     ports:
       - "${AARKAAI_PORT:-5000}:5000"
     volumes:
-      # Persist database
-      - ./aarkaai.db:/home/aarkaai/app/aarkaai.db
+      # Persist database — use a directory mount so Docker doesn't create it as a dir on first run
+      - ./data:/home/aarkaai/app/data
       # Persist model files (avoid re-download)
       - ./aarkaa-3b:/home/aarkaai/app/aarkaa-3b:ro
       # Workspace for agent tools
@@ -18,6 +16,8 @@ services:
       - .env
     environment:
       - AARKAAI_ENV=production
+      # Override DB path to use the mounted data directory
+      - AARKAAI_DB_URL=sqlite:////home/aarkaai/app/data/aarkaai.db
     deploy:
       resources:
         limits:
@@ -32,6 +32,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
 volumes:
   aarkaai-workspace:

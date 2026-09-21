@@ -20,7 +20,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MODEL_OPTIONS } from '@/styles/theme';
 import { useChatContext } from '@/context/ChatContext';
-import { exportToPdf, exportToWord, exportToMarkdown, PdfTemplateId } from '@/lib/api';
+import { exportToPdf, exportToWord, exportToMarkdown } from '@/lib/api';
 import { CodeModeSandboxCard } from './CodeModeSandboxCard';
 
 interface MessageBubbleProps {
@@ -208,14 +208,13 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
     }
   };
 
-  const handleExportPdf = (template: PdfTemplateId = 'gold') => {
+  const handleExportPdf = () => {
     setShowExportMenu(false);
     exportToPdf({
       title: 'Aarka AI Response',
       content: message.content,
       modelUsed: modelInfo?.label || 'Aarka AI',
       timestamp: message.timestamp,
-      template,
     });
   };
 
@@ -457,47 +456,15 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
                       className="fixed inset-0 z-40"
                       onClick={() => setShowExportMenu(false)}
                     />
-                    <div className="absolute left-0 bottom-full mb-1.5 w-52 bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl shadow-[var(--shadow-float)] p-1.5 z-50 animate-slide-up backdrop-blur-md">
-                      <div className="text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider px-2.5 py-1">
-                        Export PDF
-                      </div>
+                    <div className="absolute left-0 bottom-full mb-1.5 w-48 bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl shadow-[var(--shadow-float)] p-1.5 z-50 animate-slide-up backdrop-blur-md">
                       <button
-                        onClick={() => handleExportPdf('gold')}
+                        onClick={handleExportPdf}
                         type="button"
-                        className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer text-left"
+                        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer text-left"
                       >
-                        <div className="flex items-center gap-2">
-                          <FileText className="w-3.5 h-3.5 text-amber-500" />
-                          <span>Executive Gold</span>
-                        </div>
-                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-500 font-semibold">Dark</span>
+                        <FileText className="w-3.5 h-3.5 text-rose-500" />
+                        <span>Export PDF</span>
                       </button>
-
-                      <button
-                        onClick={() => handleExportPdf('indigo')}
-                        type="button"
-                        className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer text-left"
-                      >
-                        <div className="flex items-center gap-2">
-                          <FileText className="w-3.5 h-3.5 text-indigo-500" />
-                          <span>Enterprise Indigo</span>
-                        </div>
-                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-500 font-semibold">Clean</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleExportPdf('emerald')}
-                        type="button"
-                        className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer text-left"
-                      >
-                        <div className="flex items-center gap-2">
-                          <FileText className="w-3.5 h-3.5 text-emerald-500" />
-                          <span>Venture Emerald</span>
-                        </div>
-                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-500 font-semibold">Teal</span>
-                      </button>
-
-                      <div className="my-1 border-t border-[var(--border)]" />
 
                       <button
                         onClick={handleExportWord}

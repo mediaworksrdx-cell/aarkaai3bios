@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">AARKAAI</string>
+    <string name="title_chat">Aarka AI Assistant</string>
+    <string name="title_screener">Institutional Screener</string>
+    <string name="title_strategy">Options Strategy</string>
+    <string name="title_skills">Agent Skills</string>
+    <string name="title_documents">Workspace &amp; Docs</string>
+    <string name="title_settings">Preferences</string>
+</resources>

@@ -1,39 +1,23 @@
 """
-AARKAAI Backend – Request Processing Pipeline Package
+AARKAAI Pipeline package.
 
-Decomposition of the monolithic pipeline.py into focused modules:
-- preprocessor: Input normalization, language detection, sanitization
-- context_builder: Memory + RAG + profile compilation
-- executor: LLM invocation, streaming, token management  
-- postprocessor: Response formatting, tool result integration
-- classifiers: Intent classification, keyword heuristics
-- orchestrator: Top-level pipeline coordination
+Public API:
+    process_query(query, user_id, session_id, mode) -> PromptResponse
+    stream_query(query, user_id, session_id, mode, model_override) -> AsyncGenerator
 
-Preserves full backward compatibility with the legacy pipeline.py.
+The pipeline was refactored from a single 3,200-line module into this package.
+Backward compatibility: `from pipeline import process_query` works unchanged.
 """
-from __future__ import annotations
+from pipeline.circuit_breaker import (  # noqa: F401
+    _CircuitBreaker,
+    _web_breaker,
+    _finance_breaker,
+    _SCREENER_AVAILABLE,
+    _screener_agent,
+)
+from pipeline.helpers import *  # noqa: F401,F403
+from pipeline.context import ContextResult  # noqa: F401
+from pipeline.post_process import _post_process  # noqa: F401
+from pipeline.core import process_query, stream_query  # noqa: F401
 
-import importlib.util
-from pathlib import Path
-
-# Load legacy pipeline.py functions and symbols seamlessly
-_legacy_path = Path(__file__).resolve().parent.parent / "pipeline.py"
-if _legacy_path.is_file():
-    _spec = importlib.util.spec_from_file_location("pipeline_legacy", _legacy_path)
-    if _spec and _spec.loader:
-        _mod = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(_mod)
-        for _attr in dir(_mod):
-            if not _attr.startswith("__"):
-                globals()[_attr] = getattr(_mod, _attr)
-
-# Export submodules
-from pipeline import preprocessor
-from pipeline import context_builder
-
-__all__ = [
-    "process_query",
-    "process_query_stream",
-    "preprocessor",
-    "context_builder",
-]
+__all__ = ["process_query", "stream_query"]

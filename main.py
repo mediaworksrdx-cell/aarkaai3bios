@@ -43,6 +43,7 @@ import modules.auth
 from config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     ALLOWED_ORIGINS,
+    APP_VERSION,
     BASE_URL,
     ENVIRONMENT,
     HOST,
@@ -80,6 +81,8 @@ logging.basicConfig(
 logger = logging.getLogger("aarkaai")
 
 # ─── Operational Metrics ──────────────────────────────────────────────────────
+import threading
+_metrics_lock = threading.Lock()
 _metrics = {
     "requests_total": 0,
     "requests_failed": 0,
@@ -110,9 +113,10 @@ def _init_modules() -> None:
     try:
         from sentence_transformers import SentenceTransformer
         from config import EMBEDDING_MODEL_NAME
+        import functools
 
         _st_model = SentenceTransformer(EMBEDDING_MODEL_NAME, device="cpu")
-        embed_fn = lambda text: _st_model.encode(text, normalize_embeddings=True)  # noqa: E731
+        embed_fn = functools.partial(_st_model.encode, normalize_embeddings=True)
         _module_status["embeddings"] = "ok"
         logger.info("✓ Embedding model loaded (%s)", EMBEDDING_MODEL_NAME)
     except Exception as exc:
@@ -297,7 +301,7 @@ app = FastAPI(
         "AARKAA-3B powered multilingual AI backend with semantic routing, "
         "finance data, RAG knowledge, web search, memory, and auto-learning."
     ),
-    version="2.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
     # Disable Swagger UI in production
     docs_url=None if IS_PRODUCTION else "/docs",
@@ -1028,7 +1032,7 @@ async def root():
     """Welcome / info endpoint."""
     return {
         "name": "AARKAAI",
-        "version": "2.0.0",
+        "version": APP_VERSION,
         "environment": ENVIRONMENT,
         "description": "AARKAA-3B powered multilingual AI backend",
         "base_url": BASE_URL,
@@ -1047,7 +1051,7 @@ async def health():
     all_ok = all(v.startswith("ok") for v in _module_status.values())
     return HealthResponse(
         status="healthy" if all_ok else "degraded",
-        version="2.0.0",
+        version=APP_VERSION,
         modules=_module_status,
     )
 
@@ -1206,10 +1210,13 @@ async def metrics(request: Request, current_user=fastapi.Depends(modules.auth.re
             media_type="text/plain; version=0.0.4; charset=utf-8",
         )
 
-    total = _metrics["requests_total"]
-    failed = _metrics["requests_failed"]
+    with _metrics_lock:
+        total = _metrics["requests_total"]
+        failed = _metrics["requests_failed"]
+        proc_time = _metrics["total_processing_time"]
+        startup = _metrics["startup_time"]
     avg_time = (
-        round(_metrics["total_processing_time"] / total, 3) if total > 0 else 0
+        round(proc_time / total, 3) if total > 0 else 0
     )
     success_ratio = (
         round((total - failed) / total, 4) if total > 0 else 1.0
@@ -1226,8 +1233,8 @@ async def metrics(request: Request, current_user=fastapi.Depends(modules.auth.re
         "requests_failed": failed,
         "success_ratio": success_ratio,
         "avg_processing_time": avg_time,
-        "total_processing_time": round(_metrics["total_processing_time"], 3),
-        "startup_time": _metrics["startup_time"],
+        "total_processing_time": round(proc_time, 3),
+        "startup_time": startup,
         "environment": ENVIRONMENT,
         "active_threads": threading.active_count(),
         "engine": engine_status,
@@ -1250,7 +1257,8 @@ async def prompt(
     import asyncio
     from pipeline import process_query
 
-    _metrics["requests_total"] += 1
+    with _metrics_lock:
+        _metrics["requests_total"] += 1
 
     # Extract execution mode from headers or JSON body (default is production)
     mode = request.headers.get("x-aarkaai-mode", req.mode or "production").lower()
@@ -1264,10 +1272,12 @@ async def prompt(
             session_id=req.session_id,
             mode=mode,
         )
-        _metrics["total_processing_time"] += result.processing_time
+        with _metrics_lock:
+            _metrics["total_processing_time"] += result.processing_time
         return result
     except Exception as exc:
-        _metrics["requests_failed"] += 1
+        with _metrics_lock:
+            _metrics["requests_failed"] += 1
         logger.error("Pipeline error: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=500,

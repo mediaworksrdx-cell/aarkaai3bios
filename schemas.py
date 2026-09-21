@@ -7,6 +7,7 @@ import re
 from typing import Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from config import APP_VERSION as _APP_VERSION
 
 
 # ─── Input Sanitization ──────────────────────────────────────────────────────
@@ -104,7 +105,7 @@ class HealthResponse(BaseModel):
     """System health check."""
 
     status: str
-    version: str = "2.0.0"
+    version: str = _APP_VERSION
     modules: dict = Field(default_factory=dict)
 
 

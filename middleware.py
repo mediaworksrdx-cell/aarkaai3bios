@@ -114,7 +114,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.rpm = rpm
         self.window = 60.0  # seconds
-        self._requests: dict[str, list[float]] = defaultdict(list)
+        # Use deque with maxlen to bound per-IP memory automatically.
+        # Once full, oldest entries are evicted — no unbounded list growth.
+        from collections import deque
+        self._deque_factory = lambda: deque(maxlen=rpm + 1)
+        self._requests: dict[str, deque] = defaultdict(self._deque_factory)
         self._redis = None
         self._redis_checked = False
         # Stricter limits for auth endpoints
@@ -209,10 +213,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             for ip in stale_ips:
                 del self._requests[ip]
 
-        # Clean old entries for this IP
-        self._requests[client_ip] = [
-            t for t in self._requests[client_ip] if t > cutoff
-        ]
+        # Clean old entries for this IP — rebuild deque with only valid timestamps
+        from collections import deque
+        valid = deque((t for t in self._requests[client_ip] if t > cutoff), maxlen=self.rpm + 1)
+        self._requests[client_ip] = valid
 
         if len(self._requests[client_ip]) >= effective_rpm:
             retry_after = int(self._requests[client_ip][0] + self.window - now) + 1

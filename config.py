@@ -19,6 +19,13 @@ PORT = int(os.getenv("AARKAAI_PORT", "5000"))
 LOG_LEVEL = os.getenv("AARKAAI_LOG_LEVEL", "INFO")
 WORKERS = int(os.getenv("AARKAAI_WORKERS", "1"))
 
+# ─── App Version ──────────────────────────────────────────────────────────────
+try:
+    from importlib.metadata import version as _pkg_version
+    APP_VERSION = _pkg_version("aarkaai")
+except Exception:
+    APP_VERSION = "3.0.0"
+
 # ─── Paths ────────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "aarkaa-3b"

@@ -1,49 +1,50 @@
 """
-Shared test fixtures for the AARKAAI test suite.
-
-Mocks heavy dependencies (llama-cpp, ChromaDB, MongoDB, yfinance, passlib, etc.)
-so tests can run cleanly without any running external services.
+Shared pytest fixtures for the AARKAAI test suite.
 """
-import sys
-import os
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock
-
-# Ensure project root is on sys.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-# Immediate top-level stubs for collection-time imports of optional heavy dependencies
-_STUB_MODULES = [
-    "sentence_transformers",
-    "llama_cpp",
-    "yfinance",
-    "passlib",
-    "passlib.context",
-    "google.genai",
-    "google",
-]
-
-for mod in _STUB_MODULES:
-    if mod not in sys.modules:
-        try:
-            __import__(mod)
-        except ImportError:
-            stub = MagicMock()
-            if mod == "passlib.context":
-                ctx_mock = MagicMock()
-                ctx_mock.CryptContext.return_value.verify.return_value = True
-                ctx_mock.CryptContext.return_value.hash.return_value = "hashed_pw"
-                stub.CryptContext = ctx_mock.CryptContext
-            sys.modules[mod] = stub
 
 
-@pytest.fixture(autouse=True)
-def mock_heavy_imports(monkeypatch):
-    """
-    Ensure modules that require external services or hardware
-    are safely mocked during test execution.
-    """
-    for mod in _STUB_MODULES:
-        if mod not in sys.modules:
-            monkeypatch.setitem(sys.modules, mod, MagicMock())
+@pytest.fixture
+def mock_pipeline():
+    """Mock process_query so HTTP tests never touch the real inference engine."""
+    from schemas import PromptResponse
 
+    dummy = PromptResponse(
+        response="test response",
+        intent="general_query",
+        confidence=0.9,
+        sources=["aarkaa-3b"],
+        detected_language="en",
+        processing_time=0.1,
+    )
+    with patch("pipeline.process_query", return_value=dummy) as mock:
+        yield mock
+
+
+@pytest.fixture
+def mock_db_session():
+    """Provide a lightweight in-memory SQLite session for unit tests."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from database import Base
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    yield session
+    session.close()
+
+
+@pytest.fixture
+def test_client(mock_pipeline):
+    """FastAPI TestClient with the pipeline mocked out."""
+    from fastapi.testclient import TestClient
+    from main import app
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        yield client
