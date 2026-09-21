@@ -297,94 +297,94 @@ export interface PdfTemplateConfig {
 
 export const PDF_TEMPLATES: Record<PdfTemplateId, PdfTemplateConfig> = {
   gold: {
-    name: 'Executive Gold',
-    badge: 'CONFIDENTIAL EXECUTIVE BRIEF',
-    bg: '#0f172a',
-    cardBg: '#1e293b',
-    cardBorder: '#334155',
-    textPrimary: '#f8fafc',
-    textSecondary: '#94a3b8',
-    accent: '#f59e0b',
-    accentMuted: 'rgba(245, 158, 11, 0.15)',
-    codeBg: '#090d16',
-    codeBorder: '#334155',
-    tableHeaderBg: '#1e293b',
-    blockquoteBg: 'rgba(245, 158, 11, 0.08)',
-    blockquoteBorder: '#f59e0b',
-    blockquoteText: '#fde68a',
-    gradient: 'linear-gradient(135deg, #020617 0%, #0f172a 50%, #1e293b 100%)',
-  },
-  indigo: {
-    name: 'Enterprise Indigo',
-    badge: 'OFFICIAL ENTERPRISE REPORT',
+    name: 'Standard Document',
+    badge: 'AARKA AI REPORT',
     bg: '#ffffff',
-    cardBg: '#f8fafc',
+    cardBg: '#ffffff',
     cardBorder: '#e2e8f0',
-    textPrimary: '#0f172a',
-    textSecondary: '#475569',
-    accent: '#4f46e5',
-    accentMuted: 'rgba(79, 70, 229, 0.1)',
-    codeBg: '#1e1e2e',
-    codeBorder: '#e2e8f0',
+    textPrimary: '#000000',
+    textSecondary: '#1e293b',
+    accent: '#0f172a',
+    accentMuted: '#f1f5f9',
+    codeBg: '#f8fafc',
+    codeBorder: '#cbd5e1',
     tableHeaderBg: '#f1f5f9',
     blockquoteBg: '#f8fafc',
-    blockquoteBorder: '#4f46e5',
-    blockquoteText: '#312e81',
-    gradient: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)',
+    blockquoteBorder: '#0f172a',
+    blockquoteText: '#1e293b',
+    gradient: 'none',
+  },
+  indigo: {
+    name: 'Enterprise Report',
+    badge: 'OFFICIAL ENTERPRISE REPORT',
+    bg: '#ffffff',
+    cardBg: '#ffffff',
+    cardBorder: '#e2e8f0',
+    textPrimary: '#000000',
+    textSecondary: '#1e293b',
+    accent: '#1e3a8a',
+    accentMuted: '#f1f5f9',
+    codeBg: '#f8fafc',
+    codeBorder: '#cbd5e1',
+    tableHeaderBg: '#f1f5f9',
+    blockquoteBg: '#f8fafc',
+    blockquoteBorder: '#1e3a8a',
+    blockquoteText: '#1e293b',
+    gradient: 'none',
   },
   emerald: {
-    name: 'Venture Emerald',
+    name: 'Venture Memo',
     badge: 'VENTURE & GROWTH MEMO',
-    bg: '#042f2e',
-    cardBg: '#064e3b',
-    cardBorder: '#0f766e',
-    textPrimary: '#f0fdfa',
-    textSecondary: '#99f6e4',
-    accent: '#10b981',
-    accentMuted: 'rgba(16, 185, 129, 0.15)',
-    codeBg: '#021e1a',
-    codeBorder: '#0f766e',
-    tableHeaderBg: '#064e3b',
-    blockquoteBg: 'rgba(16, 185, 129, 0.1)',
-    blockquoteBorder: '#10b981',
-    blockquoteText: '#a7f3d0',
-    gradient: 'linear-gradient(135deg, #042f2e 0%, #064e3b 100%)',
+    bg: '#ffffff',
+    cardBg: '#ffffff',
+    cardBorder: '#e2e8f0',
+    textPrimary: '#000000',
+    textSecondary: '#1e293b',
+    accent: '#065f46',
+    accentMuted: '#f1f5f9',
+    codeBg: '#f8fafc',
+    codeBorder: '#cbd5e1',
+    tableHeaderBg: '#f1f5f9',
+    blockquoteBg: '#f8fafc',
+    blockquoteBorder: '#065f46',
+    blockquoteText: '#1e293b',
+    gradient: 'none',
   },
   crimson: {
-    name: 'Risk & Healthcare Crimson',
+    name: 'Risk Assessment',
     badge: 'RISK & COMPLIANCE ASSESSMENT',
-    bg: '#270808',
-    cardBg: '#450a0a',
-    cardBorder: '#7f1d1d',
-    textPrimary: '#fff1f2',
-    textSecondary: '#fecdd3',
-    accent: '#f43f5e',
-    accentMuted: 'rgba(244, 63, 94, 0.15)',
-    codeBg: '#1a0505',
-    codeBorder: '#7f1d1d',
-    tableHeaderBg: '#450a0a',
-    blockquoteBg: 'rgba(244, 63, 94, 0.1)',
-    blockquoteBorder: '#f43f5e',
-    blockquoteText: '#fecdd3',
-    gradient: 'linear-gradient(135deg, #270808 0%, #450a0a 100%)',
+    bg: '#ffffff',
+    cardBg: '#ffffff',
+    cardBorder: '#e2e8f0',
+    textPrimary: '#000000',
+    textSecondary: '#1e293b',
+    accent: '#991b1b',
+    accentMuted: '#f1f5f9',
+    codeBg: '#f8fafc',
+    codeBorder: '#cbd5e1',
+    tableHeaderBg: '#f1f5f9',
+    blockquoteBg: '#f8fafc',
+    blockquoteBorder: '#991b1b',
+    blockquoteText: '#1e293b',
+    gradient: 'none',
   },
   dark: {
-    name: 'Cyber Dark',
+    name: 'Technical Report',
     badge: 'TECHNICAL DEEP DIVE',
-    bg: '#020617',
-    cardBg: '#0b1329',
-    cardBorder: '#1e293b',
-    textPrimary: '#f8fafc',
-    textSecondary: '#94a3b8',
-    accent: '#06b6d4',
-    accentMuted: 'rgba(6, 182, 212, 0.15)',
-    codeBg: '#050b18',
-    codeBorder: '#1e293b',
-    tableHeaderBg: '#0b1329',
-    blockquoteBg: 'rgba(6, 182, 212, 0.08)',
-    blockquoteBorder: '#06b6d4',
-    blockquoteText: '#a5f3fc',
-    gradient: 'linear-gradient(135deg, #020617 0%, #0f172a 100%)',
+    bg: '#ffffff',
+    cardBg: '#ffffff',
+    cardBorder: '#e2e8f0',
+    textPrimary: '#000000',
+    textSecondary: '#1e293b',
+    accent: '#0f172a',
+    accentMuted: '#f1f5f9',
+    codeBg: '#f8fafc',
+    codeBorder: '#cbd5e1',
+    tableHeaderBg: '#f1f5f9',
+    blockquoteBg: '#f8fafc',
+    blockquoteBorder: '#0f172a',
+    blockquoteText: '#1e293b',
+    gradient: 'none',
   },
 };
 
@@ -396,7 +396,7 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
   let html = markdown.replace(/```(\w+)?\n([\s\S]*?)```/g, (_m, _lang, code) => {
     const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
     codeBlocks.push(
-      `<pre style="background: ${theme.codeBg} !important; color: ${theme.textPrimary} !important; padding: 14px; border-radius: 8px; font-family: Consolas, Monaco, monospace; font-size: 12px; overflow-x: auto; margin: 16px 0; border: 1px solid ${theme.codeBorder};"><code>${escapeHtml(code.trim())}</code></pre>`
+      `<pre style="background: ${theme.codeBg} !important; color: #000000 !important; padding: 14px; border-radius: 8px; font-family: Consolas, Monaco, monospace; font-size: 12px; overflow-x: auto; margin: 16px 0; border: 1px solid ${theme.codeBorder};"><code style="color: #000000 !important;">${escapeHtml(code.trim())}</code></pre>`
     );
     return placeholder;
   });
@@ -406,7 +406,7 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
   html = html.replace(/`([^`]+)`/g, (_m, code) => {
     const placeholder = `__INLINE_CODE_${inlineCodes.length}__`;
     inlineCodes.push(
-      `<code style="background: ${theme.cardBg} !important; color: ${theme.accent} !important; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; border: 1px solid ${theme.cardBorder};">${escapeHtml(code)}</code>`
+      `<code style="background: ${theme.codeBg} !important; color: #000000 !important; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; border: 1px solid ${theme.codeBorder}; font-weight: 600;">${escapeHtml(code)}</code>`
     );
     return placeholder;
   });
@@ -427,12 +427,12 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
         r.split('|').slice(1, -1).map(c => c.trim());
 
       const headers = parseCells(rows[0]);
-      const headerHtml = `<thead><tr>${headers.map(h => `<th style="background:${theme.tableHeaderBg} !important; color:${theme.accent} !important; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; border-bottom:2px solid ${theme.cardBorder}; text-align:left;">${h}</th>`).join('')}</tr></thead>`;
+      const headerHtml = `<thead><tr>${headers.map(h => `<th style="background:${theme.tableHeaderBg} !important; color:#000000 !important; padding:8px 10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; border-bottom:2px solid #cbd5e1; text-align:left;">${h}</th>`).join('')}</tr></thead>`;
 
       const bodyRows = rows.slice(2).filter(r => r.trim().startsWith('|'));
       const bodyHtml = `<tbody>${bodyRows.map(r => {
         const cells = parseCells(r);
-        return `<tr>${cells.map(c => `<td style="padding:7px 10px; font-size:12px; color:${theme.textSecondary} !important; border-bottom:1px solid ${theme.cardBorder};">${c}</td>`).join('')}</tr>`;
+        return `<tr>${cells.map(c => `<td style="padding:7px 10px; font-size:12px; color:#1e293b !important; border-bottom:1px solid ${theme.cardBorder};">${c}</td>`).join('')}</tr>`;
       }).join('')}</tbody>`;
 
       return `<div style="overflow-x:auto; margin:16px 0; border:1px solid ${theme.cardBorder}; border-radius:8px;"><table style="width:100%; border-collapse:collapse;">${headerHtml}${bodyHtml}</table></div>`;
@@ -440,21 +440,21 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
   );
 
   // Headers
-  html = html.replace(/^### (.*$)/gim, `<h3 style="color: ${theme.accent} !important; font-size: 14px; font-weight: 700; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: 0.5px;">$1</h3>`);
-  html = html.replace(/^## (.*$)/gim, `<h2 style="color: ${theme.textPrimary} !important; font-size: 18px; font-weight: 700; margin: 22px 0 10px; border-bottom: 1px solid ${theme.cardBorder}; padding-bottom: 6px;">$1</h2>`);
-  html = html.replace(/^# (.*$)/gim, `<h1 style="color: ${theme.textPrimary} !important; font-size: 22px; font-weight: 800; margin: 26px 0 12px; border-bottom: 2px solid ${theme.accent}; padding-bottom: 8px;"><span style="color:${theme.accent} !important;">$1</span></h1>`);
+  html = html.replace(/^### (.*$)/gim, `<h3 style="color: #000000 !important; font-size: 14px; font-weight: 700; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: 0.5px;">$1</h3>`);
+  html = html.replace(/^## (.*$)/gim, `<h2 style="color: #000000 !important; font-size: 18px; font-weight: 700; margin: 22px 0 10px; border-bottom: 1px solid ${theme.cardBorder}; padding-bottom: 6px;">$1</h2>`);
+  html = html.replace(/^# (.*$)/gim, `<h1 style="color: #000000 !important; font-size: 22px; font-weight: 800; margin: 26px 0 12px; border-bottom: 2px solid #0f172a; padding-bottom: 8px;"><span style="color:#000000 !important;">$1</span></h1>`);
 
   // Blockquotes
-  html = html.replace(/^&gt; (.*$)/gim, `<blockquote style="border-left: 4px solid ${theme.blockquoteBorder} !important; background: ${theme.blockquoteBg} !important; color: ${theme.blockquoteText} !important; padding: 10px 14px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 12.5px;">$1</blockquote>`);
+  html = html.replace(/^&gt; (.*$)/gim, `<blockquote style="border-left: 4px solid #0f172a !important; background: ${theme.blockquoteBg} !important; color: #1e293b !important; padding: 10px 14px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 12.5px;">$1</blockquote>`);
 
   // Bold & Italic
-  html = html.replace(/\*\*([^*]+)\*\*/g, `<strong style="color: ${theme.textPrimary} !important;">$1</strong>`);
+  html = html.replace(/\*\*([^*]+)\*\*/g, `<strong style="color: #000000 !important; font-weight: 700;">$1</strong>`);
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
 
   // Lists
-  html = html.replace(/^\s*-\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:${theme.textSecondary} !important;">$1</li>`);
-  html = html.replace(/^\s*\*\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:${theme.textSecondary} !important;">$1</li>`);
-  html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:${theme.textSecondary} !important;">$2</li>`);
+  html = html.replace(/^\s*-\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:#1e293b !important;">$1</li>`);
+  html = html.replace(/^\s*\*\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:#1e293b !important;">$1</li>`);
+  html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, `<li style="margin-bottom: 4px; color:#1e293b !important;">$2</li>`);
 
   // Wrap lists
   html = html.replace(/(<li[\s\S]*<\/li>)/gm, '<ul style="padding-left: 24px; margin: 12px 0;">$1</ul>');
@@ -468,7 +468,7 @@ function markdownToSimpleHtml(markdown: string, theme: PdfTemplateConfig = PDF_T
       if (trimmed.startsWith('<h') || trimmed.startsWith('<pre') || trimmed.startsWith('<ul') || trimmed.startsWith('<blockquote') || trimmed.startsWith('<div') || trimmed.startsWith('__CODE_BLOCK_')) {
         return trimmed;
       }
-      return `<p style="margin: 0 0 12px; line-height: 1.7; color: ${theme.textSecondary} !important; font-size: 13px;">${trimmed.replace(/\n/g, '<br/>')}</p>`;
+      return `<p style="margin: 0 0 12px; line-height: 1.7; color: #1e293b !important; font-size: 13px;">${trimmed.replace(/\n/g, '<br/>')}</p>`;
     })
     .join('\n');
 
@@ -532,12 +532,12 @@ export function exportToPdf(options: {
       color-adjust: exact !important;
     }
     html {
-      background: ${theme.bg} !important;
+      background: #ffffff !important;
     }
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      color: ${theme.textPrimary} !important;
-      background: ${theme.bg} !important;
+      color: #000000 !important;
+      background: #ffffff !important;
       line-height: 1.65;
       padding: 0;
       margin: 0;
@@ -545,17 +545,16 @@ export function exportToPdf(options: {
       print-color-adjust: exact !important;
       color-adjust: exact !important;
     }
-    /* Full-bleed background wrapper to force dark backgrounds in PDF print */
     .page-wrapper {
-      background: ${theme.bg} !important;
-      color: ${theme.textPrimary} !important;
+      background: #ffffff !important;
+      color: #000000 !important;
       min-height: 100vh;
       padding: 24px 30px;
       max-width: 860px;
       margin: 0 auto;
     }
     .header {
-      border-bottom: 1px solid ${theme.cardBorder};
+      border-bottom: 1.5px solid #e2e8f0;
       padding-bottom: 16px;
       margin-bottom: 24px;
     }
@@ -569,7 +568,7 @@ export function exportToPdf(options: {
       font-size: 18px;
       font-weight: 800;
       letter-spacing: 1.5px;
-      color: ${theme.accent} !important;
+      color: #0f172a !important;
       text-transform: uppercase;
     }
     .badge {
@@ -580,19 +579,19 @@ export function exportToPdf(options: {
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      background: ${theme.accentMuted} !important;
-      color: ${theme.accent} !important;
-      border: 1px solid ${theme.accent};
+      background: #f1f5f9 !important;
+      color: #334155 !important;
+      border: 1px solid #cbd5e1;
     }
     .divider {
       height: 2px;
-      background: linear-gradient(90deg, ${theme.accent}, ${theme.cardBorder}, transparent) !important;
+      background: #0f172a !important;
       margin: 8px 0 16px;
     }
     .doc-title {
       font-size: 22px;
       font-weight: 800;
-      color: ${theme.textPrimary} !important;
+      color: #000000 !important;
       margin: 0 0 6px 0;
       letter-spacing: -0.5px;
     }
@@ -601,73 +600,88 @@ export function exportToPdf(options: {
       align-items: center;
       gap: 12px;
       font-size: 11px;
-      color: ${theme.textSecondary} !important;
+      color: #475569 !important;
     }
     .meta-tag {
-      background: ${theme.cardBg} !important;
+      background: #f8fafc !important;
       padding: 2px 8px;
       border-radius: 6px;
-      border: 1px solid ${theme.cardBorder};
-      color: ${theme.accent} !important;
+      border: 1px solid #e2e8f0;
+      color: #0f172a !important;
       font-weight: 600;
       font-size: 10px;
     }
     .content {
       font-size: 13px;
-      color: ${theme.textSecondary} !important;
+      color: #1e293b !important;
     }
     .content p {
-      color: ${theme.textSecondary} !important;
+      color: #1e293b !important;
+      line-height: 1.7;
     }
-    .content h1, .content h2 {
-      color: ${theme.textPrimary} !important;
-    }
-    .content h3 {
-      color: ${theme.accent} !important;
+    .content h1, .content h2, .content h3 {
+      color: #000000 !important;
     }
     .content strong {
-      color: ${theme.textPrimary} !important;
+      color: #000000 !important;
+      font-weight: 700;
     }
     .content li {
-      color: ${theme.textSecondary} !important;
+      color: #1e293b !important;
     }
     .content pre {
-      background: ${theme.codeBg} !important;
-      color: ${theme.textPrimary} !important;
+      background: #f8fafc !important;
+      color: #000000 !important;
+      border: 1px solid #cbd5e1 !important;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .content code {
+      color: #000000 !important;
+      font-family: Consolas, Monaco, monospace;
     }
     .content blockquote {
-      background: ${theme.blockquoteBg} !important;
-      color: ${theme.blockquoteText} !important;
-      border-left-color: ${theme.blockquoteBorder} !important;
+      background: #f8fafc !important;
+      color: #1e293b !important;
+      border-left: 4px solid #0f172a !important;
     }
     .content table th {
-      background: ${theme.tableHeaderBg} !important;
-      color: ${theme.accent} !important;
+      background: #f1f5f9 !important;
+      color: #000000 !important;
+      border-bottom: 2px solid #cbd5e1 !important;
     }
     .content table td {
-      color: ${theme.textSecondary} !important;
+      color: #1e293b !important;
+      border-bottom: 1px solid #e2e8f0 !important;
     }
     .footer {
       margin-top: 40px;
-      border-top: 1px solid ${theme.cardBorder};
+      border-top: 1px solid #e2e8f0;
       padding-top: 12px;
       font-size: 9.5px;
-      color: ${theme.textSecondary} !important;
+      color: #64748b !important;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
     @media print {
       html, body {
-        background: ${theme.bg} !important;
-        color: ${theme.textPrimary} !important;
+        background: #ffffff !important;
+        color: #000000 !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
         color-adjust: exact !important;
       }
       .page-wrapper {
-        background: ${theme.bg} !important;
+        background: #ffffff !important;
+        color: #000000 !important;
         padding: 0;
+      }
+      .content p, .content li, .content td, .content blockquote {
+        color: #1e293b !important;
+      }
+      .content h1, .content h2, .content h3, .content strong {
+        color: #000000 !important;
       }
       table, pre, blockquote { page-break-inside: avoid; }
       h1, h2, h3 { page-break-after: avoid; }
