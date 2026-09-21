@@ -30,6 +30,32 @@ export function generateId(): string {
   return 'id-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now().toString(36);
 }
 
+export interface UserSettings {
+  density: 'compact' | 'comfortable';
+  enterToSend: boolean;
+  showTimestamps: boolean;
+  streamingResponses: boolean;
+  incognitoChat: boolean;
+  defaultModel: string;
+  defaultEffort: EffortLevel;
+  webSearchEnabled: boolean;
+  deepResearchEnabled: boolean;
+  marketDataEnabled: boolean;
+}
+
+export const DEFAULT_USER_SETTINGS: UserSettings = {
+  density: 'comfortable',
+  enterToSend: true,
+  showTimestamps: true,
+  streamingResponses: true,
+  incognitoChat: false,
+  defaultModel: 'aarka-2.0',
+  defaultEffort: 'high',
+  webSearchEnabled: true,
+  deepResearchEnabled: true,
+  marketDataEnabled: true,
+};
+
 interface ChatContextType {
   conversations: Conversation[];
   activeConversationId: string | null;
@@ -57,6 +83,8 @@ interface ChatContextType {
   clearError: () => void;
   clearAllHistory: () => void;
   isMounted: boolean;
+  userSettings: UserSettings;
+  updateUserSettings: (newSettings: Partial<UserSettings>) => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -83,29 +111,68 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
     ? `aarka-conv-v3-${user.email.toLowerCase()}`
     : 'aarka-conv-v3-guest';
 
+  const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
+
+  const updateUserSettings = useCallback((newSettings: Partial<UserSettings>) => {
+    setUserSettings((prev) => {
+      const updated = { ...prev, ...newSettings };
+      try {
+        localStorage.setItem('aarka_user_settings_v2', JSON.stringify(updated));
+        if (updated.defaultModel) {
+          localStorage.setItem('aarka-model', updated.defaultModel);
+          setSelectedModelState(updated.defaultModel);
+        }
+        if (updated.defaultEffort) {
+          localStorage.setItem('aarka-effort', updated.defaultEffort);
+          setReasoningEffortState(updated.defaultEffort);
+        }
+      } catch {}
+      return updated;
+    });
+  }, []);
+
   // Load preferences
   useEffect(() => {
     setIsMounted(true);
     try {
-      const savedModel = localStorage.getItem('aarka-model') || localStorage.getItem('aarkaa-model');
-      if (savedModel) {
-        if (savedModel === 'aarkaa-7b' || savedModel === 'aarkaa-3b' || savedModel === 'aarkaa-2.0' || savedModel === 'aarka-2.0') {
-          setSelectedModelState('aarka-2.0');
-        } else if (savedModel.startsWith('gemini')) {
-          setSelectedModelState('gemini-3.7');
-        } else if (savedModel.startsWith('claude') || savedModel.includes('sonnet')) {
-          setSelectedModelState('claude-sonnet-5');
-        } else {
-          setSelectedModelState(savedModel);
+      const savedSettings = localStorage.getItem('aarka_user_settings_v2');
+      if (savedSettings) {
+        const parsed = JSON.parse(savedSettings);
+        setUserSettings((prev) => ({ ...prev, ...parsed }));
+        if (parsed.defaultModel) setSelectedModelState(parsed.defaultModel);
+        if (parsed.defaultEffort) setReasoningEffortState(parsed.defaultEffort);
+      } else {
+        const savedModel = localStorage.getItem('aarka-model') || localStorage.getItem('aarkaa-model');
+        if (savedModel) {
+          if (savedModel === 'aarkaa-7b' || savedModel === 'aarkaa-3b' || savedModel === 'aarkaa-2.0' || savedModel === 'aarka-2.0') {
+            setSelectedModelState('aarka-2.0');
+          } else if (savedModel.startsWith('gemini')) {
+            setSelectedModelState('gemini-3.7');
+          } else if (savedModel.startsWith('claude') || savedModel.includes('sonnet')) {
+            setSelectedModelState('claude-sonnet-5');
+          } else {
+            setSelectedModelState(savedModel);
+          }
         }
-      }
 
-      const savedEffort = (localStorage.getItem('aarka-effort') || localStorage.getItem('aarkaa-effort')) as EffortLevel;
-      if (savedEffort && ['low', 'medium', 'high'].includes(savedEffort)) {
-        setReasoningEffortState(savedEffort);
+        const savedEffort = (localStorage.getItem('aarka-effort') || localStorage.getItem('aarkaa-effort')) as EffortLevel;
+        if (savedEffort && ['low', 'medium', 'high'].includes(savedEffort)) {
+          setReasoningEffortState(savedEffort);
+        }
       }
     } catch {}
   }, []);
+
+  // Listen for global settings updates
+  useEffect(() => {
+    const handleSettingsEvent = (e: any) => {
+      if (e?.detail) {
+        updateUserSettings(e.detail);
+      }
+    };
+    window.addEventListener('aarka-settings-updated', handleSettingsEvent);
+    return () => window.removeEventListener('aarka-settings-updated', handleSettingsEvent);
+  }, [updateUserSettings]);
 
   // Sync activeConversationId into sessionStorage so page refreshes in the same tab preserve it
   useEffect(() => {
@@ -217,13 +284,16 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
   useEffect(() => {
     if (isMounted) {
       try {
+        if (userSettings.incognitoChat) {
+          return;
+        }
         const toPersist = conversations.filter(c => Array.isArray(c.messages) && c.messages.length > 0);
         localStorage.setItem(currentStorageKey, JSON.stringify(toPersist));
       } catch (e) {
         console.warn('Failed to persist user conversations', e);
       }
     }
-  }, [conversations, currentStorageKey, isMounted]);
+  }, [conversations, currentStorageKey, isMounted, userSettings.incognitoChat]);
 
   const setSelectedModel = useCallback((model: string) => {
     const normalized = model === 'aarkaa-7b' || model === 'aarkaa-3b' || model === 'aarkaa-2.0' || model === 'aarka-2.0'
@@ -249,12 +319,15 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
   const activeConversation = conversations.find(c => c && c.id === activeConversationId);
   const messages = (activeConversation && Array.isArray(activeConversation.messages)) ? activeConversation.messages : [];
 
-  const createConversation = useCallback((model: string = 'aarka-2.0', effort: EffortLevel = 'high'): string => {
+  const createConversation = useCallback((model?: string, effort?: EffortLevel): string => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
     setIsStreaming(false);
+
+    const activeModel = model || selectedModel || userSettings.defaultModel || 'aarka-2.0';
+    const activeEffort = effort || reasoningEffort || userSettings.defaultEffort || 'high';
 
     const newId = generateId();
     const newConv: Conversation = {
@@ -263,8 +336,8 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
       messages: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      model,
-      effort,
+      model: activeModel,
+      effort: activeEffort,
     };
     setConversations(prev => [newConv, ...prev.filter(c => Array.isArray(c.messages) && c.messages.length > 0)]);
     setActiveConversationId(newId);
@@ -273,7 +346,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
     } catch {}
     setError(null);
     return newId;
-  }, []);
+  }, [selectedModel, reasoningEffort, userSettings.defaultModel, userSettings.defaultEffort]);
 
   const deleteConversation = useCallback((id: string) => {
     setConversations(prev => {
@@ -345,8 +418,8 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
       const text = content.trim();
       if (!text || isStreaming) return;
 
-      const model = modelOverride || selectedModel;
-      const effort = effortOverride || reasoningEffort;
+      const model = modelOverride || selectedModel || userSettings.defaultModel || 'aarka-2.0';
+      const effort = effortOverride || reasoningEffort || userSettings.defaultEffort || 'high';
       let convId = activeConversationId;
 
       if (!convId) {
@@ -397,23 +470,37 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
       let finalModel = model === 'gemini-3.7' ? 'Google Gemini 3.7' : (model.startsWith('claude') || model.includes('sonnet')) ? 'Claude Sonnet 5' : 'Aarka AI';
 
       try {
-        const stream = streamChat(text, convId, model, effort, undefined, abortControllerRef.current.signal);
+        const stream = streamChat(
+          text,
+          convId,
+          model,
+          effort,
+          undefined,
+          abortControllerRef.current.signal,
+          {
+            webSearchEnabled: userSettings.webSearchEnabled,
+            deepResearchEnabled: userSettings.deepResearchEnabled,
+            marketDataEnabled: userSettings.marketDataEnabled,
+          }
+        );
 
         for await (const chunk of stream) {
           const delta = chunk.token ?? chunk.content ?? chunk.text;
           if (delta && typeof delta === 'string') {
             accumulated += delta;
-            setConversations(prev =>
-              prev.map(c => {
-                if (c.id === convId) {
-                  const msgs = c.messages.map(m =>
-                    m.id === assistantMsgId ? { ...m, content: accumulated } : m
-                  );
-                  return { ...c, messages: msgs };
-                }
-                return c;
-              })
-            );
+            if (userSettings.streamingResponses !== false) {
+              setConversations(prev =>
+                prev.map(c => {
+                  if (c.id === convId) {
+                    const msgs = c.messages.map(m =>
+                      m.id === assistantMsgId ? { ...m, content: accumulated } : m
+                    );
+                    return { ...c, messages: msgs };
+                  }
+                  return c;
+                })
+              );
+            }
           } else if (chunk.type === 'approval_request') {
             const approvalReq: ToolApprovalRequest = chunk.payload || chunk;
             setConversations(prev =>
@@ -586,7 +673,7 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
         abortControllerRef.current = null;
       }
     },
-    [activeConversationId, isStreaming, selectedModel, reasoningEffort, createConversation]
+    [activeConversationId, isStreaming, selectedModel, reasoningEffort, userSettings, createConversation]
   );
 
   const submitFeedback = useCallback(
@@ -751,6 +838,8 @@ export function ChatProvider({ children, user }: { children: React.ReactNode; us
         clearError,
         clearAllHistory,
         isMounted,
+        userSettings,
+        updateUserSettings,
       }}
     >
       {children}
@@ -788,6 +877,8 @@ export function useChatContext(): ChatContextType {
       clearError: () => {},
       clearAllHistory: () => {},
       isMounted: true,
+      userSettings: DEFAULT_USER_SETTINGS,
+      updateUserSettings: () => {},
     };
   }
   return context;

@@ -149,6 +149,11 @@ export function SettingsModal({ isOpen, onClose, user }: SettingsModalProps) {
     };
     try {
       localStorage.setItem('aarka_user_settings_v2', JSON.stringify(settingsPayload));
+      localStorage.setItem('aarka-model', defaultModel);
+      localStorage.setItem('aarka-effort', defaultEffort);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('aarka-settings-updated', { detail: settingsPayload }));
+      }
     } catch {}
 
     // Synchronize to backend database

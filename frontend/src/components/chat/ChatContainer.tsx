@@ -7,7 +7,7 @@ import { ChatInput } from './ChatInput';
 // FloatingApprovalDrawer now mounts exclusively inside ChatInput
 import { useChatContext } from '@/context/ChatContext';
 import { ThemeToggle } from '@/components/common/ThemeToggle';
-import { Menu, Plus, Download, FileText, FileDown, Share2, ArrowDown } from 'lucide-react';
+import { Menu, Plus, Download, FileText, FileDown, Share2, ArrowDown, EyeOff } from 'lucide-react';
 import { exportToPdf, exportToWord, exportToMarkdown } from '@/lib/api';
 
 interface ChatContainerProps {
@@ -33,6 +33,7 @@ export function ChatContainer({
     createConversation,
     activeConversation,
     activeApprovalRequest,
+    userSettings,
   } = useChatContext();
 
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -208,6 +209,12 @@ export function ChatContainer({
             <span className="font-display text-lg text-[var(--text-primary)] tracking-tight font-bold">
               Aarka <span className="text-[var(--accent-primary)] font-bold">AI</span>
             </span>
+            {userSettings?.incognitoChat && (
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-500/15 border border-purple-500/30 text-purple-600 dark:text-purple-400 text-[10px] font-mono font-semibold">
+                <EyeOff className="w-3 h-3" />
+                <span>INCOGNITO</span>
+              </span>
+            )}
           </div>
         </div>
 
@@ -290,7 +297,7 @@ export function ChatContainer({
             isGuest={!user || user?.email === 'guest@aarka-ai.com' || user?.name === 'Guest User'}
           />
         ) : (
-          <div className="max-w-4xl mx-auto py-8 px-4 sm:px-6 w-full flex flex-col">
+          <div className={`max-w-4xl mx-auto ${userSettings?.density === 'compact' ? 'py-4 px-3 sm:px-5' : 'py-8 px-4 sm:px-6'} w-full flex flex-col`}>
             {messages.map((msg) => (
               <MessageBubble
                 key={msg.id}

@@ -87,8 +87,8 @@ export function ChatInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  // Consume backend SSE approval requests from context
-  const { activeApprovalRequest } = useChatContext();
+  // Consume backend SSE approval requests and user settings from context
+  const { activeApprovalRequest, userSettings } = useChatContext();
 
   // Merge: local intercepted command approval takes priority over backend SSE approval
   const effectiveApproval = pendingApproval || activeApprovalRequest || null;
@@ -431,9 +431,17 @@ export function ChatInput({
       }
     }
 
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
+    const enterToSend = userSettings?.enterToSend !== false;
+    if (enterToSend) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSubmit();
+      }
+    } else {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        handleSubmit();
+      }
     }
   };
 
@@ -479,7 +487,7 @@ export function ChatInput({
                         {skill.description}
                       </span>
                     </div>
-                    <ArrowRight className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-[var(--accent-primary)]' : 'text-transparent'}`} />
+                    <ArrowRight className="w-3.5 h-3.5 text-[var(--text-tertiary)] flex-shrink-0" />
                   </button>
                 );
               })}
@@ -496,7 +504,7 @@ export function ChatInput({
           />
         )}
 
-        {/* Floating Input Container */}
+        {/* Input Area Card */}
         <div className="flex flex-col bg-[var(--bg-secondary)] border border-[var(--border)] rounded-2xl shadow-[var(--shadow-lg)] focus-within:border-[var(--border-accent)] focus-within:shadow-[var(--shadow-float)] transition-all duration-200 p-2 sm:p-3">
           {/* Attached Files Preview Strip */}
           {attachedFiles.length > 0 && (
@@ -563,7 +571,15 @@ export function ChatInput({
               }
             }}
             onKeyDown={handleKeyDown}
-            placeholder={isListening ? "Listening... speak now..." : isStreaming ? "Type your next message or instructions..." : "Ask Aarka anything... (Enter to send, Shift+Enter for new line)"}
+            placeholder={
+              isListening
+                ? "Listening... speak now..."
+                : isStreaming
+                ? "Type your next message or instructions..."
+                : userSettings?.enterToSend === false
+                ? "Ask Aarka anything... (Ctrl+Enter to send, Enter for new line)"
+                : "Ask Aarka anything... (Enter to send, Shift+Enter for new line)"
+            }
             disabled={false}
             rows={1}
             style={{ overflowY: 'hidden' }}

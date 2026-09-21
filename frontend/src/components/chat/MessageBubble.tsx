@@ -143,7 +143,7 @@ function MarkdownRenderer({ content, className = '', isStreaming = false }: { co
 }
 
 export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
-  const { regenerateResponse, submitFeedback, isStreaming, resolveApproval } = useChatContext();
+  const { regenerateResponse, submitFeedback, isStreaming, resolveApproval, userSettings } = useChatContext();
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(message.feedback || null);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -154,6 +154,7 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const isError = !!message.error;
   const isMessageStreaming = !!message.isStreaming;
+  const isCompact = userSettings?.density === 'compact';
 
   const modelInfo = message.modelUsed 
     ? MODEL_OPTIONS.find(m => m.id === message.modelUsed || m.label === message.modelUsed)
@@ -237,10 +238,10 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
     <div
       className={`flex w-full ${
         isUser ? 'justify-end' : 'justify-start'
-      } mb-8 animate-slide-up`}
+      } ${isCompact ? 'mb-3' : 'mb-8'} animate-slide-up`}
     >
       <div
-        className={`flex gap-3.5 ${
+        className={`flex ${isCompact ? 'gap-2.5' : 'gap-3.5'} ${
           isUser
             ? 'flex-row-reverse max-w-[85%] sm:max-w-[78%]'
             : 'flex-row max-w-full sm:max-w-[88%]'
@@ -249,18 +250,18 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
         {/* Avatar */}
         <div className="flex-shrink-0 mt-0.5">
           {isUser ? (
-            <div className="w-8 h-8 rounded-full bg-[var(--bg-tertiary)] border border-[var(--border)] flex items-center justify-center text-[var(--text-secondary)] shadow-[var(--shadow-sm)]">
-              <User className="w-4 h-4" />
+            <div className={`${isCompact ? 'w-7 h-7' : 'w-8 h-8'} rounded-full bg-[var(--bg-tertiary)] border border-[var(--border)] flex items-center justify-center text-[var(--text-secondary)] shadow-[var(--shadow-sm)]`}>
+              <User className={isCompact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
             </div>
           ) : (
-            <div className="w-8 h-8 rounded-full bg-[var(--accent-muted)] border border-[var(--border-accent)] flex items-center justify-center text-[var(--accent-primary)] shadow-[var(--shadow-sm)]">
-              <Sparkles className="w-4 h-4" />
+            <div className={`${isCompact ? 'w-7 h-7' : 'w-8 h-8'} rounded-full bg-[var(--accent-muted)] border border-[var(--border-accent)] flex items-center justify-center text-[var(--accent-primary)] shadow-[var(--shadow-sm)]`}>
+              <Sparkles className={isCompact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
             </div>
           )}
         </div>
 
         {/* Content Container */}
-        <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+        <div className={`flex flex-col ${isCompact ? 'gap-1' : 'gap-1.5'} min-w-0 flex-1`}>
           {/* Header info */}
           <div
             className={`flex items-center gap-2 px-1 text-xs text-[var(--text-tertiary)] ${
@@ -270,14 +271,18 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
             <span className="font-semibold text-[var(--text-secondary)]">
               {isUser ? 'You' : (modelInfo?.label || 'Aarka AI')}
             </span>
-            <span>·</span>
-            <span>{formattedTime}</span>
+            {userSettings?.showTimestamps !== false && (
+              <>
+                <span>·</span>
+                <span>{formattedTime}</span>
+              </>
+            )}
           </div>
 
           {/* Bubble */}
           <div
             className={`
-              relative p-4 sm:p-5 rounded-2xl transition-all duration-200
+              relative ${isCompact ? 'p-2.5 sm:p-3.5' : 'p-4 sm:p-5'} rounded-2xl transition-all duration-200
               ${
                 isUser
                   ? 'bg-[var(--accent-muted)] border border-[var(--border-accent)] text-[var(--text-primary)] rounded-tr-sm shadow-[var(--shadow-sm)]'
@@ -288,11 +293,11 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
             `}
           >
             {isUser ? (
-              <div className="whitespace-pre-wrap break-words text-sm sm:text-[0.95rem] leading-relaxed">
+              <div className={`whitespace-pre-wrap break-words ${isCompact ? 'text-xs sm:text-sm' : 'text-sm sm:text-[0.95rem]'} leading-relaxed`}>
                 {message.content}
               </div>
             ) : (
-              <div className="min-w-0 text-sm sm:text-[0.95rem]">
+              <div className={`min-w-0 ${isCompact ? 'text-xs sm:text-sm' : 'text-sm sm:text-[0.95rem]'}`}>
                 {(() => {
                   const cleanedContent = (message.content || '')
                     .replace(/(?:^|\n)This action requires your authorization before modifying the workspace:?\s*/gi, '')

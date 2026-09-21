@@ -67,7 +67,12 @@ export async function* streamChat(
   modelOverride?: string,
   effort?: EffortLevel,
   authToken?: string | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  settings?: {
+    webSearchEnabled?: boolean;
+    deepResearchEnabled?: boolean;
+    marketDataEnabled?: boolean;
+  }
 ): AsyncGenerator<StreamChunk> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -90,13 +95,18 @@ export async function* streamChat(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const payload = {
+  const payload: Record<string, any> = {
     query,
     session_id: sessionId,
     model_override: modelOverride,
     effort: effort || 'medium',
     mode: effort === 'high' ? 'deep_reasoning' : 'production',
   };
+  if (settings) {
+    if (settings.webSearchEnabled !== undefined) payload.web_search_enabled = settings.webSearchEnabled;
+    if (settings.deepResearchEnabled !== undefined) payload.deep_research_enabled = settings.deepResearchEnabled;
+    if (settings.marketDataEnabled !== undefined) payload.market_data_enabled = settings.marketDataEnabled;
+  }
 
   let response: Response;
   try {
