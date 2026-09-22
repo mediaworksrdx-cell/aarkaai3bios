@@ -86,6 +86,12 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  const inputRef = useRef(input);
+  const baseTextRef = useRef('');
+
+  useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
 
   // Consume backend SSE approval requests and user settings from context
   const { activeApprovalRequest, userSettings } = useChatContext();
@@ -180,8 +186,10 @@ export function ChatInput({
         } catch (e) {
           console.warn('Error stopping speech recognition:', e);
         }
+        recognitionRef.current = null;
       }
       setIsListening(false);
+      baseTextRef.current = (inputRef.current || textareaRef.current?.value || '').trim();
       return;
     }
 
@@ -199,42 +207,66 @@ export function ChatInput({
       recognition.interimResults = true;
       recognition.lang = 'en-US';
 
-      let lastFinalTranscript = '';
+      // Capture whatever text is already in the input when the user activates Voice
+      const initialText = (inputRef.current || textareaRef.current?.value || '').trim();
+      baseTextRef.current = initialText;
 
       recognition.onstart = () => {
         setIsListening(true);
       };
 
       recognition.onresult = (event: any) => {
+        let finalTranscript = '';
         let interimTranscript = '';
-        let currentFinal = '';
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            currentFinal += event.results[i][0].transcript;
+        for (let i = 0; i < event.results.length; ++i) {
+          const res = event.results[i];
+          const transcript = res[0]?.transcript || '';
+          if (res.isFinal) {
+            if (finalTranscript && !finalTranscript.endsWith(' ') && !transcript.startsWith(' ')) {
+              finalTranscript += ' ';
+            }
+            finalTranscript += transcript;
           } else {
-            interimTranscript += event.results[i][0].transcript;
+            if (interimTranscript && !interimTranscript.endsWith(' ') && !transcript.startsWith(' ')) {
+              interimTranscript += ' ';
+            }
+            interimTranscript += transcript;
           }
         }
 
-        const newText = (currentFinal || interimTranscript).trim();
-        if (newText && newText !== lastFinalTranscript) {
-          setInput((prev) => {
-            const separator = prev && !prev.endsWith(' ') ? ' ' : '';
-            return `${prev}${separator}${newText}`;
-          });
-          lastFinalTranscript = newText;
-          adjustHeight();
+        const parts: string[] = [];
+        const base = baseTextRef.current.trim();
+        if (base) parts.push(base);
+
+        const finalPart = finalTranscript.trim();
+        if (finalPart) parts.push(finalPart);
+
+        const interimPart = interimTranscript.trim();
+        if (interimPart) parts.push(interimPart);
+
+        const fullText = parts.join(' ');
+        setInput(fullText);
+        if (textareaRef.current) {
+          textareaRef.current.value = fullText;
         }
+        adjustHeight();
       };
 
       recognition.onerror = (event: any) => {
+        if (event.error === 'no-speech') {
+          return;
+        }
         console.warn('Speech recognition error:', event.error);
         setIsListening(false);
+        recognitionRef.current = null;
+        baseTextRef.current = (inputRef.current || textareaRef.current?.value || '').trim();
       };
 
       recognition.onend = () => {
         setIsListening(false);
+        recognitionRef.current = null;
+        baseTextRef.current = (inputRef.current || textareaRef.current?.value || '').trim();
       };
 
       recognitionRef.current = recognition;
@@ -242,6 +274,7 @@ export function ChatInput({
     } catch (err) {
       console.error('Failed to initialize speech recognition:', err);
       setIsListening(false);
+      recognitionRef.current = null;
     }
   };
 
@@ -395,6 +428,16 @@ export function ChatInput({
       });
       setAttachedFiles([]);
     }
+
+    // Stop voice recognition if currently active upon submit
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
+    setIsListening(false);
+    baseTextRef.current = '';
 
     // Normal conversational text flow
     onSend(finalMessage);
