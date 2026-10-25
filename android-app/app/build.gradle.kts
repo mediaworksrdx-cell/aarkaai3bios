@@ -125,7 +125,7 @@ dependencies {
     implementation("androidx.core:core-splashscreen:1.0.1")
 
     // Chrome Custom Tabs for OAuth
-    implementation("androidx.browser:browser:1.7.0")
+    implementation("androidx.browser:browser:1.10.0")
 
     // Test
     testImplementation("junit:junit:4.13.2")
