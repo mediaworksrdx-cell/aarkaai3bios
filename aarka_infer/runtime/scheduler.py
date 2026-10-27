@@ -73,7 +73,7 @@ class AsyncRequestScheduler:
         c_event = cancel_event or asyncio.Event()
 
         item = QueuedItem(
-            priority=priority.value,
+            priority=priority.value if hasattr(priority, "value") else int(priority),
             timestamp=now,
             request_id=req_id,
             prompt=prompt,

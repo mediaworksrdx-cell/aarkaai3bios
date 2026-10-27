@@ -32,7 +32,6 @@ class AarkaaLegacyAdapter:
         stop: Optional[List[str]] = None,
     ) -> str:
         """Synchronous generation compatibility wrapper."""
-        loop = self._get_or_create_loop()
         params = SamplingParams(
             max_tokens=max_tokens,
             temperature=temperature,
@@ -43,11 +42,9 @@ class AarkaaLegacyAdapter:
 
         async def _call():
             await self.engine.initialize()
-            messages = [{"role": "user", "content": prompt}]
-            resp = await self.engine.chat(messages, params=params)
-            return resp["content"]
+            return await self.engine.generate(prompt, params=params)
 
-        return loop.run_until_complete(_call())
+        return self._run_coroutine_sync(_call())
 
     def generate_stream(
         self,
@@ -58,7 +55,12 @@ class AarkaaLegacyAdapter:
         stop: Optional[List[str]] = None,
     ) -> Generator[str, None, None]:
         """Synchronous token generator compatibility wrapper."""
-        loop = self._get_or_create_loop()
+        import queue
+        import threading
+
+        token_queue: queue.Queue[Optional[str]] = queue.Queue()
+        stop_event = threading.Event()
+
         params = SamplingParams(
             max_tokens=max_tokens,
             temperature=temperature,
@@ -66,21 +68,36 @@ class AarkaaLegacyAdapter:
             stop=stop or ["<|im_end|>", "<|endoftext|>"],
         )
 
-        async def _init():
-            await self.engine.initialize()
+        def _producer_thread():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
 
-        loop.run_until_complete(_init())
-        messages = [{"role": "user", "content": prompt}]
+            async def _run():
+                await self.engine.initialize()
+                async for tok in self.engine.generate_stream(prompt, params=params):
+                    if stop_event.is_set():
+                        break
+                    token_queue.put(tok)
 
-        # Run async stream via event loop
-        async_gen = self.engine.chat_stream(messages, params=params)
+            try:
+                new_loop.run_until_complete(_run())
+            except Exception as e:
+                logger.error("Error in AarkaaLegacyAdapter sync stream: %s", e)
+            finally:
+                token_queue.put(None)
+                new_loop.close()
+
+        thread = threading.Thread(target=_producer_thread, daemon=True)
+        thread.start()
 
         try:
             while True:
-                token = loop.run_until_complete(async_gen.__anext__())
-                yield token
-        except StopAsyncIteration:
-            pass
+                tok = token_queue.get()
+                if tok is None:
+                    break
+                yield tok
+        finally:
+            stop_event.set()
 
     async def generate_stream_async(
         self,
@@ -98,9 +115,30 @@ class AarkaaLegacyAdapter:
             top_p=top_p,
             stop=stop or ["<|im_end|>", "<|endoftext|>"],
         )
-        messages = [{"role": "user", "content": prompt}]
-        async for tok in self.engine.chat_stream(messages, params=params):
+        async for tok in self.engine.generate_stream(prompt, params=params):
             yield tok
+
+    def _run_coroutine_sync(self, coro):
+        """Safely executes an async coroutine synchronously, even if an event loop is already running in the current thread."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                def _in_thread():
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        return new_loop.run_until_complete(coro)
+                    finally:
+                        new_loop.close()
+                return pool.submit(_in_thread).result()
+        else:
+            local_loop = self._get_or_create_loop()
+            return local_loop.run_until_complete(coro)
 
     def _get_or_create_loop(self) -> asyncio.AbstractEventLoop:
         """Retrieves or starts a compatible event loop for sync callers."""

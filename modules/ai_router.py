@@ -140,6 +140,32 @@ class AIRouter:
             "stream": stream,
         }
 
+        # Direct in-process dispatch to AARKA Infer runtime when enabled
+        use_infer_direct = os.getenv("USE_INFER_DIRECT", "true").lower() in ("true", "1", "yes")
+        if target_service == "general_3b" and use_infer_direct:
+            try:
+                from aarka_infer.adapters.router_adapter import InferRouterDispatcher
+                dispatcher = InferRouterDispatcher()
+                result = await dispatcher.dispatch(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=stream,
+                )
+                if r is not None and not stream and isinstance(result, dict):
+                    try:
+                        r.setex(f"cache:ai:{cache_key}", 3600, json.dumps(result))
+                        logger.info("Cache MISS, stored via AARKA Infer direct dispatch")
+                    except Exception:
+                        pass
+                return result
+            except Exception as infer_err:
+                logger.warning(
+                    "Direct AARKA Infer dispatch failed (%s); falling back to HTTP endpoint [%s]",
+                    infer_err,
+                    target_url,
+                )
+
         logger.info("Routing query to %s endpoint [%s]", target_service, target_url)
         
         semaphore = _GPU_CONCURRENCY.get(target_service, _GPU_CONCURRENCY["general_3b"])

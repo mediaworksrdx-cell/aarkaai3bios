@@ -75,21 +75,28 @@ class AarkaInferEngine:
             logger.info("AARKA Infer initialized successfully with backend '%s'", self.backend.name)
             return True
 
-    async def chat_stream(
+    async def generate_stream(
         self,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
+        prompt: str,
         params: Optional[SamplingParams] = None,
         priority: RequestPriority = RequestPriority.HIGH,
         cancel_event: Optional[asyncio.Event] = None,
     ) -> AsyncGenerator[str, None]:
-        """Formats conversational messages and streams tokens asynchronously."""
+        """Streams tokens directly from a raw text prompt with active Radix KV caching."""
         if not self._initialized:
             await self.initialize()
 
         sampling = params or SamplingParams()
-        prompt = self.tokenizer.apply_chat_template(messages, tools=tools, add_generation_prompt=True)
-        prompt_tokens = self.tokenizer.encode(prompt)
+        # If prompt is not already formatted as ChatML, wrap it with standard user template
+        if "<|im_start|>" not in prompt:
+            formatted_prompt = self.tokenizer.apply_chat_template(
+                [{"role": "user", "content": prompt}],
+                add_generation_prompt=True,
+            )
+        else:
+            formatted_prompt = prompt
+
+        prompt_tokens = self.tokenizer.encode(formatted_prompt)
 
         # Active KV Prefix Cache lookup
         matched_prefix, _ = self.kv_cache.match_prefix(prompt_tokens)
@@ -97,7 +104,7 @@ class AarkaInferEngine:
         # Enqueue via AsyncScheduler
         c_event = cancel_event or asyncio.Event()
         queued = await self.scheduler.submit_request(
-            prompt=prompt,
+            prompt=formatted_prompt,
             prompt_tokens=prompt_tokens,
             params=sampling,
             priority=priority,
@@ -113,10 +120,9 @@ class AarkaInferEngine:
 
             first_token_seen = False
             token_count = 0
-            full_response_parts: List[str] = []
 
             async for token_text in self.backend.generate_stream(
-                prompt=prompt,
+                prompt=formatted_prompt,
                 prompt_tokens=prompt_tokens,
                 params=sampling,
                 cancel_event=c_event,
@@ -128,7 +134,6 @@ class AarkaInferEngine:
                     self.metrics.mark_token(trace)
 
                 token_count += 1
-                full_response_parts.append(token_text)
                 yield token_text
 
             self.metrics.complete_request(trace, token_count)
@@ -142,6 +147,39 @@ class AarkaInferEngine:
             raise
         finally:
             self.scheduler.release_slot(queued)
+
+    async def generate(
+        self,
+        prompt: str,
+        params: Optional[SamplingParams] = None,
+        priority: RequestPriority = RequestPriority.HIGH,
+    ) -> str:
+        """Non-streaming complete generation for raw prompts."""
+        collected: List[str] = []
+        async for chunk in self.generate_stream(prompt, params=params, priority=priority):
+            collected.append(chunk)
+        return "".join(collected)
+
+    async def chat_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        params: Optional[SamplingParams] = None,
+        priority: RequestPriority = RequestPriority.HIGH,
+        cancel_event: Optional[asyncio.Event] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Formats conversational messages and streams tokens asynchronously."""
+        if not self._initialized:
+            await self.initialize()
+
+        prompt = self.tokenizer.apply_chat_template(messages, tools=tools, add_generation_prompt=True)
+        async for tok in self.generate_stream(
+            prompt=prompt,
+            params=params,
+            priority=priority,
+            cancel_event=cancel_event,
+        ):
+            yield tok
 
     async def chat(
         self,

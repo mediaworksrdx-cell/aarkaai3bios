@@ -41,6 +41,22 @@ import contextvars
 # Global thread/async-safe request domain tracker for dynamic routing
 request_domain = contextvars.ContextVar("request_domain", default="general")
 
+# Feature flag to enable unified AARKA Infer runtime (default: True)
+USE_AARKA_INFER = os.getenv("USE_AARKA_INFER", "true").lower() in ("true", "1", "yes")
+_infer_adapter = None
+
+def _get_infer_adapter():
+    global _infer_adapter
+    if _infer_adapter is None:
+        try:
+            from aarka_infer.adapters.engine_adapter import AarkaaLegacyAdapter
+            _infer_adapter = AarkaaLegacyAdapter()
+            logger.info("AARKA Infer runtime adapter initialized successfully.")
+        except Exception as e:
+            logger.warning("Could not initialize AARKA Infer adapter (%s); falling back to legacy engine.", e)
+            _infer_adapter = False
+    return _infer_adapter if _infer_adapter is not False else None
+
 
 _LANG_NAMES = {
     "ab": "Abkhazian",
@@ -226,14 +242,7 @@ _LANG_NAMES = {
 }
 
 _GGUF_CANDIDATES = [
-    # 7B Primary Model (Highest Reasoning Quality & High Speed) -- priority 1
-    Path(MODEL_PATH).parent / "aarkaa-7b-q8.gguf",
-    Path(MODEL_PATH).parent / "aarkaa-7b-f16.gguf",
-    Path(MODEL_PATH).parent / "aarkaa-7b-q16.gguf",
-    Path(MODEL_PATH) / "aarkaa-7b-q8.gguf",
-    Path(MODEL_PATH) / "aarkaa-7b-f16.gguf",
-    Path(MODEL_PATH) / "aarkaa-7b-q16.gguf",
-    # 3B Models -- priority 2 (fallback only)
+    # 3B Primary Models (Canonical AARKAA-3B Architecture) -- priority 1
     Path(MODEL_PATH).parent / "aarkaa-3b-q8.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-f16.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-q16.gguf",
@@ -242,6 +251,13 @@ _GGUF_CANDIDATES = [
     Path(MODEL_PATH) / "aarkaa-3b-f16.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-q16.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-f32.gguf",
+    # 7B Auxiliary Models -- priority 2
+    Path(MODEL_PATH).parent / "aarkaa-7b-q8.gguf",
+    Path(MODEL_PATH).parent / "aarkaa-7b-f16.gguf",
+    Path(MODEL_PATH).parent / "aarkaa-7b-q16.gguf",
+    Path(MODEL_PATH) / "aarkaa-7b-q8.gguf",
+    Path(MODEL_PATH) / "aarkaa-7b-f16.gguf",
+    Path(MODEL_PATH) / "aarkaa-7b-q16.gguf",
 ]
 
 
@@ -402,8 +418,19 @@ def _idle_monitor_loop():
 
 
 def init():
-    """Load the AARKAA GGUF model (7B preferred, 3B fallback) directly on CPU."""
+    """Load the AARKAA GGUF model (3B preferred) directly on CPU or via AARKA Infer."""
     global _model_gpu, _is_stub, _gguf_file_path, _gguf_coder_path
+
+    if USE_AARKA_INFER:
+        adapter = _get_infer_adapter()
+        if adapter is not None:
+            try:
+                adapter._run_coroutine_sync(adapter.engine.initialize())
+                if adapter.engine.backend is not None and adapter.engine.backend.is_healthy():
+                    _is_stub = False
+                    logger.info("AARKA Infer initialized and verified as active engine.")
+            except Exception as e:
+                logger.warning("Failed to initialize AARKA Infer in init(): %s", e)
 
     gguf_file = None
     for candidate in _GGUF_CANDIDATES:
@@ -1333,7 +1360,35 @@ def _generate_stream(prompt, max_new_tokens=16384, stop=None, temperature=0.7, f
         if yielded_any:
             return
 
-    # -- 2. Local Fallback (llama.cpp) --
+    # -- 2. AARKA Infer Runtime (Primary Unified Serving) --
+    if USE_AARKA_INFER:
+        infer_adapter = _get_infer_adapter()
+        if infer_adapter is not None:
+            yielded_any = False
+            first_token_seen = False
+            try:
+                for token in _guard_token_stream(
+                    infer_adapter.generate_stream(
+                        prompt,
+                        max_tokens=max_new_tokens,
+                        temperature=temperature,
+                        stop=stop_tokens,
+                    ),
+                    prompt_requests_code=prompt_requests_code,
+                    user_query=clean_user_q,
+                ):
+                    if not first_token_seen:
+                        first_token_seen = True
+                        ttft_ms = (time.perf_counter() - t_start) * 1000.0
+                        _measure_prefix_cache_hit(prompt, "aarka_infer", ttft_ms)
+                    yielded_any = True
+                    yield token
+                if yielded_any:
+                    return
+            except Exception as e:
+                logger.warning("AARKA Infer streaming failed (%s); falling back to legacy llama.cpp", e)
+
+    # -- 3. Local Fallback (llama.cpp) --
     model_instance = _get_model(force_gpu=True, force_general=force_general)
     if _is_stub or model_instance is None:
         yield _stub_response(prompt)
@@ -2837,4 +2892,14 @@ def _build_final_prompt(query, context, intent="", lang="en", mode="production",
 
 def is_available():
     """Whether the real model is loaded."""
+    if USE_AARKA_INFER:
+        adapter = _get_infer_adapter()
+        if adapter is not None:
+            if not adapter.engine._initialized:
+                try:
+                    adapter._run_coroutine_sync(adapter.engine.initialize())
+                except Exception as e:
+                    logger.warning("AARKA Infer on-demand initialization failed: %s", e)
+            if adapter.engine.backend is not None and adapter.engine.backend.is_healthy():
+                return True
     return not _is_stub

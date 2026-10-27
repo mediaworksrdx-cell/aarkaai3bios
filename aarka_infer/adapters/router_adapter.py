@@ -6,6 +6,7 @@ directly to the unified AARKA Infer serving runtime.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from aarka_infer.runtime.engine import AarkaInferEngine
@@ -47,4 +48,20 @@ class InferRouterDispatcher:
             params=params,
             priority=RequestPriority.HIGH,
         )
-        return resp
+        content_text = resp.get("content", "")
+        return {
+            "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+            "object": "chat.completion",
+            "model": resp.get("model", "aarkaa-3b"),
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": content_text,
+                    },
+                    "finish_reason": resp.get("finish_reason", "stop"),
+                }
+            ],
+            "content": content_text,
+        }
