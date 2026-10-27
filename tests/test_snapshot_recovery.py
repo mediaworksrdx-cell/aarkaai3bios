@@ -153,3 +153,45 @@ def test_rollback_preserves_transaction_and_snapshots_on_failure(test_files):
     assert failed_record["snapshots"][0].file_path == os.path.abspath(f1)
     assert failed_record["evidence"]["success"] is False
     assert failed_record["evidence"]["phase"] == "PHASE_1_STAGING"
+
+
+def test_phase2_failure_reverts_partial_mutations_without_state_leak(test_files):
+    """
+    CRITICAL ATOMICITY CHECK:
+    Verifies that if Phase 2 fails on a second file, any previously replaced files
+    in Phase 2 are atomically reverted from undo backups back to the pre-rollback state.
+    Guarantees ZERO partial restoration.
+    """
+    f1, f2, _ = test_files
+    mgr = TransactionalSnapshotManager()
+    mgr.begin_transaction("tx_p2_fail", [f1, f2])
+
+    with open(f1, "w", encoding="utf-8") as f:
+        f.write("Mutated f1 before rollback")
+    with open(f2, "w", encoding="utf-8") as f:
+        f.write("Mutated f2 before rollback")
+
+    orig_replace = os.replace
+    call_count = 0
+
+    def mock_replace(src, dst):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise PermissionError("Simulated file lock on second file")
+        return orig_replace(src, dst)
+
+    with patch("os.replace", side_effect=mock_replace):
+        with pytest.raises(RollbackError, match="Rollback encountered errors during Phase 2"):
+            mgr.rollback_transaction("tx_p2_fail")
+
+    # Both files must remain in their pre-rollback state; no partial restoration!
+    with open(f1, "r", encoding="utf-8") as f:
+        assert f.read() == "Mutated f1 before rollback"
+    with open(f2, "r", encoding="utf-8") as f:
+        assert f.read() == "Mutated f2 before rollback"
+
+    failed_record = mgr.get_failed_transaction("tx_p2_fail")
+    assert failed_record is not None
+    assert failed_record["evidence"]["success"] is False
+    assert failed_record["evidence"]["phase"] == "PHASE_2_EXECUTION"

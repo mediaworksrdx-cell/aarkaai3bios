@@ -185,6 +185,15 @@ def test_architecture_gate_genuine_ast_validation(sparc_workspace):
     assert bad_res.state == StageState.FAIL
     assert bad_res.passed is False
 
+    # Test empty architecture (zero modules analyzed) blocks cleanly
+    empty_res = coord.verify_architecture(
+        task_id="task_arch_empty",
+        files=[]
+    )
+    assert empty_res.state == StageState.BLOCKED
+    assert empty_res.passed is False
+    assert "No architectural or source modules" in empty_res.details
+
 
 def test_refinement_gate_genuine_test_execution(sparc_workspace):
     """Verifies refinement executes genuine tests with real pass rate."""

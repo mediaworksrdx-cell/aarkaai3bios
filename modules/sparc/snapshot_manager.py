@@ -198,8 +198,50 @@ class TransactionalSnapshotManager:
                             recovery_evidence=evidence
                         )
 
-            # ─── PHASE 2: Atomic Replacement & Orphan Cleanup ────────────────────
-            # Phase 1 passed completely. Now atomically swap staging files into place.
+            # ─── PHASE 2: Atomic Replacement & Orphan Cleanup with Zero Partial Restoration ───
+            # Pre-replacement backup: record the pre-rollback live state of all files being touched
+            undo_backups: Dict[str, str] = {}
+            try:
+                for snap in snapshots:
+                    if os.path.exists(snap.file_path):
+                        undo_path = f"{snap.file_path}.aarka_rollback_undo"
+                        with open(snap.file_path, "rb") as src, open(undo_path, "wb") as dst:
+                            dst.write(src.read())
+                        undo_backups[snap.file_path] = undo_path
+            except Exception as e:
+                # Pre-replacement backup failed: abort without touching live files
+                errors.append(f"Pre-replacement backup failed: {e}")
+                for up in undo_backups.values():
+                    try:
+                        if os.path.exists(up):
+                            os.remove(up)
+                    except OSError:
+                        pass
+                for sf in staging_files:
+                    try:
+                        if os.path.exists(sf):
+                            os.remove(sf)
+                    except OSError:
+                        pass
+                evidence = {
+                    "transaction_id": transaction_id,
+                    "restored_files": [],
+                    "unlinked_orphans": [],
+                    "errors": errors,
+                    "phase": "PHASE_2_PREPARATION",
+                    "success": False
+                }
+                self._failed_transactions[transaction_id] = {
+                    "snapshots": snapshots,
+                    "evidence": evidence
+                }
+                raise RollbackError(
+                    f"Rollback aborted prior to live mutation: {e}",
+                    recovery_evidence=evidence
+                )
+
+            # Phase 2 live mutations: replace staging files and remove orphans
+            phase2_failed = False
             for snap in reversed(snapshots):
                 try:
                     if snap.existed and snap.content is not None:
@@ -213,24 +255,45 @@ class TransactionalSnapshotManager:
                                     pass
                             restored_files.append(snap.file_path)
                     else:
-                        # Unlink newly created orphan
                         if os.path.exists(snap.file_path):
                             os.remove(snap.file_path)
                             unlinked_orphans.append(snap.file_path)
                 except Exception as e:
+                    phase2_failed = True
                     errors.append(f"Phase 2 replacement error on '{snap.file_path}': {e}")
+                    break
 
-            evidence = {
-                "transaction_id": transaction_id,
-                "restored_files": restored_files,
-                "unlinked_orphans": unlinked_orphans,
-                "errors": errors,
-                "phase": "PHASE_2_EXECUTION",
-                "success": len(errors) == 0
-            }
+            # If ANY error occurred during Phase 2, atomically undo all live modifications
+            if phase2_failed or errors:
+                for target_file, undo_path in undo_backups.items():
+                    try:
+                        if os.path.exists(undo_path):
+                            os.replace(undo_path, target_file)
+                    except Exception as revert_err:
+                        errors.append(f"Compensating revert error on '{target_file}': {revert_err}")
 
-            if errors:
-                # Retain in failed transactions map so snapshot content is not discarded
+                # Clean up any remaining undo files and staging files
+                for up in undo_backups.values():
+                    try:
+                        if os.path.exists(up):
+                            os.remove(up)
+                    except OSError:
+                        pass
+                for sf in staging_files:
+                    try:
+                        if os.path.exists(sf):
+                            os.remove(sf)
+                    except OSError:
+                        pass
+
+                evidence = {
+                    "transaction_id": transaction_id,
+                    "restored_files": [],
+                    "unlinked_orphans": [],
+                    "errors": errors,
+                    "phase": "PHASE_2_EXECUTION",
+                    "success": False
+                }
                 self._failed_transactions[transaction_id] = {
                     "snapshots": snapshots,
                     "evidence": evidence
@@ -240,9 +303,26 @@ class TransactionalSnapshotManager:
                     **evidence
                 })
                 raise RollbackError(
-                    f"Rollback encountered errors during Phase 2: {'; '.join(errors)}. Snapshots preserved.",
+                    f"Rollback encountered errors during Phase 2. Partial mutations reverted to pre-rollback state: {'; '.join(errors)}. Snapshots preserved.",
                     recovery_evidence=evidence
                 )
+
+            # Clean up undo backup files on complete success
+            for up in undo_backups.values():
+                try:
+                    if os.path.exists(up):
+                        os.remove(up)
+                except OSError:
+                    pass
+
+            evidence = {
+                "transaction_id": transaction_id,
+                "restored_files": restored_files,
+                "unlinked_orphans": unlinked_orphans,
+                "errors": [],
+                "phase": "PHASE_2_EXECUTION",
+                "success": True
+            }
 
             # Success: clean release of active transaction
             del self._active_transactions[transaction_id]

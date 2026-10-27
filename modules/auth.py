@@ -126,25 +126,42 @@ def revoke_token(jti: str, expires_in_seconds: int = 86400 * 31) -> bool:
 
 
 # ─── Password Hashing ────────────────────────────────────────────────────────
-import bcrypt
+try:
+    import bcrypt
+except ImportError:
+    bcrypt = None
 
 
 def verify_password(plain_password: str, hashed_password: str) -> tuple[bool, bool]:
     """Verify a password against its hash.
     
+    Supports native bcrypt, passlib CryptContext, and fallback PBKDF2 context.
     Returns:
         (is_valid, needs_rehash) tuple. When needs_rehash is True, the caller
         should update the stored hash using get_password_hash(plain_password).
     """
     if not hashed_password or not plain_password:
         return False, False
+
     # Bcrypt hashes start with $2b$, $2a$, or $2y$
     if hashed_password.startswith(("$2b$", "$2a$", "$2y$")):
-        try:
-            pwd_bytes = plain_password.encode("utf-8")[:72]
-            return bcrypt.checkpw(pwd_bytes, hashed_password.encode("utf-8")), False
-        except Exception:
-            return False, False
+        if bcrypt is not None:
+            try:
+                pwd_bytes = plain_password.encode("utf-8")[:72]
+                return bcrypt.checkpw(pwd_bytes, hashed_password.encode("utf-8")), False
+            except Exception:
+                return False, False
+        else:
+            try:
+                return pwd_context.verify(plain_password, hashed_password), False
+            except Exception:
+                return False, False
+
+    # Fallback PBKDF2 hashes
+    if hashed_password.startswith("pbkdf2:"):
+        is_valid = pwd_context.verify(plain_password, hashed_password)
+        return is_valid, (is_valid and bcrypt is not None)
+
     # SEC-H2 FIX: Legacy unsalted SHA-256 — verify but flag for immediate rehash.
     if len(hashed_password) == 64:
         import hashlib
@@ -152,14 +169,20 @@ def verify_password(plain_password: str, hashed_password: str) -> tuple[bool, bo
         if is_valid:
             logger.warning("SEC-H2: Legacy SHA-256 hash verified — flagging for bcrypt rehash")
         return is_valid, is_valid  # needs_rehash=True only when valid
-    return False, False
+
+    try:
+        return pwd_context.verify(plain_password, hashed_password), False
+    except Exception:
+        return False, False
 
 
 def get_password_hash(password: str) -> str:
-    """Hash a plain text password using bcrypt with automatic salt generation."""
+    """Hash a plain text password using bcrypt, falling back to pwd_context when bcrypt is unavailable."""
     pwd_bytes = password.encode("utf-8")[:72]
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
+    if bcrypt is not None:
+        salt = bcrypt.gensalt()
+        return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
+    return pwd_context.hash(password)
 
 
 def decode_access_token(token: str) -> dict:

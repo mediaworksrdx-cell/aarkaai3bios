@@ -357,21 +357,31 @@ class SparcSwarmCoordinator:
                 blockers=syntax_errors
             )
 
-        if modules_analyzed > 0 and total_declarations == 0:
+        if modules_analyzed == 0:
+            return StageResult(
+                stage_name="Architecture",
+                passed=False,
+                state=StageState.BLOCKED,
+                score=0.0,
+                details="Architecture BLOCKED: No architectural or source modules were provided or found for analysis.",
+                blockers=["Zero modules analyzed"]
+            )
+
+        if total_declarations == 0:
             return StageResult(
                 stage_name="Architecture",
                 passed=False,
                 state=StageState.FAIL,
                 score=3.0,
-                details="Architecture FAILED: Target modules contain no functional or class interface declarations.",
+                details=f"Architecture FAILED: Analyzed {modules_analyzed} modules but found no class or function interface declarations.",
                 blockers=["No interface contracts declared in source"]
             )
 
-        score = 9.0 if total_declarations > 0 else 8.5
+        score = min(10.0, round(8.5 + min(1.5, total_declarations * 0.1), 2))
         return StageResult(
             stage_name="Architecture",
-            passed=True,
-            state=StageState.PASS,
+            passed=score >= 8.5,
+            state=StageState.PASS if score >= 8.5 else StageState.FAIL,
             score=score,
             details=f"Architecture contracts verified cleanly. {modules_analyzed} modules parsed with zero syntax errors. Declarations={total_declarations}.",
             artifacts=[f"arch_{task_id}.json"]
@@ -383,7 +393,10 @@ class SparcSwarmCoordinator:
         target_files: List[str],
         content_map: Optional[Dict[str, str]]
     ) -> StageResult:
-        """Validates TDD test requirements: Executes real tests, measures pass rates, rejects simulated mocks."""
+        """Validates TDD test requirements: Executes real tests in an isolated child process. Zero in-process exec."""
+        import tempfile
+        import subprocess
+
         # Check if test code provided in content_map or test files in target_files
         test_modules: Dict[str, str] = {}
         if content_map:
@@ -393,97 +406,166 @@ class SparcSwarmCoordinator:
 
         test_files_on_disk = [f for f in target_files if "test" in os.path.basename(f).lower() and os.path.exists(f)]
 
-        # If test code provided in content_map, execute in-process via unittest
+        # 1. If test code provided in content_map, execute in an isolated temporary sandbox process
         if test_modules:
-            suite = unittest.TestSuite()
-            loader = unittest.TestLoader()
+            with tempfile.TemporaryDirectory() as temp_dir:
+                test_file_paths = []
+                for fname, code in (content_map or {}).items():
+                    safe_name = os.path.basename(fname)
+                    if not safe_name.endswith(".py"):
+                        safe_name += ".py"
+                    fpath = os.path.join(temp_dir, safe_name)
+                    with open(fpath, "w", encoding="utf-8") as f:
+                        f.write(code)
+                    if "test" in safe_name.lower():
+                        test_file_paths.append(safe_name)
 
-            for mod_name, code in test_modules.items():
+                runner_template = """import sys
+import unittest
+
+loader = unittest.TestLoader()
+suite = unittest.TestSuite()
+
+for tf in __TEST_FILES__:
+    try:
+        mod_name = tf[:-3]
+        if mod_name in sys.modules:
+            del sys.modules[mod_name]
+        mod = __import__(mod_name)
+        for name in dir(mod):
+            obj = getattr(mod, name)
+            if isinstance(obj, type) and issubclass(obj, unittest.TestCase):
+                suite.addTests(loader.loadTestsFromTestCase(obj))
+    except Exception as e:
+        sys.stderr.write("IMPORT_ERROR: " + str(e) + chr(10))
+        sys.exit(2)
+
+runner = unittest.TextTestRunner(stream=sys.stdout, verbosity=2)
+result = runner.run(suite)
+sys.exit(0 if result.wasSuccessful() else 1)
+"""
+                runner_code = runner_template.replace("__TEST_FILES__", repr(test_file_paths))
+                runner_path = os.path.join(temp_dir, "_isolated_runner.py")
+                with open(runner_path, "w", encoding="utf-8") as f:
+                    f.write(runner_code)
+
                 try:
-                    # Compile test module safely into isolated namespace
-                    code_obj = compile(code, mod_name, "exec")
-                    test_scope: Dict[str, Any] = {}
-                    exec(code_obj, test_scope)
-
-                    # Extract test cases
-                    for obj in test_scope.values():
-                        if isinstance(obj, type) and issubclass(obj, unittest.TestCase):
-                            suite.addTests(loader.loadTestsFromTestCase(obj))
-                except Exception as e:
-                    return StageResult(
-                        stage_name="Refinement",
-                        passed=False,
-                        state=StageState.FAIL,
-                        score=0.0,
-                        details=f"Refinement FAILED: Test suite compilation error in '{mod_name}': {e}",
-                        blockers=[f"Compilation error: {e}"]
+                    proc = subprocess.run(
+                        [sys.executable, runner_path],
+                        cwd=temp_dir,
+                        capture_output=True,
+                        text=True,
+                        timeout=30.0,
+                        shell=False
                     )
-
-            if suite.countTestCases() == 0:
-                return StageResult(
-                    stage_name="Refinement",
-                    passed=False,
-                    state=StageState.BLOCKED,
-                    score=0.0,
-                    details="Refinement BLOCKED: Test suite contains 0 runnable test cases.",
-                    blockers=["Empty test suite"]
-                )
-
-            # Run test suite
-            stream = io.StringIO()
-            runner = unittest.TextTestRunner(stream=stream, verbosity=2)
-            result = runner.run(suite)
-
-            tests_run = result.testsRun
-            errors = len(result.errors)
-            failures = len(result.failures)
-            passed_tests = tests_run - (errors + failures)
-            pass_rate = (passed_tests / tests_run) if tests_run > 0 else 0.0
-
-            score = round(pass_rate * 10.0, 2)
-            is_passed = (pass_rate == 1.0) and (score >= 8.5)
-
-            details = f"TDD test suite: {tests_run} tests run, {failures} failures, {errors} errors. Real pass rate: {pass_rate * 100:.1f}%."
-            blockers = []
-            if failures > 0 or errors > 0:
-                blockers.append(f"{failures} failures and {errors} errors in test execution")
-
-            return StageResult(
-                stage_name="Refinement",
-                passed=is_passed,
-                state=StageState.PASS if is_passed else StageState.FAIL,
-                score=score,
-                details=details,
-                blockers=blockers,
-                execution_output=stream.getvalue(),
-                artifacts=[f"test_run_{task_id}.log"]
-            )
-
-        elif test_files_on_disk:
-            # Run test files on disk via unittest loader
-            loader = unittest.TestLoader()
-            suite = unittest.TestSuite()
-            for tf in test_files_on_disk:
-                dir_name = os.path.dirname(tf) or "."
-                file_name = os.path.basename(tf)
-                try:
-                    loaded = loader.discover(start_dir=dir_name, pattern=file_name)
-                    suite.addTests(loaded)
+                except subprocess.TimeoutExpired:
+                    return StageResult(
+                        stage_name="Refinement",
+                        passed=False,
+                        state=StageState.FAIL,
+                        score=0.0,
+                        details="Refinement FAILED: Test suite execution timed out after 30 seconds.",
+                        blockers=["Test execution timeout (30s)"]
+                    )
                 except Exception as e:
                     return StageResult(
                         stage_name="Refinement",
                         passed=False,
                         state=StageState.FAIL,
                         score=0.0,
-                        details=f"Refinement FAILED: Failed discovering tests in '{tf}': {e}",
+                        details=f"Refinement FAILED: Isolated child process error: {e}",
                         blockers=[str(e)]
                     )
 
-            stream = io.StringIO()
-            runner = unittest.TextTestRunner(stream=stream, verbosity=2)
-            result = runner.run(suite)
+                out = proc.stdout + "\n" + proc.stderr
+                if "IMPORT_ERROR:" in out:
+                    err_lines = [l for l in out.splitlines() if "IMPORT_ERROR:" in l]
+                    err_msg = err_lines[0] if err_lines else "Test suite import error"
+                    return StageResult(
+                        stage_name="Refinement",
+                        passed=False,
+                        state=StageState.FAIL,
+                        score=0.0,
+                        details=f"Refinement FAILED: {err_msg}",
+                        blockers=[err_msg]
+                    )
 
-            tests_run = result.testsRun
+                ran_match = re.search(r"Ran (\d+) tests?", out)
+                tests_run = int(ran_match.group(1)) if ran_match else 0
+                if tests_run == 0:
+                    return StageResult(
+                        stage_name="Refinement",
+                        passed=False,
+                        state=StageState.BLOCKED,
+                        score=0.0,
+                        details="Refinement BLOCKED: Test suite contains 0 runnable test cases.",
+                        blockers=["Empty test suite"]
+                    )
+
+                fail_match = re.search(r"failures=(\d+)", out)
+                err_match = re.search(r"errors=(\d+)", out)
+                failures = int(fail_match.group(1)) if fail_match else (0 if proc.returncode == 0 else 1)
+                errors = int(err_match.group(1)) if err_match else 0
+                passed_tests = tests_run - (failures + errors)
+                pass_rate = max(0.0, passed_tests / tests_run) if tests_run > 0 else 0.0
+
+                score = round(pass_rate * 10.0, 2)
+                is_passed = (proc.returncode == 0) and (pass_rate == 1.0) and (score >= 8.5)
+
+                details = f"TDD test suite: {tests_run} tests run, {failures} failures, {errors} errors. Real pass rate: {pass_rate * 100:.1f}%."
+                blockers = []
+                if failures > 0 or errors > 0 or proc.returncode != 0:
+                    blockers.append(f"{failures} failures and {errors} errors in isolated test execution")
+
+                return StageResult(
+                    stage_name="Refinement",
+                    passed=is_passed,
+                    state=StageState.PASS if is_passed else StageState.FAIL,
+                    score=score,
+                    details=details,
+                    blockers=blockers,
+                    execution_output=out,
+                    artifacts=[f"test_run_{task_id}.log"]
+                )
+
+        # 2. If test files on disk, execute via isolated subprocess runner
+        elif test_files_on_disk:
+            test_dir = os.path.abspath(os.path.dirname(test_files_on_disk[0]))
+            sub_env = os.environ.copy()
+            sub_env["PYTHONPATH"] = f"{test_dir}{os.pathsep}{sub_env.get('PYTHONPATH', '')}"
+            test_basenames = [os.path.basename(f) for f in test_files_on_disk]
+            try:
+                proc = subprocess.run(
+                    [sys.executable, "-m", "unittest"] + test_basenames,
+                    cwd=test_dir,
+                    env=sub_env,
+                    capture_output=True,
+                    text=True,
+                    timeout=30.0,
+                    shell=False
+                )
+            except subprocess.TimeoutExpired:
+                return StageResult(
+                    stage_name="Refinement",
+                    passed=False,
+                    state=StageState.FAIL,
+                    score=0.0,
+                    details="Refinement FAILED: Test execution timed out after 30 seconds.",
+                    blockers=["Test execution timeout (30s)"]
+                )
+            except Exception as e:
+                return StageResult(
+                    stage_name="Refinement",
+                    passed=False,
+                    state=StageState.FAIL,
+                    score=0.0,
+                    details=f"Refinement FAILED: Failed executing test subprocess: {e}",
+                    blockers=[str(e)]
+                )
+
+            out = proc.stdout + "\n" + proc.stderr
+            ran_match = re.search(r"Ran (\d+) tests?", out)
+            tests_run = int(ran_match.group(1)) if ran_match else 0
             if tests_run == 0:
                 return StageResult(
                     stage_name="Refinement",
@@ -494,13 +576,15 @@ class SparcSwarmCoordinator:
                     blockers=["Zero test cases loaded"]
                 )
 
-            failures = len(result.failures)
-            errors = len(result.errors)
+            fail_match = re.search(r"failures=(\d+)", out)
+            err_match = re.search(r"errors=(\d+)", out)
+            failures = int(fail_match.group(1)) if fail_match else (0 if proc.returncode == 0 else 1)
+            errors = int(err_match.group(1)) if err_match else 0
             passed_tests = tests_run - (failures + errors)
-            pass_rate = passed_tests / tests_run
+            pass_rate = max(0.0, passed_tests / tests_run) if tests_run > 0 else 0.0
 
             score = round(pass_rate * 10.0, 2)
-            is_passed = (pass_rate == 1.0) and (score >= 8.5)
+            is_passed = (proc.returncode == 0) and (pass_rate == 1.0) and (score >= 8.5)
 
             return StageResult(
                 stage_name="Refinement",
@@ -508,19 +592,20 @@ class SparcSwarmCoordinator:
                 state=StageState.PASS if is_passed else StageState.FAIL,
                 score=score,
                 details=f"TDD test suite on disk: {tests_run} tests run, {failures} failures, {errors} errors. Real pass rate: {pass_rate * 100:.1f}%.",
-                blockers=[f"Test failures: {failures}"] if failures > 0 else [],
+                blockers=[f"{failures} failures and {errors} errors in test execution"] if (failures > 0 or errors > 0) else [],
+                execution_output=out,
                 artifacts=[f"test_run_{task_id}.log"]
             )
 
-        else:
-            return StageResult(
-                stage_name="Refinement",
-                passed=False,
-                state=StageState.BLOCKED,
-                score=0.0,
-                details="Refinement BLOCKED: No test suite or test code provided for TDD gate validation.",
-                blockers=["No test suite provided"]
-            )
+        # 3. No test code or files provided
+        return StageResult(
+            stage_name="Refinement",
+            passed=False,
+            state=StageState.BLOCKED,
+            score=0.0,
+            details="Refinement BLOCKED: No test modules or test files specified for execution.",
+            blockers=["Missing test suite inputs"]
+        )
 
     def _stage_completion(
         self,

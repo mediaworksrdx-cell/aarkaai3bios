@@ -137,7 +137,10 @@ def _init_modules() -> None:
     try:
         from modules import aarkaa_engine
         aarkaa_engine.init()
-        status = "ok (live)" if aarkaa_engine.is_available() else "ok (stub)"
+        if aarkaa_engine.is_available():
+            status = "ok (live)"
+        else:
+            status = "degraded (stub: weights missing)"
         _module_status["aarkaa_engine"] = status
         logger.info("✓ AARKAA-3B engine: %s", status)
     except Exception as exc:
@@ -273,7 +276,7 @@ async def lifespan(app: FastAPI):
         critical = ["database", "embeddings", "aarkaa_engine"]
         for mod in critical:
             status = _module_status.get(mod, "missing")
-            if not status.startswith("ok"):
+            if not status.startswith("ok") or "stub" in status.lower():
                 logger.critical(
                     "CRITICAL module '%s' is DOWN (%s) — aborting production startup!",
                     mod, status,
@@ -1048,7 +1051,7 @@ async def root():
 @app.get("/health", response_model=HealthResponse, tags=["info"])
 async def health():
     """System health check – reports module status."""
-    all_ok = all(v.startswith("ok") for v in _module_status.values())
+    all_ok = all((v.startswith("ok") and "stub" not in v.lower()) for v in _module_status.values())
     return HealthResponse(
         status="healthy" if all_ok else "degraded",
         version=APP_VERSION,

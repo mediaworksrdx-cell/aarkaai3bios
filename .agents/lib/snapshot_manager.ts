@@ -110,7 +110,42 @@ export class TransactionalSnapshotManager {
       }
     }
 
-    // ─── PHASE 2: Atomic Swap & Orphan Cleanup ───────────────────────────
+    // ─── PHASE 2: Atomic Swap & Orphan Cleanup with Zero Partial Restoration ───
+    const undoBackups: Map<string, string> = new Map();
+    try {
+      for (const snap of snapshots) {
+        try {
+          await fs.access(snap.filePath);
+          const undoPath = `${snap.filePath}.aarka_rollback_undo`;
+          await fs.copyFile(snap.filePath, undoPath);
+          undoBackups.set(snap.filePath, undoPath);
+        } catch {
+          // File does not exist prior to Phase 2: no undo backup needed
+        }
+      }
+    } catch (prepErr: any) {
+      errors.push(`Phase 2 preparation failed: ${prepErr.message}`);
+      for (const up of undoBackups.values()) {
+        try { await fs.unlink(up); } catch {}
+      }
+      for (const sf of stagingFiles) {
+        try { await fs.unlink(sf); } catch {}
+      }
+      const evidence: RollbackEvidence = {
+        transactionId,
+        restoredFiles: [],
+        unlinkedOrphans: [],
+        errors,
+        phase: 'PHASE_2_PREPARATION',
+        success: false
+      };
+      this.failedTransactions.set(transactionId, { snapshots, evidence });
+      const err = new Error(`Rollback aborted before live mutation: ${prepErr.message}`);
+      (err as any).evidence = evidence;
+      throw err;
+    }
+
+    let phase2Failed = false;
     for (let i = snapshots.length - 1; i >= 0; i--) {
       const snap = snapshots[i];
       try {
@@ -121,6 +156,8 @@ export class TransactionalSnapshotManager {
           } catch (unlinkErr: any) {
             if (unlinkErr.code !== 'ENOENT') {
               errors.push(`Unlink error on ${snap.filePath}: ${unlinkErr.message}`);
+              phase2Failed = true;
+              break;
             }
           }
         } else if (snap.content) {
@@ -129,25 +166,45 @@ export class TransactionalSnapshotManager {
           restoredFiles.push(snap.filePath);
         }
       } catch (err: any) {
+        phase2Failed = true;
         errors.push(`Phase 2 replacement error on ${snap.filePath}: ${err.message}`);
+        break;
       }
     }
 
-    const evidence: RollbackEvidence = {
-      transactionId,
-      restoredFiles,
-      unlinkedOrphans,
-      errors,
-      phase: 'PHASE_2_EXECUTION',
-      success: errors.length === 0
-    };
+    // Revert partial mutations if ANY failure occurred in Phase 2
+    if (phase2Failed || errors.length > 0) {
+      for (const [targetFile, undoPath] of undoBackups.entries()) {
+        try {
+          await fs.rename(undoPath, targetFile);
+        } catch (revertErr: any) {
+          errors.push(`Compensating revert error on ${targetFile}: ${revertErr.message}`);
+        }
+      }
+      for (const up of undoBackups.values()) {
+        try { await fs.unlink(up); } catch {}
+      }
+      for (const sf of stagingFiles) {
+        try { await fs.unlink(sf); } catch {}
+      }
 
-    if (errors.length > 0) {
-      // Preserve snapshots in failed map
+      const evidence: RollbackEvidence = {
+        transactionId,
+        restoredFiles: [],
+        unlinkedOrphans: [],
+        errors,
+        phase: 'PHASE_2_EXECUTION',
+        success: false
+      };
       this.failedTransactions.set(transactionId, { snapshots, evidence });
-      const err = new Error(`Rollback completed with Phase 2 errors: ${errors.join('; ')}. Snapshots preserved.`);
+      const err = new Error(`Rollback encountered errors during Phase 2. Partial changes reverted to pre-rollback state: ${errors.join('; ')}`);
       (err as any).evidence = evidence;
       throw err;
+    }
+
+    // Clean up undo files on complete success
+    for (const up of undoBackups.values()) {
+      try { await fs.unlink(up); } catch {}
     }
 
     // Success: clean release
