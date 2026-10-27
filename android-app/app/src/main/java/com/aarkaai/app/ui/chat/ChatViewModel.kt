@@ -572,9 +572,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         model: String,
         effort: String
     ) {
+        val mode = if (model == "aarka-sparc-swarm" || query.startsWith("/sparc") || query.startsWith("@sparc")) "sparc" else null
         try {
             var hasReceivedTokens = false
-            SseClient.streamPrompt(tokenHeader, query, currentSessionId, model, effort).collect { token ->
+            SseClient.streamPrompt(tokenHeader, query, currentSessionId, model, effort, mode = mode).collect { token ->
                 hasReceivedTokens = true
                 appendToLoading(targetConversationId, token)
             }
@@ -587,7 +588,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             val response = RetrofitClient.api.sendPrompt(
                 token = tokenHeader,
-                request = PromptRequest(query = query, session_id = currentSessionId, model = model, effort = effort)
+                request = PromptRequest(query = query, session_id = currentSessionId, model = model, effort = effort, mode = mode)
             )
             replaceLoading(
                 targetConversationId,

@@ -18,9 +18,9 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-KEY_PATH = r"C:\Users\daarv\Downloads\market_key.pem"
+KEY_PATH = r"C:\Users\daarv\.ssh\intelligence.pem"
 REMOTE_USER = "azureuser"
-REMOTE_IP = "20.80.83.151"
+REMOTE_IP = "138.91.105.85"
 REMOTE_HOST = f"{REMOTE_USER}@{REMOTE_IP}"
 REMOTE_DIR = "/home/azureuser/aarkaai3b"
 ARCHIVE_NAME = "deploy_latest_azure.tar.gz"
@@ -62,6 +62,8 @@ def create_archive():
             "main.py",
             "middleware.py",
             "modal_server.py",
+            "requirements.txt",
+            "pyproject.toml",
         ]
         for rf in root_files:
             if os.path.exists(rf):
@@ -73,7 +75,7 @@ def create_archive():
                 return None
             return tarinfo
 
-        for d in ["pipeline", "modules", "routers", "skills"]:
+        for d in ["pipeline", "modules", "routers", "skills", ".agents", "tests"]:
             if os.path.exists(d):
                 tar.add(d, arcname=d, filter=filter_pycache)
                 print(f"  + Added directory: {d}/")
@@ -98,6 +100,8 @@ def create_archive():
     print(f"Archive created: {ARCHIVE_NAME} ({size_mb:.2f} MB)")
 
 def deploy():
+    skip_frontend = "--skip-frontend" in sys.argv or "--backend-only" in sys.argv
+
     create_archive()
 
     print("\n[2/5] Uploading archive to Azure VM via SCP...")
@@ -107,36 +111,40 @@ def deploy():
         return False
 
     print("\n[3/5] Extracting archive on Azure VM...")
-    extract_cmd = f"cd {REMOTE_DIR} && tar -xzf {ARCHIVE_NAME} && rm -f {ARCHIVE_NAME}"
+    extract_cmd = f"cd {REMOTE_DIR} && tar -xzf {ARCHIVE_NAME} --overwrite && rm -f {ARCHIVE_NAME}"
     res = run_ssh(extract_cmd)
     if res.returncode != 0:
         print("Extract failed!", res.stderr)
         return False
 
-    print("\n[4/5] Building Next.js frontend on Azure VM...")
-    build_cmd = f"cd {REMOTE_DIR}/frontend && rm -rf .next && npm run build"
-    res = run_ssh(build_cmd)
-    if res.returncode != 0:
-        print("Frontend build note / err:", res.stderr)
+    if not skip_frontend and os.path.exists("frontend"):
+        print("\n[4/5] Building Next.js frontend on Azure VM...")
+        build_cmd = f"cd {REMOTE_DIR}/frontend && rm -rf .next && npm run build"
+        res = run_ssh(build_cmd)
+        if res.returncode != 0:
+            print("Frontend build note / err:", res.stderr)
+        restart_cmd = "pm2 restart aarka-backend && pm2 restart aarka-frontend && pm2 list"
+    else:
+        print("\n[4/5] Skipping frontend build (backend-only deployment mode)...")
+        restart_cmd = "pm2 restart aarka-backend && pm2 list"
 
-    print("\n[5/5] Restarting PM2 aarka-backend and aarka-frontend...")
-    restart_cmd = "pm2 restart aarka-backend && pm2 restart aarka-frontend && pm2 list"
+    print("\n[5/5] Restarting PM2 processes on Azure...")
     res = run_ssh(restart_cmd)
 
     if os.path.exists(ARCHIVE_NAME):
         os.remove(ARCHIVE_NAME)
 
-    print("\nValidating backend health on Azure...")
+    print("\nValidating backend health on Azure VM...")
     time.sleep(3)
     try:
         resp = requests.get(f"http://{REMOTE_IP}/health", timeout=10)
-        print(f"Backend health status: {resp.status_code} -> {resp.text[:100]}")
+        print(f"Backend health status (HTTP): {resp.status_code} -> {resp.text[:120]}")
     except Exception as e:
         print(f"Health check warning: {e}")
 
     try:
         resp2 = requests.get(f"http://{REMOTE_IP}", timeout=10)
-        print(f"Frontend web status: {resp2.status_code}")
+        print(f"Frontend web status (HTTP): {resp2.status_code}")
     except Exception as e:
         print(f"Frontend check warning: {e}")
 

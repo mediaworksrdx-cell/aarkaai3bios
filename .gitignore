@@ -131,4 +131,6 @@ workspace/
 chroma_db/
 *.tsbuildinfo
 *.jsonl
+.tmp.*/
+.tmp*
 

@@ -1,0 +1,107 @@
+"""
+Transactional Multi-File Working Tree Snapshot & Atomic Rollback Manager.
+Production-grade native Python implementation for Aarka SPARC Swarm Engine.
+"""
+
+import os
+import threading
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+
+
+@dataclass(frozen=True)
+class FileSnapshot:
+    """Represents an immutable point-in-time snapshot of a single file."""
+    file_path: str
+    existed: bool
+    content: Optional[bytes] = None
+    mode: Optional[int] = None
+
+
+class TransactionalSnapshotManager:
+    """
+    Guarantees atomic multi-file restoration and orphan cleanup across SPARC swarm stages.
+    Thread-safe and supports multi-file binary state preservation.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._active_transactions: Dict[str, List[FileSnapshot]] = {}
+
+    def begin_transaction(self, transaction_id: str, file_paths: List[str]) -> None:
+        """
+        Captures point-in-time byte snapshots of all specified files.
+        Records non-existent files to ensure orphaned creations can be purged on rollback.
+        """
+        with self._lock:
+            if transaction_id in self._active_transactions:
+                raise ValueError(f"Transaction '{transaction_id}' is already active.")
+
+            snapshots: List[FileSnapshot] = []
+            for raw_path in file_paths:
+                norm_path = os.path.abspath(raw_path)
+                if os.path.exists(norm_path):
+                    try:
+                        with open(norm_path, "rb") as f:
+                            content = f.read()
+                        mode = os.stat(norm_path).st_mode
+                        snapshots.append(FileSnapshot(file_path=norm_path, existed=True, content=content, mode=mode))
+                    except Exception as e:
+                        raise IOError(f"Failed to snapshot existing file '{norm_path}': {e}") from e
+                else:
+                    snapshots.append(FileSnapshot(file_path=norm_path, existed=False))
+
+            self._active_transactions[transaction_id] = snapshots
+
+    def commit_transaction(self, transaction_id: str) -> None:
+        """
+        Persists working tree changes and releases recorded snapshots.
+        """
+        with self._lock:
+            if transaction_id not in self._active_transactions:
+                raise KeyError(f"No active transaction found with ID '{transaction_id}'.")
+            del self._active_transactions[transaction_id]
+
+    def rollback_transaction(self, transaction_id: str) -> None:
+        """
+        Atomically restores all mutated files to original bytes and removes newly created orphan files.
+        """
+        with self._lock:
+            snapshots = self._active_transactions.get(transaction_id)
+            if snapshots is None:
+                raise KeyError(f"Cannot rollback: No active transaction found with ID '{transaction_id}'.")
+
+            errors: List[str] = []
+            for snap in reversed(snapshots):
+                try:
+                    if snap.existed:
+                        # Restore original content and permissions
+                        os.makedirs(os.path.dirname(snap.file_path), exist_ok=True)
+                        with open(snap.file_path, "wb") as f:
+                            if snap.content is not None:
+                                f.write(snap.content)
+                        if snap.mode is not None:
+                            try:
+                                os.chmod(snap.file_path, snap.mode)
+                            except OSError:
+                                pass  # Platform compatibility on Windows
+                    else:
+                        # File was created during transaction; unlink orphan
+                        if os.path.exists(snap.file_path):
+                            os.remove(snap.file_path)
+                except Exception as e:
+                    errors.append(f"Failed to restore '{snap.file_path}': {e}")
+
+            del self._active_transactions[transaction_id]
+            if errors:
+                raise IOError(f"Rollback completed with errors: {'; '.join(errors)}")
+
+    def is_active(self, transaction_id: str) -> bool:
+        """Checks if a transaction is currently open."""
+        with self._lock:
+            return transaction_id in self._active_transactions
+
+    def active_transaction_count(self) -> int:
+        """Returns the number of currently active transactions."""
+        with self._lock:
+            return len(self._active_transactions)

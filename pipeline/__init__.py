@@ -16,6 +16,11 @@ from pipeline.circuit_breaker import (  # noqa: F401
     _screener_agent,
 )
 from pipeline.helpers import *  # noqa: F401,F403
+from pipeline.helpers import (  # noqa: F401
+    _detect_language,
+    _detect_requested_language,
+    _has_live_finance_intent,
+)
 from pipeline.context import ContextResult  # noqa: F401
 from pipeline.post_process import _post_process  # noqa: F401
 from pipeline.core import process_query, stream_query  # noqa: F401

@@ -1,4 +1,4 @@
-﻿package com.aarkaai.app.ui.skills
+package com.aarkaai.app.ui.skills
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -69,6 +69,8 @@ val ALL_SKILL_CATEGORIES = listOf(
         title = "Autonomous Subagents & Orchestration",
         icon = Icons.Outlined.Memory,
         skills = listOf(
+            SkillItem("sparc", "5-stage autonomous SPARC pipeline: Specification, Pseudocode, Architecture, TDD Refinement, and Completion."),
+            SkillItem("ruvnet-swarm", "Multi-agent swarm orchestration and SPARC engineering workflow powered by ruflo and RuVector."),
             SkillItem("skill-router", "Vector FAISS semantic skill discovery and automatic priority execution pipeline."),
             SkillItem("ai-ml", "Dataset pipeline review, training methodologies, evaluation benchmarks, and inference profiling."),
             SkillItem("git-guardrails", "Pre-execution git command interception blocking destructive pushes or resets."),

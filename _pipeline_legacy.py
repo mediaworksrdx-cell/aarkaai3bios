@@ -1253,6 +1253,33 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
     # Track the active request domain for engine model routing
     aarkaa_engine.request_domain.set(domain)
 
+    # ── 1_sparc. SPARC Swarm Pipeline Integration (Synchronous) ───────────
+    import modules.sparc_bridge as sparc_bridge
+    if sparc_bridge.is_sparc_mode(mode, query):
+        logger.info("SPARC Swarm execution pipeline triggered for query: %s (mode=%s)", query[:80], mode)
+        sparc_res = sparc_bridge.execute_sparc_swarm(query=query, user_id=user_id, session_id=session_id)
+        report = sparc_bridge.format_sparc_report(sparc_res, query)
+        elapsed = round(time.perf_counter() - start, 3)
+
+        try:
+            memory.store_conversation(
+                user_id, session_id, query, report,
+                intent="sparc_engineering",
+                confidence=0.98,
+                source="sparc_swarm:ruvector:ruflo"
+            )
+        except Exception as mem_err:
+            logger.warning("Failed to store SPARC conversation: %s", mem_err)
+
+        return PromptResponse(
+            response=report,
+            intent="sparc_engineering",
+            confidence=0.98,
+            sources=["sparc_swarm", "ruvector", "ruflo"],
+            detected_language=detected_lang,
+            processing_time=elapsed,
+        )
+
     # ── 1a. Hybrid Query Router (feature-flagged) ─────────────────────────
     # When enabled, decomposes the query into typed sub-queries, executes
     # them in parallel across data sources, fuses context, then synthesizes.
@@ -2179,6 +2206,42 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
     
     # Track the active request domain for engine model routing
     aarkaa_engine.request_domain.set(domain)
+
+    # ── 1_sparc. SPARC Swarm Pipeline Integration (Streaming) ─────────────
+    import modules.sparc_bridge as sparc_bridge
+    if sparc_bridge.is_sparc_mode(mode, query) or model_override == "aarka-sparc-swarm":
+        logger.info("SPARC Swarm execution pipeline triggered in stream: %s (mode=%s)", query[:80], mode)
+        yield {"type": "status", "status": "Initializing SPARC Autonomous Swarm Pipeline..."}
+        yield {
+            "type": "metadata",
+            "intent": "sparc_engineering",
+            "sources": ["sparc_swarm", "ruvector", "ruflo"],
+            "detected_language": detected_lang
+        }
+        yield {"type": "status", "status": "Executing 5-Stage Verification Gates (Spec, Pseudocode, Architecture, TDD Refinement, Completion)..."}
+        import asyncio as _asyncio
+        sparc_res = await _asyncio.to_thread(sparc_bridge.execute_sparc_swarm, query, user_id, session_id)
+        report = sparc_bridge.format_sparc_report(sparc_res, query)
+        elapsed = round(time.perf_counter() - start, 3)
+
+        try:
+            memory.store_conversation(
+                user_id, session_id, query, report,
+                intent="sparc_engineering",
+                confidence=0.98,
+                source="sparc_swarm:ruvector:ruflo"
+            )
+        except Exception as mem_err:
+            logger.warning("Failed to store SPARC conversation: %s", mem_err)
+
+        chunk_size = 64
+        for i in range(0, len(report), chunk_size):
+            yield {"type": "content", "token": report[i:i + chunk_size]}
+            await _asyncio.sleep(0.002)
+
+        yield {"type": "final", "processing_time": elapsed}
+        yield {"type": "done"}
+        return
 
     # ── 1a. Hybrid Query Router — Streaming (feature-flagged) ─────────────
     from config import HQR_ENABLED

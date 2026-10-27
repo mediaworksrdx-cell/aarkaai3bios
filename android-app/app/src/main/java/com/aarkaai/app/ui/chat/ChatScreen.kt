@@ -727,6 +727,7 @@ fun AarkaFloatingChatInput(
                         ) {
                             Text(
                                 text = when {
+                                    selectedModel == "aarka-sparc-swarm" -> "🛸 SPARC Swarm"
                                     selectedModel == "gemini-3.7" -> "✨ Gemini 3.7"
                                     selectedModel.contains("claude") || selectedModel.contains("sonnet") -> "🟣 Claude Sonnet 5"
                                     else -> "⚡ Aarka AI"
@@ -1600,6 +1601,7 @@ fun AiMessageRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = when {
+                        message.modelUsed == "aarka-sparc-swarm" -> "SPARC Swarm"
                         message.modelUsed?.contains("Gemini", ignoreCase = true) == true || message.modelUsed == "gemini-3.7" -> "Gemini 3.7"
                         message.modelUsed?.contains("Claude", ignoreCase = true) == true || message.modelUsed?.contains("sonnet", ignoreCase = true) == true -> "Claude Sonnet 5"
                         else -> "Aarka AI"

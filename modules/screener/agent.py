@@ -296,9 +296,10 @@ class ScreenerAgent:
         """
         q_low = query.lower()
 
-        # Exclude meta/explanatory queries asking ABOUT the screener
+        # Exclude meta/explanatory queries asking ABOUT the screener or CS/technical algorithms
         meta_patterns = [
             r"\b(can you guarantee|guarantee that|how do you guarantee|how does (it|the screener)|is (it|this|that) hardcoded|are (these|they) hardcoded|explain how|demonstrate with|demonstrate how|why did you (return|select|give)|verify that)\b",
+            r"\b(bloom|kalman|particle|butterworth|wiener|gaussian|sobel|laplacian|bilateral|convolution|css|hardware|air|oil|coffee|water|spam)\s+filters?\b",
         ]
         if any(re.search(pat, q_low) for pat in meta_patterns):
             return False

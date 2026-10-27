@@ -38,33 +38,27 @@
   * **Proceed immediately** when ALL of these are true: the answer is based on verified code, documentation, or authoritative sources; the change is isolated to a well-understood area; similar patterns exist in the codebase.
   * **Proceed but verify** (run tests, double-check output) when ANY of these are true: the answer relies on inferred behavior not directly confirmed by source; the change touches multiple modules or shared interfaces; the technology or API is unfamiliar.
   * **Pause and ask the user** when ANY of these are true: the requirement is ambiguous or contradictory; multiple valid approaches exist with significant trade-offs; the answer requires domain knowledge the agent does not have; the change is irreversible or high-risk (data deletion, production deployment).
-* **Orchestration Workflow**:
+* **SPARC Swarm Orchestration Workflow (`ruflo`)**:
   ```
   User Request
         │
         ▼
-  Intent Detection
+  Intent Detection & Hybrid Memory Context (RuVector + MCP Graph)
         │
         ▼
-  Skill Router
-        ├── 0 skills ──► Base LLM Reasoning
-        ├── 1 skill  ──► Execute Skill (SKILL.md)
-        └── N skills ──► Orchestrate (Skill Priority Sequence)
+  Supervisor Agent (Task DAG & Transactional Working-Tree Snapshot)
         │
-        ▼
-  Research (Bounded Depth)
+        ├── Stage 1: Specification (Invariants, Pre/Post-Conditions, Boundaries)
         │
-        ▼
-  Plan (Only if significant or multi-file; bypass if trivial)
+        ├── Stage 2: Pseudocode (Algorithm, Asymptotic Bounds O(...), Invariants)
         │
-        ▼
-  Implementation (Sequential & Controlled)
+        ├── Stage 3: Architecture (Contracts & Interface Seams via Compiler)
         │
-        ▼
-  Verification (Compile, test, and write walkthrough.md)
+        ├── Stage 4: Refinement (TDD Unit Testing, Line Coverage >= 85%, Lint)
         │
-        ▼
-  Final Response (Markdown, factual, no self-praise)
+        └── Stage 5: Completion (Empirical Score >= 8.5/10 -> Commit Transaction)
+                    │
+                    └── [On Any Failure] ──► Atomic Working-Tree Rollback
   ```
 
 ## 3. Response Quality Check & Answering Quality Rules
@@ -103,9 +97,11 @@ When scoring technical implementations, documents, or architectures, use the fol
   * For Finance & Quant Math: Implement formulas precisely, accounting for risk variables, distributions, and boundary checks.
 * **Mandatory Edge Verification:** All code and architecture answers must explicitly handle edge constraints, empty states, boundary overflows, error recoveries, and memory allocations. All code blocks must compile/interpret cleanly and run safely.
 
-## 7. Persistent Memory Protocols (MCP Knowledge Graph)
-* **Memory Architecture:** Long-term memory across sessions is powered by the local Model Context Protocol (MCP) knowledge graph server backed by persistent storage at `~/.gemini/memory/memory.jsonl`.
-* **Proactive Context Retrieval:** When addressing tasks that depend on previous project architecture, domain modeling, user preferences, or past decisions, invoke memory tools (`search_nodes`, `open_nodes`) to retrieve relevant entity nodes and relationships.
+## 7. Persistent Memory Protocols (Dual-Tier Hybrid Memory Fabric)
+* **Memory Architecture:** Long-term memory across sessions is powered by a **Dual-Tier Hybrid Memory Fabric**:
+  1. **Tier 1 (Symbolic & Relational):** The local Model Context Protocol (MCP) knowledge graph server backed by persistent storage at `~/.gemini/memory/memory.jsonl`.
+  2. **Tier 2 (Associative & Vector-Graph):** The embedded `RuVector` engine (`.agents/lib/ruvector_client.ts`), utilizing unit-normalized high-dimensional embeddings and SIMD-friendly dot-product cosine similarity.
+* **Proactive Context Retrieval & RRF Fusion:** When addressing tasks that depend on previous project architecture, domain modeling, user preferences, or past decisions, invoke the `HybridMemoryRouter` (`.agents/lib/hybrid_memory_router.ts`). Queries are dispatched in parallel and fused via Reciprocal Rank Fusion ($k=60$). Hard architectural constraints from the MCP graph are boosted by $1.5\times$ to strictly govern associative code patterns.
 * **Autonomous Entity Ingestion:** When key architectural patterns, tech stack choices, persistent preferences, or project milestones are confirmed, record them using `create_entities`, `add_observations`, and `create_relations`.
 * **Entity Standardization:** Tag entities with standard entity types (e.g., `Architecture`, `UserPreference`, `ProjectSpec`, `Convention`) and ensure observations are clear, factual, and non-redundant.
 
@@ -115,10 +111,23 @@ When scoring technical implementations, documents, or architectures, use the fol
   * Running filesystem crawling utilities (`os.walk()`, `glob()`, `find`, `tree`, `dir /s`, `Get-ChildItem -Recurse`).
   * Probing server root or system directories (`/`, `/home`, `/tmp`, `/var`, `/opt`, `C:\Windows`, `AppData`, etc.).
   * Following symlinks outside designated file objects.
-* **Explicit Capability Handles (`file_id`):** Aarka operates strictly on files explicitly provided by the user via isolated handles (`file_id`).
-  * If a file has not been explicitly provided or referenced, Aarka must prompt the user to provide it rather than attempting to locate or scan for it on the server.
+* **Cryptographic Capability Gateway (`file_id`):** Aarka operates strictly through the `HardenedCapabilityGateway` (`.agents/lib/capability_gateway.ts`).
+  * File interactions require an HMAC-SHA256 signed capability token with action-scoped permissions (`READ`, `WRITE`, `EXECUTE`) and TTL enforcement.
+  * All paths are dereferenced via `fs.realpath` against the canonical workspace root to block symlink breakouts and TOCTOU race conditions.
+* **Safe Subprocess Execution:** Subprocesses must be executed through `AllowlistExecutionHarness` (`.agents/lib/allowlist_harness.ts`) using argument arrays and `shell: false`. Shell string interpolation is strictly prohibited.
 * **Function & Feature Encapsulation:** Internal cloud infrastructure, server application files, internal configuration databases, and host environment variables are strictly encapsulated and must never be exposed or leaked.
 
-
-
-
+## 9. RuVnet Swarm & SPARC Autonomous Engineering Protocol
+* **Swarm Orchestration (`ruflo`):** For complex engineering tasks, Aarka coordinates execution through specialized agent roles:
+  * **Supervisor (Core Aarka):** Manages DAG task dependencies, registers working-tree transactions, and evaluates empirical stage scores.
+  * **Architect:** Formulates formal specifications, invariant clauses, pseudocode, and type-checked interface contracts.
+  * **Implementer:** Synthesizes compiling, production-grade code with zero stubs or placeholders.
+  * **Verifier:** Executes unit/property tests, measures test pass rates and coverage, and runs linters.
+  * **Security Sentinel:** Validates capability boundaries and enforces Rule 8 containment.
+* **SPARC Execution Pipeline:** Every significant coding task must progress through 5 verified gates:
+  1. **Specification (S):** Formal requirement verification (`# SPECIFICATION`, `## PRECONDITIONS`, `## POSTCONDITIONS`, `## INVARIANTS`).
+  2. **Pseudocode (P):** Explicit `ALGORITHM`, asymptotic bounds ($\mathcal{O}(\dots)$), and `LOOP INVARIANT` proofs.
+  3. **Architecture (A):** Interface contracts and module seams validated via compiler check (`tsc --noEmit`).
+  4. **Refinement (R):** TDD test runner execution with $100\%$ pass rate and $\ge 85\%$ coverage.
+  5. **Completion (C):** Composite quality score must reach $\ge 8.5 / 10$.
+* **Transactional Multi-File Rollback:** Before any swarm task modifies the working tree, a transaction is registered via `TransactionalSnapshotManager` (`.agents/lib/snapshot_manager.ts`). If any SPARC gate fails or throws an error, all modified files are atomically restored to original byte parity and newly created orphan files are unlinked.

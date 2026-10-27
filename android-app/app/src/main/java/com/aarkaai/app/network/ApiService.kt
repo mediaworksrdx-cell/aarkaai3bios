@@ -12,7 +12,8 @@ data class PromptRequest(
     val session_id: String = "1",
     val model: String? = "aarka-2.0",
     val effort: String? = "medium",
-    val context: Map<String, Any>? = null
+    val context: Map<String, Any>? = null,
+    val mode: String? = null
 )
 
 data class PromptResponse(

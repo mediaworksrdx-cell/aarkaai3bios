@@ -24,13 +24,15 @@ object SseClient {
         query: String,
         sessionId: String,
         model: String? = "aarka-2.0",
-        effort: String? = "medium"
+        effort: String? = "medium",
+        mode: String? = null
     ): Flow<String> = flow {
         val jsonRequest = JsonObject().apply {
             addProperty("query", query)
             addProperty("session_id", sessionId)
             if (!model.isNullOrBlank()) addProperty("model", model)
             if (!effort.isNullOrBlank()) addProperty("effort", effort)
+            if (!mode.isNullOrBlank()) addProperty("mode", mode)
         }
         val requestBody = jsonRequest.toString().toRequestBody("application/json".toMediaType())
         

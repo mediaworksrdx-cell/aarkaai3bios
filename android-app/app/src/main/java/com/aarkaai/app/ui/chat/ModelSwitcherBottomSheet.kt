@@ -97,6 +97,19 @@ fun ModelSwitcherBottomSheet(
                 onClick = { onModelSelect("claude-sonnet-5") }
             )
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Aarka SPARC Swarm Option
+            val isSparc = currentModel == "aarka-sparc-swarm"
+            ModelOptionCard(
+                title = "Aarka SPARC Swarm",
+                subtitle = "Autonomous 5-stage engineering swarm with verified TDD and rollback safety",
+                icon = "🛸",
+                badge = "RuVnet Swarm",
+                isSelected = isSparc,
+                onClick = { onModelSelect("aarka-sparc-swarm") }
+            )
+
             Spacer(modifier = Modifier.height(14.dp))
 
             // Effort Selection

@@ -20,6 +20,8 @@ All dispatches emit an audit_event() entry regardless of outcome.
 from __future__ import annotations
 
 import logging
+import os
+import re
 from enum import Enum
 from typing import Any, Dict, Optional
 
@@ -554,7 +556,15 @@ class ToolGateway:
             val = args.get(key)
             if val and isinstance(val, str):
                 try:
-                    resolved = (workspace / val).resolve()
+                    norm_val = val.replace("\\", "/")
+                    if os.name != "nt" and re.match(r"^[a-zA-Z]:", norm_val):
+                        audit_event("gateway.path_traversal_blocked",
+                                    key=key, value=val[:100], user_id=self.user_id)
+                        raise ToolGatewayError(
+                            f"Path traversal detected in argument '{key}': Windows drive '{val}' "
+                            f"escapes POSIX workspace boundary."
+                        )
+                    resolved = (workspace / norm_val).resolve()
                     if not resolved.is_relative_to(workspace):
                         audit_event("gateway.path_traversal_blocked",
                                     key=key, value=val[:100], user_id=self.user_id)
