@@ -148,11 +148,15 @@ class AarkaModelLoader:
                     logger.info("Found verified AARKAA-3B GGUF: %s", cand_path)
                     return cand_path
 
-        # Recursive check in model cache if present
+        # Recursive check in model cache if present (7B first, then 3B)
         for directory in settings.gguf_search_directories:
             if directory.exists():
+                for found in directory.glob("*7b*.gguf"):
+                    if found.stat().st_size > 1024 * 1024:
+                        logger.info("Found matching 7B GGUF: %s", found)
+                        return found
                 for found in directory.glob("*3b*.gguf"):
-                    if "7b" not in found.name.lower() and found.stat().st_size > 1024 * 1024:
+                    if found.stat().st_size > 1024 * 1024:
                         logger.info("Found matching 3B GGUF: %s", found)
                         return found
 

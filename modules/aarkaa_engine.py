@@ -242,7 +242,14 @@ _LANG_NAMES = {
 }
 
 _GGUF_CANDIDATES = [
-    # 3B Primary Models (Canonical AARKAA-3B Architecture) -- priority 1
+    # 7B Primary Model (Highest Reasoning Quality & High Speed) -- priority 1
+    Path(MODEL_PATH).parent / "aarkaa-7b-q8.gguf",
+    Path(MODEL_PATH).parent / "aarkaa-7b-f16.gguf",
+    Path(MODEL_PATH).parent / "aarkaa-7b-q16.gguf",
+    Path(MODEL_PATH) / "aarkaa-7b-q8.gguf",
+    Path(MODEL_PATH) / "aarkaa-7b-f16.gguf",
+    Path(MODEL_PATH) / "aarkaa-7b-q16.gguf",
+    # 3B Models -- priority 2 (fallback only)
     Path(MODEL_PATH).parent / "aarkaa-3b-q8.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-f16.gguf",
     Path(MODEL_PATH).parent / "aarkaa-3b-q16.gguf",
@@ -251,13 +258,6 @@ _GGUF_CANDIDATES = [
     Path(MODEL_PATH) / "aarkaa-3b-f16.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-q16.gguf",
     Path(MODEL_PATH) / "aarkaa-3b-f32.gguf",
-    # 7B Auxiliary Models -- priority 2
-    Path(MODEL_PATH).parent / "aarkaa-7b-q8.gguf",
-    Path(MODEL_PATH).parent / "aarkaa-7b-f16.gguf",
-    Path(MODEL_PATH).parent / "aarkaa-7b-q16.gguf",
-    Path(MODEL_PATH) / "aarkaa-7b-q8.gguf",
-    Path(MODEL_PATH) / "aarkaa-7b-f16.gguf",
-    Path(MODEL_PATH) / "aarkaa-7b-q16.gguf",
 ]
 
 

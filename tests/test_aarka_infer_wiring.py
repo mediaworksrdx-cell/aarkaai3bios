@@ -22,12 +22,13 @@ def ensure_infer_engine():
     yield engine
 
 
-def test_gguf_candidates_prioritize_3b():
-    """Verify that 3B candidate models are prioritized over 7B models."""
-    candidates = [str(c).lower() for c in aarkaa_engine._GGUF_CANDIDATES]
-    first_3b_idx = next(i for i, c in enumerate(candidates) if "3b" in c)
-    first_7b_idx = next(i for i, c in enumerate(candidates) if "7b" in c)
-    assert first_3b_idx < first_7b_idx, "3B models must precede 7B models in search priority"
+def test_gguf_candidates_prioritize_7b():
+    """Verify that 7B candidate models are prioritized over 3B models."""
+    from pathlib import Path
+    candidate_names = [Path(c).name.lower() for c in aarkaa_engine._GGUF_CANDIDATES]
+    first_7b_idx = next(i for i, name in enumerate(candidate_names) if "7b" in name)
+    first_3b_idx = next(i for i, name in enumerate(candidate_names) if "3b" in name)
+    assert first_7b_idx < first_3b_idx, "7B models must precede 3B models in search priority"
 
 
 def test_aarkaa_engine_adapter_initialization():

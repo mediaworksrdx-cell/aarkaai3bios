@@ -58,6 +58,12 @@ class InferConfig(BaseSettings):
     )
     gguf_candidates_3b: List[str] = Field(
         default=[
+            # 7B Primary Models -- priority 1
+            "aarkaa-7b-q8.gguf",
+            "aarkaa-7b-f16.gguf",
+            "aarkaa-7b-q16.gguf",
+            "aarkaa-7b.gguf",
+            # 3B Auxiliary Models -- priority 2
             "aarkaa-3b-q8.gguf",
             "aarkaa-3b-f16.gguf",
             "aarkaa-3b-q4_k_m.gguf",
@@ -65,7 +71,7 @@ class InferConfig(BaseSettings):
             "aarkaa-3b-f32.gguf",
             "aarkaa-3b.gguf",
         ],
-        description="Prioritized list of 3B GGUF filenames"
+        description="Prioritized list of GGUF filenames (7B first, 3B fallback)"
     )
 
     # ── Backend Selection ────────────────────────────────────────────────────
