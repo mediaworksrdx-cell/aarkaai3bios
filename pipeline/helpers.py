@@ -169,6 +169,8 @@ _REASONING_PATTERNS = [
     re.compile(r'\bpercentage\s+loss\b.*\breturn\b.*\boriginal\b', re.DOTALL),
     re.compile(r'\b(weigh\w*|scale|balance)\b.*\b(heavier|lighter|outlier|ball|balls|coin|coins|marble|marbles|item|items|bar|bars)\b', re.DOTALL),
     re.compile(r'\b(heavier|lighter|outlier|ball|balls|coin|coins|marble|marbles|item|items|bar|bars)\b.*\b(weigh\w*|scale|balance)\b', re.DOTALL),
+    re.compile(r'\b(switch|switches)\b.*\b(bulb|bulbs|light|lights|room)\b', re.DOTALL),
+    re.compile(r'\b(bulb|bulbs)\b.*\b(switch|switches)\b', re.DOTALL),
 ]
 
 

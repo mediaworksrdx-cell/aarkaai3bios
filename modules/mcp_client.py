@@ -184,7 +184,10 @@ class MCPServerConnection:
             if not command:
                 raise ValueError(f"Command not provided for stdio transport in server {self.server_name}")
 
-            parts = shlex.split(command)
+            if isinstance(command, list):
+                parts = [str(p).strip("\"'") for p in command]
+            else:
+                parts = [p.strip("\"'") for p in shlex.split(command, posix=(os.name != "nt"))]
 
             # Retrieve admin allowlist from config if present
             from config import MCP_ADMIN_ALLOWED_BINARIES
@@ -193,10 +196,15 @@ class MCPServerConnection:
             # Whitelisted minimal environment
             sanitized_env = {
                 "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-                "HOME": "/tmp",
-                "TMPDIR": "/tmp",
+                "HOME": os.environ.get("USERPROFILE", "/tmp") if os.name == "nt" else "/tmp",
+                "TMPDIR": os.environ.get("TEMP", "/tmp") if os.name == "nt" else "/tmp",
                 "PYTHONUNBUFFERED": "1"
             }
+            if os.name == "nt":
+                if "SYSTEMROOT" in os.environ:
+                    sanitized_env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+                if "COMSPEC" in os.environ:
+                    sanitized_env["COMSPEC"] = os.environ["COMSPEC"]
 
             audit_event(
                 "mcp.server_launched",

@@ -556,6 +556,12 @@ class ToolGateway:
             val = args.get(key)
             if val and isinstance(val, str):
                 try:
+                    if "\0" in val:
+                        audit_event("gateway.path_traversal_blocked",
+                                    key=key, value="[NULL_BYTE]", user_id=self.user_id)
+                        raise ToolGatewayError(
+                            f"Path traversal detected in argument '{key}': embedded null-byte rejected."
+                        )
                     norm_val = val.replace("\\", "/")
                     if os.name != "nt" and re.match(r"^[a-zA-Z]:", norm_val):
                         audit_event("gateway.path_traversal_blocked",
@@ -574,6 +580,13 @@ class ToolGateway:
                         )
                 except ToolGatewayError:
                     raise
+                except (ValueError, OSError) as e:
+                    audit_event("gateway.path_traversal_blocked",
+                                key=key, value=val[:100], user_id=self.user_id)
+                    raise ToolGatewayError(
+                        f"Path traversal detected in argument '{key}': '{val}' "
+                        f"cannot be resolved safely within workspace: {e}"
+                    )
                 except Exception:
                     pass  # Non-path values may fail resolve safely
 

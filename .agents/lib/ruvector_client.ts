@@ -1,3 +1,6 @@
+import * as fs from 'fs/promises';
+import * as path from 'path';
+
 export interface VectorEntry {
   id: string;
   vector: number[];
@@ -11,9 +14,12 @@ export interface SearchHit {
 }
 
 export interface IRuVectorClient {
+  engineType: string;
   insert(entry: VectorEntry): Promise<boolean>;
   search(queryVector: number[], k: number): Promise<SearchHit[]>;
   size(): number;
+  saveToFile?(filePath: string): Promise<void>;
+  loadFromFile?(filePath: string): Promise<number>;
 }
 
 interface StoredVector {
@@ -24,26 +30,47 @@ interface StoredVector {
 
 /**
  * PureTypeScriptVectorFallback Engine
- * High-performance, SIMD-friendly in-memory cosine similarity engine.
+ * High-performance in-memory cosine similarity engine with strict numeric validation.
  * Pre-normalizes vectors to unit length and uses bounded top-k insertion for sub-millisecond execution.
+ * Explicitly reports 'pure-typescript-fallback' and never fabricates native acceleration.
  */
 export class PureTypeScriptVectorFallback implements IRuVectorClient {
+  public readonly engineType = 'pure-typescript-fallback';
   private dimension: number;
   private entries: StoredVector[];
   private idIndex: Map<string, number>;
   private queryBuffer: Float32Array;
 
   constructor(dimension: number = 384) {
+    if (dimension <= 0) {
+      throw new Error(`Dimension must be a positive integer, got ${dimension}`);
+    }
     this.dimension = dimension;
     this.entries = [];
     this.idIndex = new Map();
     this.queryBuffer = new Float32Array(dimension);
   }
 
-  public async insert(entry: VectorEntry): Promise<boolean> {
-    if (!entry.vector || entry.vector.length !== this.dimension) {
-      throw new Error(`Dimension mismatch: expected ${this.dimension}, got ${entry?.vector?.length}`);
+  private validateVector(vec: number[]): void {
+    if (!vec || !Array.isArray(vec)) {
+      throw new Error('Vector must be a non-null array of numbers');
     }
+    if (vec.length !== this.dimension) {
+      throw new Error(`Dimension mismatch: expected ${this.dimension}, got ${vec.length}`);
+    }
+    for (let i = 0; i < vec.length; i++) {
+      const v = vec[i];
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new Error(`Vector contains non-finite or non-numeric value at index ${i}: ${v}`);
+      }
+    }
+  }
+
+  public async insert(entry: VectorEntry): Promise<boolean> {
+    if (!entry || !entry.id || typeof entry.id !== 'string') {
+      throw new Error('Entry must have a non-empty string ID');
+    }
+    this.validateVector(entry.vector);
 
     const len = this.dimension;
     let sumSq = 0;
@@ -60,7 +87,7 @@ export class PureTypeScriptVectorFallback implements IRuVectorClient {
     const stored: StoredVector = {
       id: entry.id,
       normalizedVec,
-      metadata: entry.metadata
+      metadata: entry.metadata ? { ...entry.metadata } : undefined
     };
 
     if (this.idIndex.has(entry.id)) {
@@ -75,9 +102,8 @@ export class PureTypeScriptVectorFallback implements IRuVectorClient {
   }
 
   public async search(queryVector: number[], k: number = 5): Promise<SearchHit[]> {
-    if (!queryVector || queryVector.length !== this.dimension) {
-      throw new Error(`Query vector dimension mismatch: expected ${this.dimension}, got ${queryVector?.length}`);
-    }
+    if (k <= 0) return [];
+    this.validateVector(queryVector);
 
     const len = this.dimension;
     let sumSq = 0;
@@ -125,6 +151,43 @@ export class PureTypeScriptVectorFallback implements IRuVectorClient {
   public size(): number {
     return this.entries.length;
   }
+
+  public async saveToFile(filePath: string): Promise<void> {
+    const records = this.entries.map(e => ({
+      id: e.id,
+      vector: Array.from(e.normalizedVec),
+      metadata: e.metadata
+    }));
+    const data = JSON.stringify({
+      version: 1,
+      dimension: this.dimension,
+      records
+    }, null, 2);
+
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, data, 'utf-8');
+  }
+
+  public async loadFromFile(filePath: string): Promise<number> {
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed.dimension !== this.dimension) {
+      throw new Error(`Dimension mismatch in file: expected ${this.dimension}, found ${parsed.dimension}`);
+    }
+
+    this.entries = [];
+    this.idIndex.clear();
+
+    for (const item of parsed.records || []) {
+      await this.insert({
+        id: item.id,
+        vector: item.vector,
+        metadata: item.metadata
+      });
+    }
+
+    return this.entries.length;
+  }
 }
 
 export class RuVectorClientFactory {
@@ -141,6 +204,7 @@ export class RuVectorClientFactory {
         });
 
         return {
+          engineType: 'native-ruvector',
           async insert(entry: VectorEntry): Promise<boolean> {
             return await db.insert(entry.id, entry.vector, entry.metadata);
           },
@@ -152,8 +216,18 @@ export class RuVectorClientFactory {
           }
         };
       }
-    } catch {}
+    } catch {
+      // Fallback when native module is unavailable
+    }
 
-    return new PureTypeScriptVectorFallback(dimension);
+    const fallback = new PureTypeScriptVectorFallback(dimension);
+    if (storagePath) {
+      try {
+        await fallback.loadFromFile(storagePath);
+      } catch {
+        // Fresh store if file does not exist yet
+      }
+    }
+    return fallback;
   }
 }

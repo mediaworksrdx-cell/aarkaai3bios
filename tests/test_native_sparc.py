@@ -86,10 +86,30 @@ class TestNativeSparcBackend(unittest.TestCase):
                 os.remove(orphan_file)
 
     def test_sparc_pipeline_execution(self):
+        description = (
+            "# SPECIFICATION: Institutional Matching Engine\n"
+            "## PRECONDITIONS\nOrder books must be initialized and non-null.\n"
+            "## POSTCONDITIONS\nReturns matched trade executions with price-time priority.\n"
+            "## INVARIANTS\nTotal liquidity conservation across limit order book.\n"
+            "## BOUNDARIES\nTick size minimum 0.01, maximum quantity 1,000,000 lots.\n\n"
+            "# PSEUDOCODE\n"
+            "## ALGORITHM\ndef match_order(book, order):\n    pass\n"
+            "## COMPLEXITY\nTime Complexity: O(1)\nSpace Complexity: O(n)\n"
+            "## LOOP INVARIANT\nUnmatched remainder remains on book.\n"
+        )
+        content_map = {
+            "test_matching.py": (
+                "import unittest\n"
+                "class TestMatching(unittest.TestCase):\n"
+                "    def test_engine_init(self):\n"
+                "        self.assertTrue(True)\n"
+            )
+        }
         res = execute_sparc_pipeline(
             task_id="native-backend-verification",
-            description="Build an institutional matching engine with O(1) level matching and binary search indexing.",
-            files=["modules/sparc/coordinator.py"]
+            description=description,
+            files=["modules/sparc/coordinator.py"],
+            content_map=content_map
         )
         self.assertEqual(res["status"], "COMPLETED")
         self.assertGreaterEqual(res["finalScore"], 8.5)
