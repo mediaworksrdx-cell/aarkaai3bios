@@ -42,7 +42,7 @@ chromadb==1.5.9
 
 # Search / Web
 ddgs==9.14.4
-wikipedia-api==0.10.0
+wikipedia-api==0.16.0
 beautifulsoup4==4.15.0
 
 # PDF / Documents
