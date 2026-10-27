@@ -1,4 +1,7 @@
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 import uuid
 import os
 import logging
@@ -27,6 +30,8 @@ class ImageGenTool(Tool):
         prompt = params.get("prompt")
         if not prompt:
             return "Error: 'prompt' parameter is required in Action Input."
+        if torch is None:
+            return "Error executing ImageGen: PyTorch ('torch') is not installed in this environment."
         
         try:
             # Lazy load our custom standalone AARKAA-VISION model

@@ -1,5 +1,8 @@
 import logging
-import yfinance as yf
+try:
+    import yfinance as yf
+except ImportError:
+    yf = None
 from typing import List, Dict, Any
 from sqlalchemy import Column, Integer, String, Float, DateTime
 from sqlalchemy.orm import Session

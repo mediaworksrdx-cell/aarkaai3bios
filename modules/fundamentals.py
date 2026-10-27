@@ -1,5 +1,8 @@
 import logging
-import yfinance as yf
+try:
+    import yfinance as yf
+except ImportError:
+    yf = None
 import json
 from typing import Dict, Any
 

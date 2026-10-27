@@ -15,7 +15,10 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
+try:
+    import yfinance as yf
+except ImportError:
+    yf = None
 
 from modules.screener.schemas import DataQuality, ScoreBreakdown
 from modules.screener.universe import UniverseManager

@@ -1,6 +1,11 @@
 import logging
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+try:
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+except ImportError:
+    torch = None
+    AutoModelForCausalLM = None
+    AutoTokenizer = None
 from PIL import Image
 from modules.tools.base import Tool
 from config import SAFE_WORK_DIR
@@ -25,6 +30,8 @@ class AarkaVisionAnalyzeTool(Tool):
 
         if not image_path_param:
             return "Error: 'image_path' parameter is required in Action Input."
+        if torch is None or AutoModelForCausalLM is None:
+            return "Error executing Aarka Vision Analysis: PyTorch ('torch') or 'transformers' is not installed in this environment."
 
         try:
             # Prevent path traversal

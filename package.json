@@ -1,0 +1,12 @@
+{
+  "name": "aarkaai3b",
+  "version": "3.0.0",
+  "description": "AARKAAI-3B Enterprise Swarm & AI Architecture",
+  "private": true,
+  "scripts": {
+    "ruflo": "ruflo"
+  },
+  "dependencies": {
+    "ruflo": "^3.63.4"
+  }
+}

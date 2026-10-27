@@ -1,4 +1,7 @@
-import pdfplumber
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None
 import re
 import os
 import logging
@@ -22,6 +25,8 @@ def parse_pdf(file_path: str) -> dict:
     """Full PDF text extraction with page-by-page content.
     Returns {page_count, pages: [{page_num, text, tables}], total_chars}.
     Tables extracted as list of list[list[str]]."""
+    if pdfplumber is None:
+        raise ImportError("pdfplumber is not installed in this environment.")
     if not is_safe_path(file_path):
         raise ValueError("Invalid file path outside safe workspace")
     

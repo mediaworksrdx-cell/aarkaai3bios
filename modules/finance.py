@@ -10,7 +10,10 @@ import logging
 import re
 from typing import Optional
 
-import yfinance as yf
+try:
+    import yfinance as yf
+except ImportError:
+    yf = None
 
 from config import COMMODITY_TICKERS, CRYPTO_SUFFIXES, FOREX_PAIRS, INDIA_SUFFIX
 

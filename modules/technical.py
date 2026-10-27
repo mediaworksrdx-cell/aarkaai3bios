@@ -17,7 +17,10 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
+try:
+    import yfinance as yf
+except ImportError:
+    yf = None
 
 logger = logging.getLogger(__name__)
 

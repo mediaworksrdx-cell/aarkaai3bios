@@ -1,5 +1,22 @@
 import numpy as np
-from scipy.stats import norm
+try:
+    from scipy.stats import norm
+except ImportError:
+    import math
+
+    class _NormFallback:
+        @staticmethod
+        def cdf(x):
+            if isinstance(x, np.ndarray):
+                v_erf = np.vectorize(math.erf)
+                return 0.5 * (1.0 + v_erf(x / np.sqrt(2.0)))
+            return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+        @staticmethod
+        def pdf(x):
+            return np.exp(-0.5 * (x ** 2)) / np.sqrt(2.0 * np.pi)
+
+    norm = _NormFallback()
 import logging
 
 logger = logging.getLogger(__name__)

@@ -7,7 +7,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 
-import yfinance as yf
+try:
+    import yfinance as yf
+except ImportError:
+    yf = None
 
 from modules.screener.schemas import DataQuality
 from modules.screener.provenance import (SnapshotProvenance, make_price_provenance, make_fundamental_provenance, make_indicator_provenance, make_unavailable_provenance, IST)
