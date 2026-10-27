@@ -10,7 +10,7 @@ python-multipart==0.0.32
 
 # Database
 sqlalchemy==2.0.51
-pymongo>=4.6.0
+pymongo>=4.18.1
 dnspython>=2.4.0
 
 # Auth
