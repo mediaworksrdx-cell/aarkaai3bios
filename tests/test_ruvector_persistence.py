@@ -161,3 +161,35 @@ def test_ruvector_benchmark_execution():
     assert report["latency_p50_ms"] >= 0
     assert report["latency_mean_ms"] >= 0
     assert "platform" in report["hardware"]
+
+
+def test_ruvector_text_embedding_cross_process_reproducibility():
+    """
+    CRITICAL DETERMINISM CHECK:
+    Verifies that embed_text_deterministic produces identical vector outputs across
+    different Python process restarts and different PYTHONHASHSEED seeds (SHA-256 backed).
+    """
+    import subprocess
+    import sys
+    import json
+
+    code = (
+        "import json, sys\n"
+        "from modules.sparc.ruvector import RuVectorEngine\n"
+        "engine = RuVectorEngine(dimension=16)\n"
+        "vec = engine.embed_text_deterministic('institutional market portfolio allocation')\n"
+        "sys.stdout.write(json.dumps(vec))\n"
+    )
+
+    env1 = dict(os.environ, PYTHONHASHSEED="42")
+    env2 = dict(os.environ, PYTHONHASHSEED="999999")
+
+    out1 = subprocess.check_output([sys.executable, "-c", code], env=env1).decode("utf-8")
+    out2 = subprocess.check_output([sys.executable, "-c", code], env=env2).decode("utf-8")
+
+    vec1 = json.loads(out1)
+    vec2 = json.loads(out2)
+
+    assert len(vec1) == 16
+    assert len(vec2) == 16
+    assert vec1 == vec2, "Text embeddings differed across Python process seeds!"

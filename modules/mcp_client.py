@@ -22,7 +22,7 @@ import dataclasses
 import unicodedata
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import jsonschema
 
@@ -176,6 +176,7 @@ class MCPServerConnection:
         self.config = config
         self.process: Optional[asyncio.subprocess.Process] = None
         self._request_id = 0
+        self.last_latency_ms: Optional[float] = None
 
     async def connect(self):
         transport = self.config.get('transport', 'stdio')
@@ -236,10 +237,13 @@ class MCPServerConnection:
             "params": params or {}
         }
         req_str = json.dumps(req) + "\n"
+        t0 = time.perf_counter()
         self.process.stdin.write(req_str.encode('utf-8'))
         await self.process.stdin.drain()
 
         line = await self.process.stdout.readline()
+        elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+        self.last_latency_ms = elapsed_ms
         if not line:
             raise ConnectionError("Connection closed by server")
 
@@ -509,6 +513,9 @@ class MCPClient:
                         "risk_level": "MEDIUM"
                     })
 
+            server_conn = self._servers.get(server_name)
+            measured_latency = server_conn.last_latency_ms if (is_connected and server_conn) else None
+
             manifests.append({
                 "id": server_name,
                 "name": server_name.replace("_", " ").title(),
@@ -519,7 +526,7 @@ class MCPClient:
                 "trust_level": srv_conf.get("trust_level", "workspace_read"),
                 "tools": server_tools,
                 "health": {
-                    "latency_ms": 14.2 if is_connected else None,
+                    "latency_ms": measured_latency,
                     "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 }
             })

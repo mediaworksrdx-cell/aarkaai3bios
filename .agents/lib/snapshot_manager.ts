@@ -15,15 +15,18 @@ export interface RollbackEvidence {
   restoredFiles: string[];
   unlinkedOrphans: string[];
   errors: string[];
+  phase: string;
   success: boolean;
 }
 
 /**
  * Transactional Multi-File Working Tree Snapshot Engine
- * Provides atomic capture, file modification tracking, SHA-256 byte parity, and zero-leak rollback.
+ * Provides two-phase atomic capture, file modification tracking, SHA-256 byte parity,
+ * and zero-leak rollback. Retains snapshots if restoration encounters any error.
  */
 export class TransactionalSnapshotManager {
   private activeTransactions: Map<string, FileSnapshot[]> = new Map();
+  private failedTransactions: Map<string, { snapshots: FileSnapshot[]; evidence: RollbackEvidence }> = new Map();
 
   public async beginTransaction(transactionId: string, filePaths: string[]): Promise<void> {
     if (!transactionId || typeof transactionId !== 'string') {
@@ -60,10 +63,54 @@ export class TransactionalSnapshotManager {
       throw new Error(`Cannot rollback: No active transaction found with ID '${transactionId}'.`);
     }
 
+    const stagingFiles: string[] = [];
     const restoredFiles: string[] = [];
     const unlinkedOrphans: string[] = [];
     const errors: string[] = [];
 
+    // ─── PHASE 1: Staging & Parity Verification ──────────────────────────
+    for (const snap of snapshots) {
+      if (snap.existed && snap.content) {
+        const stagePath = `${snap.filePath}.aarka_rollback_stage`;
+        try {
+          await fs.mkdir(path.dirname(stagePath), { recursive: true });
+          await fs.writeFile(stagePath, snap.content, { mode: snap.mode });
+
+          const stageBytes = await fs.readFile(stagePath);
+          const hash = crypto.createHash('sha256').update(stageBytes).digest('hex');
+          if (snap.sha256 && hash !== snap.sha256) {
+            throw new Error(`Staging byte parity mismatch on ${stagePath}: expected ${snap.sha256}, got ${hash}`);
+          }
+          stagingFiles.push(stagePath);
+        } catch (stageErr: any) {
+          errors.push(`Phase 1 staging error on ${snap.filePath}: ${stageErr.message}`);
+
+          // Abort Phase 1: clean staging files without modifying live targets
+          for (const sf of stagingFiles) {
+            try {
+              await fs.unlink(sf);
+            } catch {}
+          }
+
+          const evidence: RollbackEvidence = {
+            transactionId,
+            restoredFiles: [],
+            unlinkedOrphans: [],
+            errors,
+            phase: 'PHASE_1_STAGING',
+            success: false
+          };
+
+          // Preserve snapshots on failure
+          this.failedTransactions.set(transactionId, { snapshots, evidence });
+          const err = new Error(`Atomic rollback aborted in Phase 1 (no files modified): ${errors.join('; ')}`);
+          (err as any).evidence = evidence;
+          throw err;
+        }
+      }
+    }
+
+    // ─── PHASE 2: Atomic Swap & Orphan Cleanup ───────────────────────────
     for (let i = snapshots.length - 1; i >= 0; i--) {
       const snap = snapshots[i];
       try {
@@ -71,45 +118,40 @@ export class TransactionalSnapshotManager {
           try {
             await fs.unlink(snap.filePath);
             unlinkedOrphans.push(snap.filePath);
-          } catch (err: any) {
-            if (err.code !== 'ENOENT') {
-              errors.push(`Unlink error on ${snap.filePath}: ${err.message}`);
+          } catch (unlinkErr: any) {
+            if (unlinkErr.code !== 'ENOENT') {
+              errors.push(`Unlink error on ${snap.filePath}: ${unlinkErr.message}`);
             }
           }
         } else if (snap.content) {
-          await fs.mkdir(path.dirname(snap.filePath), { recursive: true });
-          await fs.writeFile(snap.filePath, snap.content, { mode: snap.mode });
-
-          // Parity check
-          const written = await fs.readFile(snap.filePath);
-          const hash = crypto.createHash('sha256').update(written).digest('hex');
-          if (hash !== snap.sha256) {
-            errors.push(`Byte parity mismatch on ${snap.filePath}: expected ${snap.sha256}, got ${hash}`);
-          } else {
-            restoredFiles.push(snap.filePath);
-          }
+          const stagePath = `${snap.filePath}.aarka_rollback_stage`;
+          await fs.rename(stagePath, snap.filePath);
+          restoredFiles.push(snap.filePath);
         }
       } catch (err: any) {
-        errors.push(`Failed to restore ${snap.filePath}: ${err.message}`);
+        errors.push(`Phase 2 replacement error on ${snap.filePath}: ${err.message}`);
       }
     }
-
-    this.activeTransactions.delete(transactionId);
 
     const evidence: RollbackEvidence = {
       transactionId,
       restoredFiles,
       unlinkedOrphans,
       errors,
+      phase: 'PHASE_2_EXECUTION',
       success: errors.length === 0
     };
 
     if (errors.length > 0) {
-      const err = new Error(`Rollback completed with errors: ${errors.join('; ')}`);
+      // Preserve snapshots in failed map
+      this.failedTransactions.set(transactionId, { snapshots, evidence });
+      const err = new Error(`Rollback completed with Phase 2 errors: ${errors.join('; ')}. Snapshots preserved.`);
       (err as any).evidence = evidence;
       throw err;
     }
 
+    // Success: clean release
+    this.activeTransactions.delete(transactionId);
     return evidence;
   }
 
@@ -126,5 +168,9 @@ export class TransactionalSnapshotManager {
 
   public activeTransactionCount(): number {
     return this.activeTransactions.size;
+  }
+
+  public getFailedTransaction(transactionId: string): { snapshots: FileSnapshot[]; evidence: RollbackEvidence } | undefined {
+    return this.failedTransactions.get(transactionId);
   }
 }

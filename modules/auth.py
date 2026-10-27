@@ -20,7 +20,34 @@ import uuid
 import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from passlib.context import CryptContext
+try:
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+except ImportError:
+    import hashlib
+    import hmac
+    import secrets
+
+    class _FallbackCryptContext:
+        """Lightweight PBKDF2 fallback when passlib is unavailable in minimal test environments."""
+        def hash(self, secret: str) -> str:
+            salt = secrets.token_hex(16)
+            dk = hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), salt.encode("utf-8"), 100000)
+            return f"pbkdf2:sha256:{salt}:{dk.hex()}"
+
+        def verify(self, secret: str, hash_str: str) -> bool:
+            try:
+                parts = hash_str.split(":")
+                if len(parts) == 4 and parts[0] == "pbkdf2":
+                    salt = parts[2]
+                    dk = hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), salt.encode("utf-8"), 100000)
+                    return hmac.compare_digest(dk.hex(), parts[3])
+            except Exception:
+                pass
+            return False
+
+    pwd_context = _FallbackCryptContext()
+
 from sqlalchemy.orm import Session
 
 from config import SECRET_KEY, JWT_ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, API_KEY, API_KEY_HEADER
@@ -33,9 +60,6 @@ logger = logging.getLogger(__name__)
 ACCESS_TOKEN_MINUTES = int(os.getenv("AARKAAI_ACCESS_TOKEN_MINUTES", str(ACCESS_TOKEN_EXPIRE_MINUTES)))
 # Refresh token: long-lived (default 30 days)
 REFRESH_TOKEN_DAYS = int(os.getenv("AARKAAI_REFRESH_TOKEN_DAYS", "30"))
-
-# Password hashing context (bcrypt, salted)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # OAuth2 scheme (auto_error=False to allow checking X-API-Key fallback)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)

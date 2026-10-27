@@ -20,7 +20,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-import chromadb
+try:
+    import chromadb
+    HAS_CHROMADB = True
+except ImportError:
+    chromadb = None
+    HAS_CHROMADB = False
 import numpy as np
 
 from config import (

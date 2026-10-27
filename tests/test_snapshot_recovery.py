@@ -1,12 +1,14 @@
 """
 Transactional Working Tree Snapshot & Atomic Rollback Recovery Test Suite.
-Verifies multi-file point-in-time capture, byte-parity restoration, orphan unlinking,
-dynamic file registration, recovery evidence logging, and exception handling.
+Verifies multi-file point-in-time capture, two-phase atomic restoration, byte-parity verification,
+orphan unlinking, dynamic file registration, recovery evidence logging, and exception handling.
+Ensures snapshots and transactions are preserved on any restoration failure.
 """
 
 import hashlib
 import os
 import pytest
+from unittest.mock import patch
 from modules.sparc.snapshot_manager import (
     TransactionalSnapshotManager,
     RollbackError,
@@ -73,6 +75,7 @@ def test_snapshot_lifecycle_rollback_and_byte_parity(test_files):
     # 3. Execute rollback
     evidence = mgr.rollback_transaction("tx_rollback")
     assert evidence["success"] is True
+    assert evidence["phase"] == "PHASE_2_EXECUTION"
     assert not mgr.is_active("tx_rollback")
 
     # 4. Verify exact byte parity restored
@@ -120,3 +123,33 @@ def test_duplicate_begin_transaction_rejected(test_files):
 
     with pytest.raises(ValueError, match="already active"):
         mgr.begin_transaction("tx_dup", [f1])
+
+
+def test_rollback_preserves_transaction_and_snapshots_on_failure(test_files):
+    """
+    CRITICAL ATOMICITY CHECK:
+    Verifies that if Phase 1 staging encounters an error (e.g. disk write failure),
+    the working tree files remain untouched, no partial corruption occurs, and the
+    snapshots and evidence are preserved in get_failed_transaction() rather than discarded.
+    """
+    f1, _, _ = test_files
+    mgr = TransactionalSnapshotManager()
+    mgr.begin_transaction("tx_fail", [f1])
+
+    # Mutate file
+    with open(f1, "w", encoding="utf-8") as f:
+        f.write("Mutated text before rollback attempt")
+
+    # Simulate Phase 1 failure by mocking open for the staging file
+    with patch("builtins.open", side_effect=IOError("Simulated disk error during staging")):
+        with pytest.raises(RollbackError, match="Atomic rollback aborted in Phase 1"):
+            mgr.rollback_transaction("tx_fail")
+
+    # Verify that failed transaction snapshots are preserved for forensic recovery
+    failed_record = mgr.get_failed_transaction("tx_fail")
+    assert failed_record is not None
+    assert "snapshots" in failed_record
+    assert len(failed_record["snapshots"]) == 1
+    assert failed_record["snapshots"][0].file_path == os.path.abspath(f1)
+    assert failed_record["evidence"]["success"] is False
+    assert failed_record["evidence"]["phase"] == "PHASE_1_STAGING"

@@ -1,11 +1,11 @@
 """
 Ruflo Integration Adapter & Swarm Coordinator Interface.
 
-Separates genuine Ruflo runtime coordination from native Aarka SPARC orchestration.
-Never labels custom coordinators as Ruflo.
-Probes runtime requirements (official package 'ruflo@3.63.4' / '@claude-flow/cli: 3.63.4'),
-and if uninstalled, explicitly records the dependency blocker and gracefully delegates to
-the native AarkaNativeSparcCoordinator.
+Integrates genuine Ruflo runtime CLI ('ruflo@3.63.4' / '@claude-flow/cli: 3.63.4' by ruvnet).
+Discovers local and global binary installations, executes real health and diagnostics probes,
+and coordinates multi-agent swarm operations using hardened argument-array execution (shell=False).
+If Ruflo is not present, safely falls back to native AarkaNativeSparcCoordinator with explicit
+unintegrated blocker reporting.
 """
 
 import json
@@ -43,17 +43,40 @@ class RufloRuntimeStatus:
     verification_notes: List[str] = field(default_factory=list)
 
 
-def probe_ruflo_runtime() -> RufloRuntimeStatus:
+def probe_ruflo_runtime(extra_search_paths: Optional[List[str]] = None) -> RufloRuntimeStatus:
     """
-    Probes the host environment for genuine Ruflo binary or Node.js package.
+    Probes the host environment for genuine Ruflo binary (global or local node_modules).
     Authoritative package: 'ruflo@3.63.4' (MIT, published by ruvnet).
     """
-    ruflo_bin = shutil.which("ruflo")
     notes: List[str] = []
+    candidates: List[str] = []
 
-    if ruflo_bin:
+    # 1. System PATH lookups
+    for bin_name in ["ruflo", "ruflo.cmd"]:
+        found = shutil.which(bin_name)
+        if found:
+            candidates.append(os.path.abspath(found))
+
+    # 2. Local node_modules candidates
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    local_bins = [
+        os.path.join(repo_root, "node_modules", ".bin", "ruflo.cmd"),
+        os.path.join(repo_root, "node_modules", ".bin", "ruflo"),
+        os.path.join(repo_root, "frontend", "node_modules", ".bin", "ruflo.cmd"),
+        os.path.join(repo_root, "frontend", "node_modules", ".bin", "ruflo"),
+    ]
+    if extra_search_paths:
+        local_bins.extend(extra_search_paths)
+
+    for lb in local_bins:
+        if os.path.exists(lb):
+            norm = os.path.abspath(lb)
+            if norm not in candidates:
+                candidates.append(norm)
+
+    # 3. Test execution of candidate binaries
+    for ruflo_bin in candidates:
         try:
-            # Query version
             res = subprocess.run(
                 [ruflo_bin, "--version"],
                 capture_output=True,
@@ -61,7 +84,7 @@ def probe_ruflo_runtime() -> RufloRuntimeStatus:
                 timeout=5.0,
                 check=False
             )
-            version_str = res.stdout.strip() or res.stderr.strip()
+            version_str = (res.stdout.strip() or res.stderr.strip()).splitlines()[-1]
             notes.append(f"Discovered Ruflo executable at: {ruflo_bin} (version: {version_str})")
             return RufloRuntimeStatus(
                 is_installed=True,
@@ -72,9 +95,9 @@ def probe_ruflo_runtime() -> RufloRuntimeStatus:
                 verification_notes=notes
             )
         except Exception as e:
-            notes.append(f"Failed to execute version probe on '{ruflo_bin}': {e}")
+            notes.append(f"Probe attempt on '{ruflo_bin}' failed: {e}")
 
-    # Not found on PATH
+    # Not found in PATH or local candidate locations
     blocker = (
         "Ruflo runtime (official npm package 'ruflo@3.63.4') is not installed or not found on PATH. "
         "Native Ruflo swarm CLI coordination is unavailable. Integration status is UNVERIFIED / UNINTEGRATED. "
@@ -99,12 +122,40 @@ class RufloCoordinator:
     """
 
     def __init__(self, executable_path: str, timeout_seconds: float = 120.0) -> None:
-        self.executable_path = executable_path
+        self.executable_path = os.path.abspath(executable_path)
         self.timeout_seconds = timeout_seconds
+
+    def get_version(self) -> str:
+        """Executes real ruflo --version."""
+        res = subprocess.run(
+            [self.executable_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            check=False
+        )
+        return (res.stdout.strip() or res.stderr.strip()).splitlines()[-1]
+
+    def run_doctor(self) -> Dict[str, Any]:
+        """Runs the real ruflo doctor diagnostic suite."""
+        res = subprocess.run(
+            [self.executable_path, "doctor"],
+            capture_output=True,
+            text=True,
+            timeout=30.0,
+            check=False
+        )
+        return {
+            "exit_code": res.returncode,
+            "stdout": res.stdout,
+            "stderr": res.stderr,
+            "passed": res.returncode == 0
+        }
 
     def execute_swarm(self, task_description: str, agent_roles: List[str], workspace_dir: str) -> Dict[str, Any]:
         """
-        Delegates task to the real ruflo executable using JSON argument vectors.
+        Delegates task to the real ruflo executable using structured JSON argument vectors.
+        Uses shell=False to prevent command injection.
         """
         args = [
             self.executable_path,
@@ -122,14 +173,12 @@ class RufloCoordinator:
             timeout=self.timeout_seconds,
             check=False
         )
-        if proc.returncode != 0:
-            raise RuntimeError(f"Ruflo execution failed with code {proc.returncode}: {proc.stderr}")
-
         try:
             return json.loads(proc.stdout)
         except json.JSONDecodeError:
             return {
                 "success": proc.returncode == 0,
+                "exit_code": proc.returncode,
                 "raw_output": proc.stdout,
                 "raw_error": proc.stderr
             }

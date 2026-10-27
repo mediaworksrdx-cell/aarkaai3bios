@@ -302,8 +302,9 @@ class RuVectorEngine:
 
     def embed_text_deterministic(self, text: str) -> List[float]:
         """
-        Deterministic lightweight tokenizer/hasher embedding generating a unit-normalized
+        Deterministic cross-process tokenizer/hasher embedding generating a unit-normalized
         pseudo-vector of length self.dimension for text retrieval when neural models are absent.
+        Uses SHA-256 to guarantee identical vector outputs across process restarts and platforms.
         """
         vec = [0.0] * self.dimension
         words = text.lower().split()
@@ -311,9 +312,11 @@ class RuVectorEngine:
             return vec
 
         for word in words:
-            h = hash(word)
-            idx = abs(h) % self.dimension
-            sign = 1.0 if (h % 2 == 0) else -1.0
+            # Cryptographic SHA-256 word digest guarantees cross-process reproducibility
+            digest = hashlib.sha256(word.encode("utf-8")).digest()
+            h = int.from_bytes(digest[:8], byteorder="big")
+            idx = h % self.dimension
+            sign = 1.0 if (digest[8] % 2 == 0) else -1.0
             vec[idx] += sign
 
         return self._normalize(vec)
