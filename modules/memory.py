@@ -24,6 +24,17 @@ from database import (
 
 logger = logging.getLogger(__name__)
 
+from modules.mongo_client import get_mongo_db, mark_mongo_unavailable
+
+def _use_mongodb() -> bool:
+    import config
+    try:
+        return bool(config.MONGODB_URI and get_mongo_db() is not None)
+    except Exception as exc:
+        mark_mongo_unavailable(exc)
+        return False
+
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -43,21 +54,25 @@ def store_conversation(
 ) -> None:
     """Store a conversation turn."""
     import config
-    if config.MONGODB_URI:
-        from modules.mongo_repository import ConversationRepo, PersonalChatRepo
-        ConversationRepo.add_entry(
-            user_id=user_id,
-            session_id=session_id,
-            query=query,
-            response=response,
-            intent=intent,
-            confidence=confidence,
-            source=source,
-        )
-        PersonalChatRepo.add_message(user_id=user_id, session_id=session_id, message=query, role="user")
-        PersonalChatRepo.add_message(user_id=user_id, session_id=session_id, message=response, role="assistant")
-        logger.debug("Stored conversation in MongoDB for user %s", user_id)
-        return
+    if _use_mongodb():
+        try:
+            from modules.mongo_repository import ConversationRepo, PersonalChatRepo
+            ConversationRepo.add_entry(
+                user_id=user_id,
+                session_id=session_id,
+                query=query,
+                response=response,
+                intent=intent,
+                confidence=confidence,
+                source=source,
+            )
+            PersonalChatRepo.add_message(user_id=user_id, session_id=session_id, message=query, role="user")
+            PersonalChatRepo.add_message(user_id=user_id, session_id=session_id, message=response, role="assistant")
+            logger.debug("Stored conversation in MongoDB for user %s", user_id)
+            return
+        except Exception as exc:
+            mark_mongo_unavailable(exc)
+            logger.warning("MongoDB turn store failed (%s); falling back to SQLite.", exc)
 
     session: Session = SessionLocal()
     try:
@@ -88,21 +103,25 @@ def store_conversation(
 def get_recent_conversations(user_id: str, limit: int = 15) -> list[dict]:
     """Fetch the most recent conversations for a user."""
     import config
-    if config.MONGODB_URI:
-        from modules.mongo_repository import ConversationRepo
-        docs = ConversationRepo.get_history(user_id=user_id, limit=limit)
-        return [
-            {
-                "id": str(r.get("_id", r.get("id"))),
-                "query": r.get("query", ""),
-                "response": r.get("response", ""),
-                "intent": r.get("intent", "general"),
-                "confidence": r.get("confidence", 0.0),
-                "source": r.get("source", "aarkaa-3b"),
-                "timestamp": r["timestamp"].isoformat() if isinstance(r.get("timestamp"), datetime) else r.get("timestamp"),
-            }
-            for r in reversed(docs)
-        ]
+    if _use_mongodb():
+        try:
+            from modules.mongo_repository import ConversationRepo
+            docs = ConversationRepo.get_history(user_id=user_id, limit=limit)
+            return [
+                {
+                    "id": str(r.get("_id", r.get("id"))),
+                    "query": r.get("query", ""),
+                    "response": r.get("response", ""),
+                    "intent": r.get("intent", "general"),
+                    "confidence": r.get("confidence", 0.0),
+                    "source": r.get("source", "aarkaa-3b"),
+                    "timestamp": r["timestamp"].isoformat() if isinstance(r.get("timestamp"), datetime) else r.get("timestamp"),
+                }
+                for r in reversed(docs)
+            ]
+        except Exception as exc:
+            mark_mongo_unavailable(exc)
+            logger.warning("MongoDB get_recent_conversations failed (%s); falling back to SQLite.", exc)
 
     session: Session = SessionLocal()
     try:
@@ -132,10 +151,15 @@ def get_recent_conversations(user_id: str, limit: int = 15) -> list[dict]:
 def get_conversation_count(user_id: str) -> int:
     """Total conversations for a user."""
     import config
-    if config.MONGODB_URI:
-        from modules.mongo_repository import ConversationRepo
-        coll = ConversationRepo.get_collection()
-        return coll.count_documents({"user_id": user_id}) if coll is not None else 0
+    if _use_mongodb():
+        try:
+            from modules.mongo_repository import ConversationRepo
+            coll = ConversationRepo.get_collection()
+            if coll is not None:
+                return coll.count_documents({"user_id": user_id})
+        except Exception as exc:
+            mark_mongo_unavailable(exc)
+            logger.warning("MongoDB get_conversation_count failed (%s); falling back to SQLite.", exc)
 
     session: Session = SessionLocal()
     try:
@@ -168,14 +192,18 @@ def get_chat_context(user_id: str, session_id: str, limit: int = 10) -> list[dic
         "data lineage & provenance",
         "authoritative data lineage",
     ]
-    if config.MONGODB_URI:
-        from modules.mongo_repository import PersonalChatRepo
-        docs = PersonalChatRepo.get_messages(user_id=user_id, session_id=session_id, limit=limit * 2)
-        return [
-            {"role": r.get("role"), "message": r.get("message")}
-            for r in docs
-            if not any(k in (r.get("message") or "").lower() for k in refusal_markers)
-        ]
+    if _use_mongodb():
+        try:
+            from modules.mongo_repository import PersonalChatRepo
+            docs = PersonalChatRepo.get_messages(user_id=user_id, session_id=session_id, limit=limit * 2)
+            return [
+                {"role": r.get("role"), "message": r.get("message")}
+                for r in docs
+                if not any(k in (r.get("message") or "").lower() for k in refusal_markers)
+            ]
+        except Exception as exc:
+            mark_mongo_unavailable(exc)
+            logger.warning("MongoDB get_chat_context failed (%s); falling back to SQLite.", exc)
 
     session: Session = SessionLocal()
     try:
@@ -261,7 +289,15 @@ def get_user_profile(user_id: str) -> dict:
                 interaction_count=0,
             )
             session.add(profile)
-            session.commit()
+            try:
+                session.commit()
+            except Exception:
+                session.rollback()
+                profile = (
+                    session.query(UserKnowledgeProfile)
+                    .filter(UserKnowledgeProfile.user_id == user_id)
+                    .first()
+                )
 
         return {
             "user_id": profile.user_id,
@@ -349,7 +385,7 @@ def store_rlhf_feedback(
 
     import config
     # 1. Store in MongoDB if enabled
-    if config.MONGODB_URI:
+    if _use_mongodb():
         try:
             from modules.mongo_repository import RLHFRepo
             RLHFRepo.add_entry(
@@ -385,7 +421,7 @@ def store_rlhf_feedback(
     except Exception as exc:
         session.rollback()
         logger.error("store_rlhf_feedback failed: %s", exc)
-        if not config.MONGODB_URI:
+        if not _use_mongodb():
             raise exc
     finally:
         session.close()

@@ -849,8 +849,9 @@ def _stream_modal_gpu(prompt, max_new_tokens=16384, stop=None, temperature=0.7, 
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"}
         )
-        # Fast 3.5s timeout: if Modal GPU is cold or slow, seamlessly fall back to local Aarka engine
-        resp = urllib.request.urlopen(req, timeout=3.5)
+        # Modal GPU endpoint timeout (allow container spinup)
+        modal_timeout = float(os.getenv('AARKAAI_MODAL_TIMEOUT', '25.0'))
+        resp = urllib.request.urlopen(req, timeout=modal_timeout)
         _modal_breaker_failures = 0
 
         def generator():

@@ -14,14 +14,34 @@ import config
 
 logger = logging.getLogger(__name__)
 
+import time
 _client: Optional[MongoClient] = None
 _db = None
+_client_cooldown_until = 0.0
+
+
+def mark_mongo_unavailable(exc: Any = None) -> None:
+    """Safely mark MongoDB as unavailable and cool down connection retries."""
+    global _client, _db, _client_cooldown_until
+    if exc:
+        logger.warning("MongoDB unavailable (%s); falling back to SQLite for the session.", exc)
+    try:
+        if _client is not None:
+            _client.close()
+    except Exception:
+        pass
+    _client = None
+    _db = None
+    _client_cooldown_until = time.time() + 86400.0
 
 
 def get_mongo_client() -> Optional[MongoClient]:
     """Return singleton PyMongo MongoClient instance or None if MONGODB_URI is not set."""
-    global _client
+    global _client, _client_cooldown_until
     if not config.MONGODB_URI:
+        return None
+
+    if time.time() < _client_cooldown_until:
         return None
 
     if _client is None:
@@ -29,9 +49,9 @@ def get_mongo_client() -> Optional[MongoClient]:
             logger.info("Connecting to MongoDB Atlas Flex cluster...")
             _client = MongoClient(
                 config.MONGODB_URI,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=5000,
-                socketTimeoutMS=30000,
+                serverSelectionTimeoutMS=2000,
+                connectTimeoutMS=2000,
+                socketTimeoutMS=5000,
                 maxPoolSize=50,
                 minPoolSize=5,
                 retryWrites=True,
@@ -41,8 +61,7 @@ def get_mongo_client() -> Optional[MongoClient]:
             _client.admin.command("ping")
             logger.info("✓ Connected to MongoDB Atlas Flex successfully.")
         except Exception as exc:
-            logger.error("Failed to connect to MongoDB Atlas Flex: %s", exc)
-            _client = None
+            mark_mongo_unavailable(exc)
             return None
     return _client
 
@@ -53,11 +72,14 @@ def get_mongo_db():
     if _db is not None:
         return _db
 
-    client = get_mongo_client()
-    if client is not None:
-        _db = client[config.MONGODB_DB_NAME]
-        init_mongo_indexes(_db)
-        return _db
+    try:
+        client = get_mongo_client()
+        if client is not None:
+            _db = client[config.MONGODB_DB_NAME]
+            init_mongo_indexes(_db)
+            return _db
+    except Exception as exc:
+        mark_mongo_unavailable(exc)
     return None
 
 
