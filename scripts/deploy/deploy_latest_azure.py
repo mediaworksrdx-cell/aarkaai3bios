@@ -111,7 +111,7 @@ def deploy():
         return False
 
     print("\n[3/5] Extracting archive on Azure VM...")
-    extract_cmd = f"cd {REMOTE_DIR} && tar -xzf {ARCHIVE_NAME} --overwrite && rm -f {ARCHIVE_NAME}"
+    extract_cmd = f"chmod -R u+w {REMOTE_DIR} && cd {REMOTE_DIR} && tar -xzf {ARCHIVE_NAME} --overwrite && rm -f {ARCHIVE_NAME}"
     res = run_ssh(extract_cmd)
     if res.returncode != 0:
         print("Extract failed!", res.stderr)

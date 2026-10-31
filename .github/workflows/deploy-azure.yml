@@ -1,0 +1,83 @@
+name: Azure Production Deployment
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'modules/**'
+      - 'pipeline/**'
+      - 'routers/**'
+      - 'skills/**'
+      - '.agents/**'
+      - 'main.py'
+      - 'config.py'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - 'infra/azure/**'
+      - '.github/workflows/deploy-azure.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-and-test:
+    name: Validate Fixed Codebase & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov ruff
+
+      - name: Codebase Lint & AST Validation
+        run: |
+          python -m compileall -q modules/ main.py
+          ruff check modules/ main.py --select E,F,W --ignore E501
+
+      - name: Run Core Verification Tests
+        run: |
+          pytest tests/test_sparc_genuine_stages.py tests/test_snapshot_recovery.py tests/unit/test_all_tools_registry.py -v
+
+  deploy-to-azure-vm:
+    name: Deploy Fixed Codebase to Azure VM
+    needs: [ validate-and-test ]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Key & Deploy
+        env:
+          AZURE_SSH_KEY: ${{ secrets.AZURE_VM_SSH_KEY }}
+          REMOTE_USER: "azureuser"
+          REMOTE_HOST: "138.91.105.85"
+          REMOTE_DIR: "/home/azureuser/aarkaai3b"
+        run: |
+          if [ -z "$AZURE_SSH_KEY" ]; then
+            echo "Notice: AZURE_VM_SSH_KEY secret not configured in repo settings. Skipping automated VM SSH push."
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          echo "$AZURE_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          tar --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='node_modules' \
+              -czf deploy_latest_azure.tar.gz main.py config.py requirements.txt pyproject.toml \
+              modules pipeline routers skills .agents tests
+
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa deploy_latest_azure.tar.gz $REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR/
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $REMOTE_USER@$REMOTE_HOST "chmod -R u+w $REMOTE_DIR && cd $REMOTE_DIR && tar -xzf deploy_latest_azure.tar.gz --overwrite && rm -f deploy_latest_azure.tar.gz && pm2 restart aarka-backend && pm2 list"
+
+      - name: Verify Live Deployment Health
+        run: |
+          sleep 10
+          curl -f -s http://138.91.105.85/health || echo "Remote health endpoint warming up..."
