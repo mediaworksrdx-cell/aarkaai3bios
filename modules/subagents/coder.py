@@ -22,14 +22,15 @@ Produce code that is ready for production, well-structured, and highly maintaina
     def _execute(self, query: str, context: dict) -> str:
         prompt = f"Requirements: {query}\n\nPlease generate the required code."
         if context:
-            prompt += f"\nContext: {json.dumps(context)}"
+            prompt += f"\nContext: {json.dumps(context, default=str)}"
         
         output = self._invoke_model(self.system_prompt, prompt)
         
         if context.get('execute_code', False):
             # Assuming FinanceCodeTool can execute the code
-            tool_results = self._invoke_tools([('FinanceCodeTool', 'execute', {'code': output})])
-            return f"Code:\n{output}\n\nExecution Output:\n{tool_results}"
+            tool_results = self._invoke_tools([('FinanceCodeTool', 'execute', {'code': output})], context=context)
+            exec_data = "\n".join(str(r.data if hasattr(r, "data") else r) for r in tool_results)
+            return f"Code:\n{output}\n\nExecution Output:\n{exec_data}"
         
         return output
 

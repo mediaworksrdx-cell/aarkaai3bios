@@ -29,7 +29,7 @@ class DocumentParserTool(Tool):
                 return str(document_parser.extract_key_figures(text))
             elif action == "summarize":
                 file_path = params.get("file_path")
-                max_chars = params.get("max_chars")
+                max_chars = int(params.get("max_chars") or 3000)
                 return str(document_parser.summarize_document(file_path, max_chars))
             return f"Unknown action: {action}"
         except Exception as e:

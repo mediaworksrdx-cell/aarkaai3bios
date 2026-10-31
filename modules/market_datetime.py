@@ -59,6 +59,9 @@ def is_trading_day(check_date: date = None, exchange: str = "NSE") -> bool:
     """Check if a given date is a trading day (not weekend, not holiday)."""
     if check_date is None:
         check_date = date.today()
+    elif isinstance(check_date, str):
+        check_date = datetime.strptime(check_date, "%Y-%m-%d").date()
+    exchange = exchange or "NSE"
     
     if check_date.weekday() >= 5: # Saturday or Sunday
         return False

@@ -19,22 +19,22 @@ class MarketDateTimeTool(Tool):
         action = params.get("action", "default")
         try:
             if action == "market_status":
-                exchange = params.get("exchange")
+                exchange = params.get("exchange") or "NSE"
                 return str(market_datetime.is_market_open(exchange))
             elif action == "next_expiry":
-                expiry_type = params.get("expiry_type")
-                exchange = params.get("exchange")
+                expiry_type = params.get("expiry_type") or "monthly"
+                exchange = params.get("exchange") or "NSE"
                 return str(market_datetime.next_expiry(expiry_type, exchange))
             elif action == "holidays":
-                year = params.get("year")
-                exchange = params.get("exchange")
+                year = int(params.get("year") or 2026)
+                exchange = params.get("exchange") or "NSE"
                 return str(market_datetime.get_trading_holidays(year, exchange))
             elif action == "time_to_expiry":
-                expiry_date_str = params.get("expiry_date_str")
+                expiry_date_str = params.get("expiry_date_str") or ""
                 return str(market_datetime.time_to_expiry(expiry_date_str))
             elif action == "is_trading_day":
                 check_date = params.get("check_date")
-                exchange = params.get("exchange")
+                exchange = params.get("exchange") or "NSE"
                 return str(market_datetime.is_trading_day(check_date, exchange))
             return f"Unknown action: {action}"
         except Exception as e:

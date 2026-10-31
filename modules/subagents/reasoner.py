@@ -23,7 +23,7 @@ Your output should clearly delineate these stages. Focus purely on logical reaso
     def _execute(self, query: str, context: dict) -> str:
         prompt = f"Query: {query}\n"
         if context:
-            prompt += f"\nPrior Context: {json.dumps(context, indent=2)}\n"
+            prompt += f"\nPrior Context: {json.dumps(context, indent=2, default=str)}\n"
         prompt += "\nPlease provide your reasoning trace and final answer following the requested steps."
         
         response = self._invoke_model(self.system_prompt, prompt)

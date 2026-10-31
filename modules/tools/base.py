@@ -34,7 +34,13 @@ class ToolRegistry:
         self.tools[tool.name] = tool
 
     def get_tool(self, name: str) -> Tool:
-        return self.tools.get(name)
+        if name in self.tools:
+            return self.tools[name]
+        if name.endswith("Tool") and name[:-4] in self.tools:
+            return self.tools[name[:-4]]
+        if f"{name}Tool" in self.tools:
+            return self.tools[f"{name}Tool"]
+        return None
 
     def get_all_tool_metadata(self) -> Dict[str, Dict[str, Any]]:
         """Return registry metadata mapping for the planning module."""

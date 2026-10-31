@@ -49,7 +49,7 @@ STRICT RULES:
                 # Chain 1: Price data
                 price_results = self._invoke_tools([
                     ("MarketDataTool", "price", {"symbol": symbol})
-                ])
+                ], context=context)
                 for r in price_results:
                     if r.is_valid and r.data:
                         parts.append(f"[Price] {r.data}")
@@ -58,7 +58,7 @@ STRICT RULES:
                 # Chain 2: Financial ratios
                 ratio_results = self._invoke_tools([
                     ("FinancialDataTool", "ratios", {"symbol": symbol})
-                ])
+                ], context=context)
                 for r in ratio_results:
                     if r.is_valid and r.data:
                         parts.append(f"[Ratios] {r.data}")
@@ -67,7 +67,7 @@ STRICT RULES:
                 # Chain 3: Technical indicators
                 tech_results = self._invoke_tools([
                     ("TechnicalAnalysisTool", "indicators", {"symbol": symbol})
-                ])
+                ], context=context)
                 for r in tech_results:
                     if r.is_valid and r.data:
                         parts.append(f"[Technicals] {r.data}")

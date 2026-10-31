@@ -31,8 +31,8 @@ class KnowledgeSearchTool(Tool):
         if not query:
             return "Error: 'query' parameter is required for search action."
         user_id = params.get("user_id", "default")
-        top_k = params.get("top_k", 3)
-        return str(rag.retrieve(query, user_id, top_k))
+        top_k = int(params.get("top_k", 3))
+        return str(rag.retrieve(query=query, top_k=top_k, user_id=user_id))
 
     def _handle_store(self, params: Dict[str, Any]) -> str:
         topic = params.get("topic")

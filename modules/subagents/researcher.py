@@ -23,13 +23,16 @@ Guidelines:
         search_terms = search_terms.strip() if search_terms else query
 
         # 2. Try RAG knowledge base via self._invoke_tools
-        rag_results = self._invoke_tools([('KnowledgeSearchTool', 'search', {'query': search_terms})])
+        rag_results = self._invoke_tools([('KnowledgeSearchTool', 'search', {'query': search_terms})], context=context)
         
         # 3. Try web search via self._invoke_tools
-        web_results = self._invoke_tools([('WebSearch', 'search', {'query': search_terms})])
+        web_results = self._invoke_tools([('WebSearch', 'search', {'query': search_terms})], context=context)
+
+        rag_text = "\n".join(str(r.data if hasattr(r, "data") else r) for r in rag_results)
+        web_text = "\n".join(str(r.data if hasattr(r, "data") else r) for r in web_results)
 
         # 4. Combine tool results into a research context string
-        research_context = f"--- RAG Results ---\n{rag_results}\n\n--- Web Results ---\n{web_results}"
+        research_context = f"--- RAG Results ---\n{rag_text}\n\n--- Web Results ---\n{web_text}"
 
         # 5. Call self._invoke_model() with the research context to synthesize findings
         synthesis_prompt = self.system_prompt

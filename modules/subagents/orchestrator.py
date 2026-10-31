@@ -398,7 +398,7 @@ class CognitiveOrchestrator:
         # Check if writer or critic already synthesized a complete response
         final_synthesized = None
         for r in reversed(accumulated_results):
-            if r.agent_name in ("writer", "critic") and r.output and len(r.output.strip()) > 80:
+            if r.agent_name.lower() in ("writer", "writeragent", "critic", "criticagent") and r.output and len(r.output.strip()) > 80:
                 final_synthesized = r.output.strip()
                 break
 

@@ -47,9 +47,12 @@ Instructions:
                 corrected = result.get('corrected_answer')
                 if corrected:
                     return corrected
-                return str(result)
+                return answer_to_verify if answer_to_verify else str(result)
         except json.JSONDecodeError:
-            return f"Critic failed to output valid JSON. Output was: {output}"
+            if '_metadata' not in context:
+                context['_metadata'] = {}
+            context['_metadata']['critic_json_error'] = True
+            return answer_to_verify if answer_to_verify else f"Critic failed to output valid JSON. Output was: {output}"
 
     def _estimate_confidence(self, output: str, context: dict) -> float:
         score = context.get('_metadata', {}).get('critic_score', 5)
