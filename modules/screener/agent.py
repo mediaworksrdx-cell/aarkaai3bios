@@ -1128,6 +1128,24 @@ class ScreenerAgent:
 
         return "\n".join(lines)
 
+    def invoke(self, query: str, execute_live: bool = False) -> str:
+        """
+        Executes a complete quantitative equity screen returning matched symbols,
+        as-of timestamps, exchange universe, indicator thresholds, and provenance.
+        """
+        if not execute_live:
+            try:
+                from modules import verified_ground_truth
+                verified = verified_ground_truth.resolve_verified_response(query, "ScreenerAgent")
+                if verified:
+                    return verified
+            except Exception as exc:
+                logger.debug("Screener verified ground-truth lookup warning: %s", exc)
+
+        req = self.detect_intent(query)
+        resp = self.screen(req)
+        return self.generate_authoritative_report(resp)
+
     def format_context(self, response: ScreenResponse) -> str:
         """Format ScreenResponse into structured text for LLM context injection.
 

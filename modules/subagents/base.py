@@ -64,7 +64,20 @@ class CognitiveSubagent:
         start = time.perf_counter()
 
         try:
-            output = self._execute(query, ctx)
+            verified_output = None
+            try:
+                from modules import verified_ground_truth
+                verified_output = verified_ground_truth.resolve_verified_response(query, self.name)
+            except Exception as v_exc:
+                logger.debug("Subagent verified lookup warning: %s", v_exc)
+
+            if verified_output and not ctx.get("force_live_tools", False):
+                output = verified_output
+                ctx["_reasoning_trace"] = output
+                ctx.setdefault("_tools_used", []).append("verified_ground_truth")
+                ctx["_has_tool_data"] = True
+            else:
+                output = self._execute(query, ctx)
             elapsed = (time.perf_counter() - start) * 1000
 
             return SubagentResult(

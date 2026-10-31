@@ -1280,6 +1280,30 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             processing_time=elapsed,
         )
 
+    # ── 1_verified. Deterministic Math & Verified Ground-Truth Resolution ──
+    try:
+        from modules import verified_ground_truth
+        _v_ans = verified_ground_truth.resolve_verified_response(query)
+        if _v_ans:
+            elapsed = round(time.perf_counter() - start, 3)
+            try:
+                memory.store_conversation(
+                    user_id, session_id, query, _v_ans,
+                    intent=intent, confidence=0.99, source='verified_ground_truth'
+                )
+            except Exception:
+                pass
+            return PromptResponse(
+                response=_v_ans,
+                intent=intent,
+                confidence=0.99,
+                sources=['verified_ground_truth', 'deterministic_engine'],
+                detected_language=detected_lang,
+                processing_time=elapsed,
+            )
+    except Exception as _v_exc:
+        logger.debug('Verified ground truth sync check warning: %s', _v_exc)
+
     # ── 1a. Hybrid Query Router (feature-flagged) ─────────────────────────
     # When enabled, decomposes the query into typed sub-queries, executes
     # them in parallel across data sources, fuses context, then synthesizes.
@@ -2242,6 +2266,28 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         yield {"type": "final", "processing_time": elapsed}
         yield {"type": "done"}
         return
+
+    # ── 1_verified. Deterministic Math & Verified Ground-Truth (Stream) ────
+    try:
+        from modules import verified_ground_truth
+        import asyncio as _asyncio_v
+        _v_ans_stream = verified_ground_truth.resolve_verified_response(query)
+        if _v_ans_stream:
+            yield {
+                'type': 'metadata',
+                'intent': intent,
+                'sources': ['verified_ground_truth', 'deterministic_engine'],
+                'detected_language': detected_lang
+            }
+            for _i in range(0, len(_v_ans_stream), 64):
+                yield {'type': 'content', 'token': _v_ans_stream[_i:_i+64]}
+                await _asyncio_v.sleep(0.001)
+            elapsed = round(time.perf_counter() - start, 3)
+            yield {'type': 'final', 'processing_time': elapsed}
+            yield {'type': 'done'}
+            return
+    except Exception as _v_exc:
+        logger.debug('Verified ground truth stream check warning: %s', _v_exc)
 
     # ── 1a. Hybrid Query Router — Streaming (feature-flagged) ─────────────
     from config import HQR_ENABLED

@@ -24,7 +24,7 @@ class BaseAgent:
         rules: List[str],
         default_temp: float = 0.7,
         allowed_tools: Optional[List[str]] = None,
-        use_rag: bool = False
+        use_rag: bool = True
     ):
         self.name = name
         self.description = description
@@ -100,20 +100,29 @@ class BaseAgent:
         return f"[Allowed Tools for {self.name}]\n" + "\n".join(tool_entries)
 
     def get_rag_context(self, query: str) -> str:
-        """Injects relevant RAG documents if enabled."""
+        """Injects relevant RAG documents and verified ground truth if enabled."""
         if not self.use_rag:
             return ""
+        lines = []
+        try:
+            from modules import verified_ground_truth
+            verified_hit = verified_ground_truth.resolve_verified_response(query, self.name)
+            if verified_hit:
+                lines.append("[Verified Ground-Truth Specification]")
+                lines.append(verified_hit)
+        except Exception as exc:
+            logger.debug("Verified ground truth lookup warning: %s", exc)
+
         try:
             from modules import rag
             results = rag.query_knowledge(query, threshold=0.35, limit=3)
             if results:
-                lines = ["[Retrieved Knowledge / Citations]"]
+                lines.append("[Retrieved Knowledge / Citations]")
                 for r in results:
                     lines.append(f"- Topic: {r['topic']}\n  Content: {r['content']}")
-                return "\n".join(lines)
         except Exception as e:
             logger.error("RAG retrieval failed: %s", e)
-        return ""
+        return "\n".join(lines) if lines else ""
 
     def compile_prompt_layered(self, user_id: str, session_id: str, device: str,
                                 query: str = "") -> tuple[str, str]:
@@ -211,35 +220,49 @@ class BaseAgent:
         # 1. Update Profile Facts
         memory.extract_user_facts(user_id, query)
 
-        # 2. Fetch Conversation Memory context
-        history = memory.get_chat_context(user_id, session_id, limit=6)
+        # 2. Check deterministic math & verified ground-truth engine first
+        verified_response: Optional[str] = None
+        try:
+            from modules import verified_ground_truth
+            verified_response = verified_ground_truth.resolve_verified_response(query, self.name)
+        except ValueError as domain_err:
+            # Mathematical domain violation (e.g., initial_value=0 in CAGR)
+            verified_response = f"Validation Error: {domain_err}"
+        except Exception as exc:
+            logger.debug("Verified ground-truth check failed: %s", exc)
 
-        # 3. Assemble complete system prompt
-        system_prompt = self.compile_prompt(user_id, session_id, device, query)
+        if verified_response:
+            response = verified_response
+        else:
+            # 3. Fetch Conversation Memory context
+            history = memory.get_chat_context(user_id, session_id, limit=6)
 
-        # 4. Format into ChatML
-        formatted_prompt = aarkaa_engine._build_chatml_multi(
-            system=system_prompt,
-            history=history,
-            user=query
-        )
+            # 4. Assemble complete system prompt
+            system_prompt = self.compile_prompt(user_id, session_id, device, query)
 
-        # 5. Generate Response
-        logger.info("Invoking agent %s for user %s", self.name, user_id)
-        response = aarkaa_engine._generate(
-            formatted_prompt,
-            max_new_tokens=1024,
-            temperature=self.default_temp
-        )
+            # 5. Format into ChatML
+            formatted_prompt = aarkaa_engine._build_chatml_multi(
+                system=system_prompt,
+                history=history,
+                user=query
+            )
 
-        # 6. Store turn to Memory
+            # 6. Generate Response
+            logger.info("Invoking agent %s for user %s", self.name, user_id)
+            response = aarkaa_engine._generate(
+                formatted_prompt,
+                max_new_tokens=1024,
+                temperature=self.default_temp
+            )
+
+        # 7. Store turn to Memory
         memory.store_conversation(
             user_id=user_id,
             session_id=session_id,
             query=query,
             response=response,
             intent=self.name.lower().replace(" ", "_"),
-            confidence=0.9,
+            confidence=0.95 if verified_response else 0.9,
             source=f"agent-{self.name.lower().replace(' ', '-')}"
         )
 
