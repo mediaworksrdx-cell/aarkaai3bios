@@ -147,17 +147,19 @@ class _SourceHandlers:
 
     @staticmethod
     def fetch_news(sq: SubQuery, user_id: str) -> SourceResult:
-        """Fetch current news via Google CSE / DuckDuckGo (modules.web_search)."""
+        """Fetch current news via Tavily AI Search / Google CSE / DuckDuckGo (modules.web_search)."""
         start = time.perf_counter()
         try:
-            from modules.web_search import search_google_cse, search_ddg
+            from modules.web_search import search_tavily, search_google_cse, search_ddg
 
             query = sq.params.get("query", sq.query_text)
             lang = sq.params.get("lang", "en")
             max_results = sq.params.get("max_results", 5)
 
-            # Google CSE first, fallback to DuckDuckGo
-            results = search_google_cse(query, max_results=max_results)
+            # Tavily first, then Google CSE, fallback to DuckDuckGo
+            results = search_tavily(query, max_results=max_results, topic="news")
+            if not results:
+                results = search_google_cse(query, max_results=max_results)
             if not results:
                 results = search_ddg(query, max_results=max_results)
 
