@@ -65,13 +65,18 @@ def verify_answer_correctness(agent_name: str, query_idx: int, output: str, is_c
         if "isin" not in out_low or "ind as" not in out_low:
             return False, "Analyst output missing ISIN / Ind AS provenance"
 
-    # 4. Code agents must pass AST parsing
+    # 4. Code agents must pass AST parsing on Python code
     if is_code_agent or agent_name in ("AarkaCoderPipeline", "CoderAgent", "CodingAgent"):
-        blocks = re.findall(r"```(?:python)?\s*(.*?)\s*```", output, re.DOTALL)
-        code_to_check = blocks[0] if blocks else (output if agent_name == "AarkaCoderPipeline" else "")
-        if code_to_check:
+        python_blocks = re.findall(r"```(?:python|py)\s*\n(.*?)\s*```", output, re.DOTALL)
+        if python_blocks:
+            for code_to_check in python_blocks:
+                try:
+                    ast.parse(code_to_check)
+                except SyntaxError as exc:
+                    return False, f"AST SyntaxError: {exc}"
+        elif agent_name == "AarkaCoderPipeline":
             try:
-                ast.parse(code_to_check)
+                ast.parse(output)
             except SyntaxError as exc:
                 return False, f"AST SyntaxError: {exc}"
 

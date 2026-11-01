@@ -209,6 +209,7 @@ def run_audit_loop():
                 "latency_s": round(elapsed, 3),
                 "was_corrected": was_corrected,
                 "failure_reason": None if is_ok else reason,
+                "full_output": output,
                 "output_preview": output[:140].replace("\n", " ") + "...",
             })
 
