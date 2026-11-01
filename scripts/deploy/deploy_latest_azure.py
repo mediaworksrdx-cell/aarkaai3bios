@@ -64,6 +64,7 @@ def create_archive():
             "modal_server.py",
             "requirements.txt",
             "pyproject.toml",
+            "agent_240_full_queries_and_answers.json",
         ]
         for rf in root_files:
             if os.path.exists(rf):
