@@ -1,227 +1,269 @@
+"""
+AARKAAI – Market date/time utilities.
+
+* Exchange rules (sessions, expiry weekday, trading-days-per-year) are loaded
+  from ``modules/market_rules.json`` (override with AARKA_MARKET_RULES_PATH).
+* Holidays are fetched from the exchange source and cached per year under
+  ``data/market_holidays/``. Operators may also drop a verified JSON file in
+  that directory. Nothing is hardcoded; if no calendar is available the
+  functions report ``holiday_calendar_verified = False`` instead of guessing.
+"""
+from __future__ import annotations
+
+import calendar
+import json
 import logging
-from datetime import datetime, date, time, timedelta
-from typing import Dict, Any, List
+import os
+from datetime import date, datetime, time, timedelta, timezone
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import pytz
 
 logger = logging.getLogger(__name__)
 
-def get_trading_holidays(year: int = 2026, exchange: str = "NSE") -> list:
-    """Get list of trading holidays. Hardcoded for NSE 2026.
-    Returns list of {date, name, day_of_week}."""
-    holidays = []
-    if exchange.upper() == "NSE" and year == 2026:
-        holiday_dates = [
-            (date(2026, 1, 26), "Republic Day"),
-            (date(2026, 3, 3), "Holi"),
-            (date(2026, 3, 20), "Eid-Ul-Fitr"),
-            (date(2026, 4, 3), "Good Friday"),
-            (date(2026, 4, 14), "Dr. Baba Saheb Ambedkar Jayanti"),
-            (date(2026, 5, 1), "Maharashtra Day"),
-            (date(2026, 5, 27), "Bakri Id"),
-            (date(2026, 8, 15), "Independence Day"),
-            (date(2026, 9, 14), "Ganesh Chaturthi"),
-            (date(2026, 10, 2), "Mahatma Gandhi Jayanti"),
-            (date(2026, 10, 18), "Dussehra"),
-            (date(2026, 11, 8), "Diwali"),
-            (date(2026, 11, 24), "Guru Nanak Jayanti"),
-            (date(2026, 12, 25), "Christmas"),
-        ]
-        for d, name in holiday_dates:
-            holidays.append({
-                "date": str(d),
-                "name": name,
-                "day_of_week": d.strftime("%A")
-            })
-    return holidays
+_ROOT = Path(__file__).resolve().parent.parent
+_RULES_PATH = Path(os.environ.get("AARKA_MARKET_RULES_PATH", Path(__file__).with_name("market_rules.json")))
+_HOLIDAY_DIR = Path(os.environ.get("AARKA_HOLIDAY_DIR", _ROOT / "data" / "market_holidays"))
+_WEEKDAYS = {name: i for i, name in enumerate(calendar.day_name)}
+
+
+@lru_cache(maxsize=1)
+def _rules() -> Dict[str, Any]:
+    with open(_RULES_PATH, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    return {k.upper(): v for k, v in data.items() if not k.startswith("_")}
+
+
+def exchange_rules(exchange: str) -> Dict[str, Any]:
+    ex = (exchange or "").upper()
+    rules = _rules()
+    if ex not in rules:
+        raise ValueError(f"Unknown exchange '{exchange}'. Configured: {sorted(rules)}")
+    return rules[ex]
+
+
+def _tz(exchange: str):
+    return pytz.timezone(exchange_rules(exchange)["timezone"])
+
+
+def now(exchange: str) -> datetime:
+    return datetime.now(_tz(exchange))
+
+
+def _parse_hhmm(s: str) -> time:
+    return datetime.strptime(s, "%H:%M").time()
+
+
+# ─────────────────────────────── holidays ─────────────────────────────────────
+
+def _cache_file(exchange: str, year: int) -> Path:
+    return _HOLIDAY_DIR / f"{exchange.upper()}_{year}.json"
+
+
+def _fetch_nse_holidays(src: Dict[str, Any], year: int) -> Optional[List[Dict[str, str]]]:
+    try:
+        import requests
+    except ImportError:
+        return None
+    headers = {"User-Agent": "Mozilla/5.0 (AARKAAI market calendar)", "Accept": "application/json",
+               "Referer": src.get("warmup_url", "")}
+    try:
+        with requests.Session() as s:
+            if src.get("warmup_url"):
+                s.get(src["warmup_url"], headers=headers, timeout=8)
+            r = s.get(src["url"], headers=headers, timeout=8)
+            r.raise_for_status()
+            payload = r.json()
+    except Exception as exc:  # network/API failures are reported, not hidden
+        logger.warning("Holiday fetch failed (%s): %s", src.get("url"), exc)
+        return None
+    rows = payload.get(src.get("segment", "CM"), []) if isinstance(payload, dict) else []
+    out = []
+    for row in rows:
+        try:
+            d = datetime.strptime(row["tradingDate"], "%d-%b-%Y").date()
+        except (KeyError, ValueError):
+            continue
+        if d.year == year:
+            out.append({"date": d.isoformat(), "name": row.get("description", ""), "day_of_week": d.strftime("%A")})
+    return out or None
+
+
+@lru_cache(maxsize=32)
+def _load_holidays(exchange: str, year: int) -> Optional[tuple]:
+    path = _cache_file(exchange, year)
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return tuple(tuple(sorted(h.items())) for h in data["holidays"])
+        except Exception as exc:
+            logger.warning("Invalid holiday cache %s: %s", path, exc)
+    if os.environ.get("AARKA_OFFLINE") == "1":
+        return None
+    src = exchange_rules(exchange).get("holiday_source", {})
+    fetched = _fetch_nse_holidays(src, year) if src.get("provider") == "nse_api" else None
+    if not fetched:
+        return None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"exchange": exchange.upper(), "year": year, "source": src.get("url"),
+                                    "fetched_at": datetime.now(timezone.utc).isoformat(), "holidays": fetched},
+                                   indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not write holiday cache: %s", exc)
+    return tuple(tuple(sorted(h.items())) for h in fetched)
+
+
+def holiday_calendar_status(year: int, exchange: str = "NSE") -> Dict[str, Any]:
+    loaded = _load_holidays(exchange.upper(), int(year))
+    src = exchange_rules(exchange).get("holiday_source", {})
+    return {"exchange": exchange.upper(), "year": int(year), "verified": loaded is not None,
+            "source": str(_cache_file(exchange, year)) if loaded is not None else src.get("url", "none configured")}
+
+
+def get_trading_holidays(year: Optional[int] = None, exchange: str = "NSE") -> list:
+    """Holidays for ``year`` (default: current exchange-local year). Empty list if unavailable."""
+    yr = int(year) if year is not None else now(exchange).year
+    loaded = _load_holidays(exchange.upper(), yr)
+    return [dict(h) for h in loaded] if loaded else []
+
+
+# ─────────────────────────────── sessions ─────────────────────────────────────
 
 def market_session_info(exchange: str = "NSE") -> dict:
-    """Full session breakdown: pre_market, market_open, market_close, post_market times."""
-    exchange = exchange.upper()
-    if exchange in ["NSE", "BSE"]:
-        return {
-            "pre_market": "09:00:00",
-            "market_open": "09:15:00",
-            "market_close": "15:30:00",
-            "post_market": "16:00:00",
-            "timezone": "Asia/Kolkata"
-        }
-    elif exchange in ["NYSE", "NASDAQ"]:
-        return {
-            "pre_market": "04:00:00",
-            "market_open": "09:30:00",
-            "market_close": "16:00:00",
-            "post_market": "20:00:00",
-            "timezone": "America/New_York"
-        }
-    return {}
+    r = exchange_rules(exchange)
+    s = r["sessions"]
+    return {"pre_market": s["pre_open_start"], "pre_open_order_end": s.get("pre_open_order_end"),
+            "market_open": s["market_open"], "market_close": s["market_close"],
+            "post_market": s["post_close_end"], "timezone": r["timezone"]}
 
-def is_trading_day(check_date: date = None, exchange: str = "NSE") -> bool:
-    """Check if a given date is a trading day (not weekend, not holiday)."""
+
+def is_trading_day(check_date: Any = None, exchange: str = "NSE") -> bool:
+    """Weekday and (when a verified calendar is available) holiday check."""
+    exchange = exchange or "NSE"
     if check_date is None:
-        check_date = date.today()
+        check_date = now(exchange).date()
     elif isinstance(check_date, str):
         check_date = datetime.strptime(check_date, "%Y-%m-%d").date()
-    exchange = exchange or "NSE"
-    
-    if check_date.weekday() >= 5: # Saturday or Sunday
+    if check_date.weekday() >= 5:
         return False
-        
-    if exchange.upper() == "NSE" and check_date.year == 2026:
-        holiday_dates = [datetime.strptime(h["date"], "%Y-%m-%d").date() for h in get_trading_holidays(check_date.year, exchange)]
-        if check_date in holiday_dates:
-            return False
-            
-    return True
+    holidays = {h["date"] for h in get_trading_holidays(check_date.year, exchange)}
+    return check_date.isoformat() not in holidays
+
 
 def is_market_open(exchange: str = "NSE") -> dict:
-    """Check if market is currently open.
-    Supports: NSE (9:15-15:30 IST), BSE (9:15-15:30 IST), NYSE (9:30-16:00 ET), NASDAQ (9:30-16:00 ET).
-    Returns dict with is_open, exchange, current_time, session (pre_market/market/post_market/closed), next_open."""
     try:
         info = market_session_info(exchange)
-        if not info:
-            return {"is_open": False, "error": "Unknown exchange"}
-            
-        tz = pytz.timezone(info["timezone"])
-        now = datetime.now(tz)
-        
-        pre_mkt = datetime.strptime(info["pre_market"], "%H:%M:%S").time()
-        mkt_open = datetime.strptime(info["market_open"], "%H:%M:%S").time()
-        mkt_close = datetime.strptime(info["market_close"], "%H:%M:%S").time()
-        post_mkt = datetime.strptime(info["post_market"], "%H:%M:%S").time()
-        
-        current_time = now.time()
-        is_td = is_trading_day(now.date(), exchange)
-        
-        session = "closed"
-        is_open = False
-        
-        if is_td:
-            if mkt_open <= current_time < mkt_close:
-                session = "market"
-                is_open = True
-            elif pre_mkt <= current_time < mkt_open:
+        n = now(exchange)
+        cur = n.time()
+        pre, op, cl, post = (_parse_hhmm(info[k]) for k in ("pre_market", "market_open", "market_close", "post_market"))
+        td = is_trading_day(n.date(), exchange)
+        session, is_open = "closed", False
+        if td:
+            if op <= cur < cl:
+                session, is_open = "market", True
+            elif pre <= cur < op:
                 session = "pre_market"
-            elif mkt_close <= current_time < post_mkt:
+            elif cl <= cur < post:
                 session = "post_market"
-
-        # Find next open
-        next_open = None
-        if session == "market":
-            next_open = str(now.date()) + " " + info["market_open"]
-        else:
-            check_date = now.date() if current_time < mkt_open else now.date() + timedelta(days=1)
-            while not is_trading_day(check_date, exchange):
-                check_date += timedelta(days=1)
-            next_open = str(check_date) + " " + info["market_open"]
-            
-        return {
-            "is_open": is_open,
-            "exchange": exchange,
-            "current_time": str(now),
-            "session": session,
-            "next_open": next_open
-        }
+        d = n.date() if (cur < op and td) else n.date() + timedelta(days=1)
+        for _ in range(30):
+            if is_trading_day(d, exchange):
+                break
+            d += timedelta(days=1)
+        status = holiday_calendar_status(n.year, exchange)
+        return {"is_open": is_open, "exchange": exchange.upper(), "current_time": n.isoformat(),
+                "session": session, "next_open": f"{d.isoformat()} {info['market_open']}",
+                "timezone": info["timezone"], "holiday_calendar_verified": status["verified"],
+                "holiday_calendar_source": status["source"]}
     except Exception as e:
-        logger.error(f"Error in is_market_open: {e}")
-        return {"is_open": False, "error": str(e)}
+        logger.error("Error in is_market_open: %s", e)
+        return {"is_open": None, "error": str(e)}
+
+
+def _adjust_to_trading_day(d: date, exchange: str) -> date:
+    for _ in range(10):
+        if is_trading_day(d, exchange):
+            return d
+        d -= timedelta(days=1)
+    return d
+
 
 def next_expiry(expiry_type: str = "monthly", exchange: str = "NSE") -> dict:
-    """Next expiry date.
-    expiry_type: 'weekly' (Thursday), 'monthly' (last Thursday)
-    Returns dict with expiry_date, days_remaining, expiry_type."""
     try:
-        info = market_session_info(exchange)
-        if not info:
-            return {}
-        tz = pytz.timezone(info.get("timezone", "Asia/Kolkata"))
-        now = datetime.now(tz).date()
-        
-        target_weekday = 3 # Thursday
-        
-        if expiry_type == "weekly":
-            days_ahead = target_weekday - now.weekday()
-            if days_ahead < 0:
-                days_ahead += 7
-            next_exp = now + timedelta(days=days_ahead)
-            while not is_trading_day(next_exp, exchange):
-                next_exp -= timedelta(days=1)
-        elif expiry_type == "monthly":
-            import calendar
-            last_day = calendar.monthrange(now.year, now.month)[1]
-            last_date = date(now.year, now.month, last_day)
-            days_back = (last_date.weekday() - target_weekday) % 7
-            last_thursday = last_date - timedelta(days=days_back)
-            
-            if now > last_thursday:
-                next_month = now.month + 1 if now.month < 12 else 1
-                next_year = now.year if now.month < 12 else now.year + 1
-                last_day = calendar.monthrange(next_year, next_month)[1]
-                last_date = date(next_year, next_month, last_day)
-                days_back = (last_date.weekday() - target_weekday) % 7
-                next_exp = last_date - timedelta(days=days_back)
-            else:
-                next_exp = last_thursday
-                
-            while not is_trading_day(next_exp, exchange):
-                next_exp -= timedelta(days=1)
-        else:
-            return {}
+        rules = exchange_rules(exchange).get("derivatives_expiry")
+        if not rules:
+            return {"error": f"No derivatives expiry rule configured for {exchange}"}
+        wd = _WEEKDAYS[rules["weekday"]]
+        today = now(exchange).date()
 
-        days_remaining = (next_exp - now).days
-        
-        return {
-            "expiry_date": str(next_exp),
-            "days_remaining": days_remaining,
-            "expiry_type": expiry_type
-        }
+        def weekly_from(d: date) -> date:
+            return d + timedelta(days=(wd - d.weekday()) % 7)
+
+        def monthly_for(y: int, m: int) -> date:
+            last = date(y, m, calendar.monthrange(y, m)[1])
+            return last - timedelta(days=(last.weekday() - wd) % 7)
+
+        if expiry_type == "weekly":
+            exp = _adjust_to_trading_day(weekly_from(today), exchange)
+            if exp < today:
+                exp = _adjust_to_trading_day(weekly_from(today + timedelta(days=1)), exchange)
+        elif expiry_type == "monthly":
+            exp = _adjust_to_trading_day(monthly_for(today.year, today.month), exchange)
+            if exp < today:
+                y, m = (today.year + (today.month // 12), today.month % 12 + 1)
+                exp = _adjust_to_trading_day(monthly_for(y, m), exchange)
+        else:
+            return {"error": "expiry_type must be 'weekly' or 'monthly'"}
+        status = holiday_calendar_status(exp.year, exchange)
+        return {"expiry_date": exp.isoformat(), "days_remaining": (exp - today).days, "expiry_type": expiry_type,
+                "expiry_weekday_rule": rules["weekday"], "rule_source": rules.get("source"),
+                "holiday_calendar_verified": status["verified"]}
     except Exception as e:
-        logger.error(f"Error in next_expiry: {e}")
-        return {}
+        logger.error("Error in next_expiry: %s", e)
+        return {"error": str(e)}
+
 
 def trading_days_between(start_date: date, end_date: date, exchange: str = "NSE") -> int:
-    """Count trading days between two dates."""
-    try:
-        if start_date > end_date:
-            return 0
-        count = 0
-        current = start_date
-        while current <= end_date:
-            if is_trading_day(current, exchange):
-                count += 1
-            current += timedelta(days=1)
-        return count
-    except Exception as e:
-        logger.error(f"Error in trading_days_between: {e}")
+    if start_date > end_date:
         return 0
+    count, cur = 0, start_date
+    while cur <= end_date:
+        if is_trading_day(cur, exchange):
+            count += 1
+        cur += timedelta(days=1)
+    return count
 
-def time_to_expiry(expiry_date_str: str) -> dict:
-    """Calculate time remaining to expiry.
-    Returns days, hours, minutes, trading_days_remaining, as_fraction_of_year."""
+
+def time_to_expiry(expiry_date_str: str, exchange: str = "NSE") -> dict:
     try:
-        expiry_date = datetime.strptime(expiry_date_str, "%Y-%m-%d").date()
-        expiry_dt = datetime.combine(expiry_date, time(15, 30))
-        
-        now = datetime.now()
-        diff = expiry_dt - now
-        
+        rules = exchange_rules(exchange)
+        tz = _tz(exchange)
+        exp_date = datetime.strptime(expiry_date_str, "%Y-%m-%d").date()
+        exp_dt = tz.localize(datetime.combine(exp_date, _parse_hhmm(rules["sessions"]["market_close"])))
+        n = now(exchange)
+        diff = exp_dt - n
         if diff.total_seconds() <= 0:
-            return {"days": 0, "hours": 0, "minutes": 0, "trading_days_remaining": 0, "as_fraction_of_year": 0.0}
-            
-        days = diff.days
-        hours = diff.seconds // 3600
-        minutes = (diff.seconds % 3600) // 60
-        
-        trading_days = trading_days_between(now.date(), expiry_date)
-        as_fraction = trading_days / 252.0
-        
-        return {
-            "days": days,
-            "hours": hours,
-            "minutes": minutes,
-            "trading_days_remaining": trading_days,
-            "as_fraction_of_year": round(as_fraction, 4)
-        }
+            return {"days": 0, "hours": 0, "minutes": 0, "trading_days_remaining": 0,
+                    "as_fraction_of_year": 0.0, "calendar_fraction_of_year": 0.0}
+        tdays = trading_days_between(n.date(), exp_date, exchange)
+        tdpy = float(rules["trading_days_per_year"])
+        return {"days": diff.days, "hours": diff.seconds // 3600, "minutes": (diff.seconds % 3600) // 60,
+                "trading_days_remaining": tdays, "as_fraction_of_year": tdays / tdpy,
+                "calendar_fraction_of_year": diff.total_seconds() / (365.0 * 86400.0),
+                "trading_days_per_year": tdpy}
     except Exception as e:
-        logger.error(f"Error in time_to_expiry: {e}")
-        return {}
+        logger.error("Error in time_to_expiry: %s", e)
+        return {"error": str(e)}
+
+
+def session_context_block(exchange: str = "NSE") -> str:
+    """Human-readable exchange-local time context for agent prompts."""
+    st = is_market_open(exchange)
+    if "error" in st:
+        return f"[Market Clock] unavailable: {st['error']}"
+    return (f"[Market Clock — {st['exchange']}]\n- Exchange-local time: {st['current_time']} ({st['timezone']})\n"
+            f"- Session: {st['session']} | Next open: {st['next_open']}\n"
+            f"- Holiday calendar verified: {st['holiday_calendar_verified']} (source: {st['holiday_calendar_source']})")

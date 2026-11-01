@@ -7,14 +7,24 @@
 .env.production
 .env.production.*
 *.db
+security_audit.jsonl
+var/
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 
 # GCP / Cloud service account keys
 *-sa-key.json
 *service_account*.json
+!modules/market_rules.json
+!agent_240_full_queries_and_answers.json
 *-service-account*.json
+!modules/market_rules.json
+!agent_240_full_queries_and_answers.json
 orbital-heaven-*.json
+!modules/market_rules.json
+!agent_240_full_queries_and_answers.json
 
 
 # SSH / TLS keys
@@ -27,12 +37,18 @@ orbital-heaven-*.json
 # JSON files (block by default, whitelist specific ones)
 # ══════════════════════════════════════════════════════════════════════════════
 *.json
+!modules/market_rules.json
+!agent_240_full_queries_and_answers.json
 !package.json
 !package-lock.json
 !tsconfig.json
 !*/Contents.json
 !frontend/**/*.json
+!modules/market_rules.json
+!agent_240_full_queries_and_answers.json
 !.github/**/*.json
+!modules/market_rules.json
+!agent_240_full_queries_and_answers.json
 !.vscode/settings.json
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -53,6 +69,8 @@ build/
 *.zip
 *.gguf
 load_results_*.json
+!modules/market_rules.json
+!agent_240_full_queries_and_answers.json
 load_test_results.json
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -130,7 +148,9 @@ workspace/
 # ══════════════════════════════════════════════════════════════════════════════
 chroma_db/
 *.tsbuildinfo
-*.jsonl
+*.json
+!modules/market_rules.json
+!agent_240_full_queries_and_answers.jsonl
 .tmp.*/
 .tmp*
 

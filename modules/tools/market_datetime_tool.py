@@ -4,7 +4,7 @@ from modules import market_datetime
 
 class MarketDateTimeTool(Tool):
     name = "MarketDateTimeTool"
-    description = "Market sessions, expiry dates, trading holidays, time calculations. Actions: market_status, next_expiry, holidays, time_to_expiry, is_trading_day"
+    description = "Market sessions, expiry dates, trading holidays, time calculations. Actions: market_status, next_expiry, holidays, time_to_expiry, is_trading_day, session_info"
     risk_level = "SAFE"
     latency_weight = 0.2
     cost_weight = 0.1
@@ -26,12 +26,17 @@ class MarketDateTimeTool(Tool):
                 exchange = params.get("exchange") or "NSE"
                 return str(market_datetime.next_expiry(expiry_type, exchange))
             elif action == "holidays":
-                year = int(params.get("year") or 2026)
                 exchange = params.get("exchange") or "NSE"
-                return str(market_datetime.get_trading_holidays(year, exchange))
+                year = int(params["year"]) if params.get("year") else market_datetime.now(exchange).year
+                status = market_datetime.holiday_calendar_status(year, exchange)
+                return str({"holidays": market_datetime.get_trading_holidays(year, exchange), **status})
             elif action == "time_to_expiry":
                 expiry_date_str = params.get("expiry_date_str") or ""
-                return str(market_datetime.time_to_expiry(expiry_date_str))
+                if not expiry_date_str:
+                    return "Error: expiry_date_str (YYYY-MM-DD) is required"
+                return str(market_datetime.time_to_expiry(expiry_date_str, params.get("exchange") or "NSE"))
+            elif action == "session_info":
+                return str(market_datetime.market_session_info(params.get("exchange") or "NSE"))
             elif action == "is_trading_day":
                 check_date = params.get("check_date")
                 exchange = params.get("exchange") or "NSE"

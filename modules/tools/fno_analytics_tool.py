@@ -49,12 +49,16 @@ class FnOAnalyticsTool(Tool):
         
         try:
             if action == "greeks":
-                spot = float(params.get("spot", 0.0))
-                strike = float(params.get("strike", 0.0))
-                time_to_expiry = float(params.get("time_to_expiry", 0.0))
-                risk_free_rate = float(params.get("risk_free_rate", 0.065))
-                volatility = float(params.get("volatility", 0.0))
-                option_type = params.get("option_type", "call")
+                required = ["spot", "strike", "time_to_expiry", "risk_free_rate", "volatility", "option_type"]
+                missing = [k for k in required if params.get(k) in (None, "")]
+                if missing:
+                    return f"Error: missing required arguments {missing} (no default rates or volatilities are assumed)"
+                spot = float(params["spot"])
+                strike = float(params["strike"])
+                time_to_expiry = float(params["time_to_expiry"])
+                risk_free_rate = float(params["risk_free_rate"])
+                volatility = float(params["volatility"])
+                option_type = params["option_type"]
                 
                 result = modules.fno_analytics.compute_greeks(
                     spot, strike, time_to_expiry, risk_free_rate, volatility, option_type
