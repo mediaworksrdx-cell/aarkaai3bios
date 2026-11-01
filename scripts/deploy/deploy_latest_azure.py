@@ -65,6 +65,7 @@ def create_archive():
             "requirements.txt",
             "pyproject.toml",
             "agent_240_full_queries_and_answers.json",
+            "audit_240_viewer.html",
         ]
         for rf in root_files:
             if os.path.exists(rf):
@@ -76,7 +77,7 @@ def create_archive():
                 return None
             return tarinfo
 
-        for d in ["pipeline", "modules", "routers", "skills", ".agents", "tests", "scripts"]:
+        for d in ["pipeline", "modules", "routers", "skills", ".agents", "tests", "scripts", "encyclopedia"]:
             if os.path.exists(d):
                 tar.add(d, arcname=d, filter=filter_pycache)
                 print(f"  + Added directory: {d}/")

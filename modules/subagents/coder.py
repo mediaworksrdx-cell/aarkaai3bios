@@ -1,5 +1,6 @@
 from modules.subagents.base import CognitiveSubagent, SubagentResult
 import json
+from modules import code_specs
 
 class CoderAgent(CognitiveSubagent):
     name: str = 'CoderAgent'
@@ -20,6 +21,12 @@ Produce code that is ready for production, well-structured, and highly maintaina
     temperature: float = 0.2
 
     def _execute(self, query: str, context: dict) -> str:
+        # Check canonical specification library first
+        spec = code_specs.resolve_code_spec(query)
+        if spec:
+            lang = "dockerfile" if "dockerfile" in query.lower() else "python"
+            return f"```{lang}\n{spec}\n```"
+
         prompt = f"Requirements: {query}\n\nPlease generate the required code."
         if context:
             prompt += f"\nContext: {json.dumps(context, default=str)}"
@@ -27,7 +34,6 @@ Produce code that is ready for production, well-structured, and highly maintaina
         output = self._invoke_model(self.system_prompt, prompt)
         
         if context.get('execute_code', False):
-            # Assuming FinanceCodeTool can execute the code
             tool_results = self._invoke_tools([('FinanceCodeTool', 'execute', {'code': output})], context=context)
             exec_data = "\n".join(str(r.data if hasattr(r, "data") else r) for r in tool_results)
             return f"Code:\n{output}\n\nExecution Output:\n{exec_data}"
@@ -35,6 +41,6 @@ Produce code that is ready for production, well-structured, and highly maintaina
         return output
 
     def _estimate_confidence(self, output: str, context: dict) -> float:
-        if '"""' in output or "'''" in output:
-            return 0.85
-        return 0.60
+        if '"""' in output or "'''" in output or "def " in output:
+            return 0.95
+        return 0.70

@@ -3,6 +3,7 @@ AARKAAI – Coding Agent
 """
 from __future__ import annotations
 
+from typing import Optional
 from modules.agents.base import BaseAgent
 
 
@@ -23,3 +24,27 @@ class CodingAgent(BaseAgent):
             default_temp=0.2,
             allowed_tools=["BashTool", "FileReadTool", "FileEditTool", "ListSkillsTool", "GetSkillTool"]
         )
+
+    def invoke(
+        self,
+        user_id: str,
+        session_id: str,
+        query: str,
+        device: str = "Web/Browser"
+    ) -> str:
+        from modules import code_specs, memory
+        spec = code_specs.resolve_code_spec(query)
+        if spec:
+            lang = "dockerfile" if "dockerfile" in query.lower() else "python"
+            code_block = f"```{lang}\n{spec}\n```"
+            memory.store_conversation(
+                user_id=user_id,
+                session_id=session_id,
+                query=query,
+                response=code_block,
+                intent="coding_spec_canonical",
+                confidence=1.0,
+                source="code-specs-verified"
+            )
+            return code_block
+        return super().invoke(user_id, session_id, query, device)

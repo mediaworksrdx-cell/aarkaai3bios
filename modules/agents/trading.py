@@ -31,6 +31,12 @@ class TradingAgent(BaseAgent):
             ),
             rules=[
                 "Provide quantitative analysis of market structures, trends, and risk-to-reward ratios.",
+                "Position sizing formula: Quantity = floor(Account Equity × Risk% / |Entry Price - Stop Loss|).",
+                "Moving Average Golden Cross: strictly defined as 50 EMA crossing above 200 EMA (prior EMA50 <= EMA200 and current EMA50 > EMA200).",
+                "ATR Trailing Stop is monotonic and non-reversing: Long Stop = max(previous stop, highest high - multiplier * ATR).",
+                "Implied Volatility (IV) Crush: post-event drop in IV compresses the vega component of option value, causing long option premiums to lose value even if price direction was correct.",
+                "European Style Options: Contractually cannot be exercised early before expiry; traders exit prior to expiry exclusively via offsetting market trades.",
+                "PCR and Max Pain: Descriptive open-interest payoff distributions and contextual sentiment metrics, never causal price magnets.",
                 "Explain technical indicators (e.g., RSI, MACD, Bollinger Bands) and chart setups step-by-step.",
                 "Never offer direct financial advice or buy/sell execution guarantees. Emphasize strict risk management (stop-losses, position sizing).",
                 "Draft trading ideas using scenario models (bullish, bearish, neutral).",

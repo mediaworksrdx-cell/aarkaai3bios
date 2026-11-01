@@ -497,6 +497,44 @@ def interest_coverage(ebit: float, interest_expense: float) -> CalcResult:
                       {"interest_coverage": eb / i})
 
 
+def economic_value_added(nopat: float, wacc_rate: float, invested_capital: float) -> CalcResult:
+    """Economic Value Added (EVA) = NOPAT - (WACC × Invested Capital)."""
+    nop = _finite("nopat", nopat)
+    w = _rate("wacc_rate", wacc_rate)
+    ic = _positive("invested_capital", invested_capital)
+    capital_charge = w * ic
+    eva_val = nop - capital_charge
+    return CalcResult(
+        "Economic Value Added (EVA)",
+        "EVA = NOPAT - (WACC × Invested Capital)",
+        {"nopat": nop, "wacc_rate": w, "invested_capital": ic},
+        {"eva": eva_val, "capital_charge": capital_charge, "eva_spread": (nop / ic) - w},
+        assumptions=["Capital charge reflects opportunity cost of all invested debt and equity capital"]
+    )
+
+
+def debt_to_equity(interest_bearing_debt: float, shareholders_equity: float, cash: Optional[float] = None) -> CalcResult:
+    """Debt-to-Equity Ratio = Total Interest-Bearing Debt / Shareholders' Equity."""
+    d = _non_negative("interest_bearing_debt", interest_bearing_debt)
+    eq = _finite("shareholders_equity", shareholders_equity)
+    if eq == 0:
+        raise FinanceDomainError("shareholders_equity must be non-zero")
+    de_ratio = d / eq
+    out = {"debt_to_equity": de_ratio}
+    inputs: Dict[str, Any] = {"interest_bearing_debt": d, "shareholders_equity": eq}
+    if cash is not None:
+        c = _non_negative("cash", cash)
+        inputs["cash"] = c
+        out["net_debt_to_equity"] = (d - c) / eq
+    return CalcResult(
+        "Debt-to-Equity Ratio",
+        "D/E = Total Interest-Bearing Debt / Shareholders' Equity ; Net D/E = (Debt - Cash) / Equity",
+        inputs,
+        out,
+        assumptions=["Numerator includes short & long term interest-bearing borrowings; excludes non-debt liabilities like trade payables"]
+    )
+
+
 # Published Altman model definitions (coefficients are part of the model, not data).
 ALTMAN_MODELS: Dict[str, Dict[str, Any]] = {
     "original": {
@@ -768,6 +806,7 @@ CALCULATORS: Dict[str, Callable[..., CalcResult]] = {
     "dcf": dcf_two_stage, "enterprise_value": enterprise_value, "ev_ebitda": ev_to_ebitda,
     "pe_ratio": pe_ratio, "fcff": fcff, "fcfe": fcfe_from_fcff, "dupont": dupont,
     "debt_to_ebitda": debt_to_ebitda, "interest_coverage": interest_coverage, "altman_z": altman_z,
+    "eva": economic_value_added, "debt_to_equity": debt_to_equity,
     "sharpe_sortino": sharpe_sortino, "max_drawdown": max_drawdown, "position_size": position_size,
     "risk_reward": risk_reward, "bond_price": bond_price, "bond_ytm": bond_ytm,
     "black_scholes": black_scholes, "implied_volatility": implied_volatility,
@@ -808,6 +847,8 @@ FORMULAS: Dict[str, str] = {
     "fcfe": "FCFE = FCFF - Interest(1 - t) + Net Borrowing = NI + D&A - CapEx - Delta_NWC + Net Borrowing",
     "dupont": "ROE = Net Margin (NI/Revenue) × Asset Turnover (Revenue/Avg Assets) × Equity Multiplier (Avg Assets/Avg Equity)",
     "debt_to_ebitda": "Debt/EBITDA = Total Debt / EBITDA ; Net Debt/EBITDA = (Debt - Cash) / EBITDA",
+    "debt_to_equity": "D/E = Total Interest-Bearing Debt / Shareholders' Equity ; Net D/E = (Debt - Cash) / Equity",
+    "eva": "EVA = NOPAT - (WACC × Invested Capital) ; Capital Charge = WACC × Invested Capital",
     "interest_coverage": "ICR = EBIT / Interest Expense",
     "altman_z": _altman_definitions(),
     "sharpe_sortino": "Sharpe = mean(R - r_f)/σ × √P ; Sortino = mean(R - MAR)/DownsideDev × √P (DownsideDev over all N)",
