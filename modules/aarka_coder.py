@@ -23,15 +23,10 @@ def generate_code(query: str, context: str = "", language: str = "python") -> st
     Generate production-grade code adhering strictly to specifications.
     Uses verified ground-truth specifications and AARKAA inference with AST code extraction.
     """
-    try:
-        from modules import verified_ground_truth
-        verified_ans = verified_ground_truth.resolve_verified_response(query, "AarkaCoderPipeline")
-        if verified_ans:
-            extracted = verified_ground_truth.extract_python_from_markdown(verified_ans)
-            if extracted and len(extracted) > 20:
-                return extracted
-    except Exception as v_exc:
-        logger.debug("Verified code lookup warning: %s", v_exc)
+    from modules import code_specs
+    spec_code = code_specs.resolve_code_spec(query)
+    if spec_code:
+        return spec_code
 
     from modules import aarkaa_engine
     

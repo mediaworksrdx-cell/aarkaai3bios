@@ -1280,16 +1280,16 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
             processing_time=elapsed,
         )
 
-    # ── 1_verified. Deterministic Math & Verified Ground-Truth Resolution ──
+    # ── 1_verified. Deterministic Math Resolution ──
     try:
         from modules import verified_ground_truth
-        _v_ans = verified_ground_truth.resolve_verified_response(query)
+        _v_ans = verified_ground_truth.compute_deterministic_math(query)
         if _v_ans:
             elapsed = round(time.perf_counter() - start, 3)
             try:
                 memory.store_conversation(
                     user_id, session_id, query, _v_ans,
-                    intent=intent, confidence=0.99, source='verified_ground_truth'
+                    intent=intent, confidence=0.99, source='deterministic_math'
                 )
             except Exception:
                 pass
@@ -1297,12 +1297,12 @@ def process_query(query: str, user_id: str = "default", session_id: str = "defau
                 response=_v_ans,
                 intent=intent,
                 confidence=0.99,
-                sources=['verified_ground_truth', 'deterministic_engine'],
+                sources=['deterministic_math'],
                 detected_language=detected_lang,
                 processing_time=elapsed,
             )
     except Exception as _v_exc:
-        logger.debug('Verified ground truth sync check warning: %s', _v_exc)
+        logger.debug('Deterministic math check note: %s', _v_exc)
 
     # ── 1a. Hybrid Query Router (feature-flagged) ─────────────────────────
     # When enabled, decomposes the query into typed sub-queries, executes
@@ -2267,16 +2267,16 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
         yield {"type": "done"}
         return
 
-    # ── 1_verified. Deterministic Math & Verified Ground-Truth (Stream) ────
+    # ── 1_verified. Deterministic Math (Stream) ────
     try:
         from modules import verified_ground_truth
         import asyncio as _asyncio_v
-        _v_ans_stream = verified_ground_truth.resolve_verified_response(query)
+        _v_ans_stream = verified_ground_truth.compute_deterministic_math(query)
         if _v_ans_stream:
             yield {
                 'type': 'metadata',
                 'intent': intent,
-                'sources': ['verified_ground_truth', 'deterministic_engine'],
+                'sources': ['deterministic_math'],
                 'detected_language': detected_lang
             }
             for _i in range(0, len(_v_ans_stream), 64):
@@ -2287,7 +2287,7 @@ async def stream_query(query: str, user_id: str = "default", session_id: str = "
             yield {'type': 'done'}
             return
     except Exception as _v_exc:
-        logger.debug('Verified ground truth stream check warning: %s', _v_exc)
+        logger.debug('Deterministic math stream check note: %s', _v_exc)
 
     # ── 1a. Hybrid Query Router — Streaming (feature-flagged) ─────────────
     from config import HQR_ENABLED

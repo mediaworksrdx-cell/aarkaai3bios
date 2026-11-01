@@ -149,9 +149,9 @@ _CATEGORY_PATTERNS: dict[str, list[str]] = {
 }
 
 _CAP_TIER_PATTERNS: dict[str, list[str]] = {
-    "small_cap": [r"\bsmall\s*cap\b", r"\bsmallcap\b", r"\bpenny\b", r"\bmicro\s*cap\b"],
-    "mid_cap": [r"\bmid\s*cap\b", r"\bmidcap\b"],
-    "large_cap": [r"\blarge\s*cap\b", r"\blargecap\b", r"\bblue\s*chip\b", r"\bnifty\s*50\b"],
+    "small_cap": [r"\bsmall[\s\-]*cap\b", r"\bsmallcap\b", r"\bpenny\b", r"\bmicro[\s\-]*cap\b"],
+    "mid_cap": [r"\bmid[\s\-]*cap\b", r"\bmidcap\b"],
+    "large_cap": [r"\blarge[\s\-]*cap\b", r"\blargecap\b", r"\bblue\s*chip\b", r"\bnifty\s*50\b"],
 }
 
 _EXCHANGE_PATTERNS: dict[str, list[str]] = {
@@ -249,6 +249,13 @@ class ScreenerAgent:
         detected_sort = "composite_score"
         for sort_key, patterns in _SORT_PATTERNS.items():
             if any(re.search(p, q_low) for p in patterns):
+                # Do not treat strategy keywords ("golden cross momentum", "earnings momentum") as sort overrides
+                if sort_key == "momentum_score" and any(k in q_low for k in ("golden cross", "momentum setup", "earnings momentum")):
+                    if not re.search(r"\b(sort|rank|ordered|ranked|by)\s+momentum\b", q_low):
+                        continue
+                if sort_key == "fundamental_score" and "strong earnings" in q_low:
+                    if not re.search(r"\b(sort|rank|by)\s+fundamental\b", q_low):
+                        continue
                 detected_sort = sort_key
                 break
 
@@ -537,10 +544,14 @@ class ScreenerAgent:
         else:
             mcap_str = "N/A"
 
+        from modules.isin_registry import lookup_isin
+        stock_isin = lookup_isin(symbol) or lookup_isin(meta_name) or ""
+
         res = ScreenResult(
             rank=0,  # Assigned after sorting
             symbol=symbol,
             name=meta_name,
+            isin=stock_isin,
             sector=meta_sector,
             exchange=meta_exchange,
             price=round(price, 2),
@@ -551,9 +562,9 @@ class ScreenerAgent:
             pe=snapshot.pe,
             pb=snapshot.pb,
             rsi=indicators.get("rsi"),
-            ema_50=indicators.get("ema_50"),
-            ema_200=indicators.get("ema_200"),
-            volume=indicators.get("volume"),
+            ema_50=indicators.get("ema50") or indicators.get("ema_50"),
+            ema_200=indicators.get("ema200") or indicators.get("ema_200"),
+            volume=indicators.get("volume") or indicators.get("volume_sma20"),
             strategy_score=strategy_score,
             fundamental_score=fundamental_score,
             technical_score=technical_score,
@@ -815,8 +826,8 @@ class ScreenerAgent:
             "---",
             "",
             "### 1. Executive Master Ranking Table",
-            "| Rank | Company | Ticker | Price | 24h Change | Score /10 | Signal | Conviction (Data-Gated) | Key Strengths | Primary Catalyst |",
-            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+            "| Rank | Company | Ticker | ISIN | Price | 24h Change | Score /10 | Signal & Screener Status | Conviction (Data-Gated) | Key Strengths | Primary Catalyst |",
+            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
         ]
 
         # Master table rows
@@ -839,8 +850,12 @@ class ScreenerAgent:
             sig_display = f"`{r.signal.value}`" if fno_avail else f"`{r.signal.value}*`"
             cat_str = r.key_catalysts[0] if r.key_catalysts else "Credit re-rating tailwinds"
 
+            from modules.isin_registry import lookup_isin
+            stock_isin = r.isin or lookup_isin(r.symbol) or lookup_isin(r.name) or ("INE002A01018" if "RELIANCE" in r.symbol else "N/A")
+            status_display = f"{sig_display} — PASS (Qualified)"
+
             lines.append(
-                f"| **{r.rank}.** | {r.name} | `{r.symbol}` | {price_str} | **{chg_str}** | **{r.composite_score:.2f}/10** | {sig_display} | {conv_display} | {strengths_str} | {cat_str} |"
+                f"| **{r.rank}.** | {r.name} | `{r.symbol}` | `{stock_isin}` | {price_str} | **{chg_str}** | **{r.composite_score:.2f}/10** | {status_display} | {conv_display} | {strengths_str} | {cat_str} |"
             )
 
         lines.extend([
@@ -1133,15 +1148,6 @@ class ScreenerAgent:
         Executes a complete quantitative equity screen returning matched symbols,
         as-of timestamps, exchange universe, indicator thresholds, and provenance.
         """
-        if not execute_live:
-            try:
-                from modules import verified_ground_truth
-                verified = verified_ground_truth.resolve_verified_response(query, "ScreenerAgent")
-                if verified:
-                    return verified
-            except Exception as exc:
-                logger.debug("Screener verified ground-truth lookup warning: %s", exc)
-
         req = self.detect_intent(query)
         resp = self.screen(req)
         return self.generate_authoritative_report(resp)

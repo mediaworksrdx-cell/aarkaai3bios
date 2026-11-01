@@ -138,6 +138,7 @@ class ScreenResult(BaseModel):
     rank: int
     symbol: str
     name: str
+    isin: str = ""
     sector: str
     exchange: str
     price: float
@@ -240,6 +241,7 @@ class StockMeta(BaseModel):
     fno_eligible: bool = False
     catalyst: str = ""
     country: str = "IN"
+    isin: str = ""
 
     @property
     def yf_symbol(self) -> str:

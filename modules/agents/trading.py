@@ -6,7 +6,14 @@ F&O analytics, market data, and options strategy tools.
 """
 from __future__ import annotations
 
+import logging
+from typing import Optional
+
+from modules import market_datetime, memory
 from modules.agents.base import BaseAgent
+from modules.trading_calc import resolve_trading_strategy
+
+logger = logging.getLogger(__name__)
 
 
 class TradingAgent(BaseAgent):
@@ -43,3 +50,74 @@ class TradingAgent(BaseAgent):
             ],
             use_rag=True,
         )
+
+    def _handle_market_datetime_query(self, query: str) -> Optional[str]:
+        """Dynamically answers market hours and session timings using authoritative exchange rules."""
+        q_low = query.lower()
+        is_timing_query = any(k in q_low for k in [
+            "trading hours", "market hours", "market open", "market timing", "session timing",
+            "pre-market", "pre market", "is the market open", "trading holiday", "holidays"
+        ])
+        if not is_timing_query:
+            return None
+
+        exchange = "BSE" if "bse" in q_low else ("NYSE" if "nyse" in q_low else "NSE")
+        info = market_datetime.market_session_info(exchange)
+        open_status = market_datetime.is_market_open(exchange)
+
+        lines = [
+            f"### {exchange} Trading Hours & Session Timings",
+            f"\nAll times are stated in exchange-local time (**{info['timezone']}**):\n",
+            f"- **Pre-Market Order Collection Session:** `{info['pre_market']} – {info.get('pre_open_order_end', '09:08')} IST`",
+            f"- **Pre-Market Order Matching & Buffer:** `{info.get('pre_open_order_end', '09:08')} – {info['market_open']} IST`",
+            f"- **Normal Equity Market Hours:** `{info['market_open']} – {info['market_close']} IST`",
+            f"- **Post-Market Closing Session:** `{info['market_close']} – {info['post_market']} IST`",
+            f"\n#### Current Exchange Status",
+            f"- **Current Time:** `{open_status['current_time']} ({open_status['timezone']})`",
+            f"- **Active Session:** `{open_status['session'].upper()}`",
+            f"- **Market Is Currently Open:** `{'YES' if open_status['is_open'] else 'NO'}`",
+            f"- **Next Trading Session Open:** `{open_status['next_open']}`",
+            "\n*Disclaimer: This is for educational/informational purposes only. Not SEBI-registered investment advice. Options and equities trading involves substantial risk of loss.*",
+        ]
+        return "\n".join(lines)
+
+    def invoke(
+        self,
+        user_id: str,
+        session_id: str,
+        query: str,
+        device: str = "Web/Browser"
+    ) -> str:
+        """
+        Executes a turn on the Trading Agent.
+        Wires deterministic market timing and options mathematical structures.
+        """
+        memory.extract_user_facts(user_id, query)
+
+        # 1. Market session / timings query
+        market_timing = self._handle_market_datetime_query(query)
+        if market_timing:
+            memory.store_conversation(
+                user_id=user_id, session_id=session_id, query=query,
+                response=market_timing, intent="trading_market_datetime",
+                confidence=0.99, source="market-datetime"
+            )
+            return market_timing
+
+        # 2. Options and technical divergence strategy
+        strategy_resp = resolve_trading_strategy(query)
+        if strategy_resp:
+            full_resp = (
+                f"{strategy_resp}\n\n"
+                f"*Disclaimer: This is for educational/informational purposes only. "
+                f"Not SEBI-registered investment advice. Options trading involves substantial risk of loss.*"
+            )
+            memory.store_conversation(
+                user_id=user_id, session_id=session_id, query=query,
+                response=full_resp, intent="trading_strategy",
+                confidence=0.99, source="trading-calc-engine"
+            )
+            return full_resp
+
+        # 3. Default to LLM generation
+        return super().invoke(user_id, session_id, query, device)

@@ -60,7 +60,7 @@ class UniverseManager:
     }
 
     PHARMA_HEALTHCARE: Dict[str, StockMeta] = {
-        "SUNPHARMA.NS": StockMeta(name="Sun Pharmaceutical", symbol="SUNPHARMA", exchange="NSE", sector="pharma_healthcare", industry="Pharmaceuticals", cap_tier="large_cap", fno_eligible=True, catalyst="Specialty portfolio ramp-up in the US market.", country="IN"),
+        "SUNPHARMA.NS": StockMeta(name="Sun Pharmaceutical", symbol="SUNPHARMA", exchange="NSE", sector="pharma_healthcare", industry="Pharmaceuticals", cap_tier="large_cap", fno_eligible=True, catalyst="Specialty portfolio ramp-up in the US market.", country="IN", isin="INE044A01036"),
         "DRREDDY.NS": StockMeta(name="Dr. Reddy's Labs", symbol="DRREDDY", exchange="NSE", sector="pharma_healthcare", industry="Pharmaceuticals", cap_tier="large_cap", fno_eligible=True, catalyst="Complex generics pipeline and biosimilars.", country="IN"),
         "CIPLA.NS": StockMeta(name="Cipla Limited", symbol="CIPLA", exchange="NSE", sector="pharma_healthcare", industry="Pharmaceuticals", cap_tier="large_cap", fno_eligible=True, catalyst="Respiratory franchise strength and US generics.", country="IN"),
         "DIVISLAB.NS": StockMeta(name="Divi's Laboratories", symbol="DIVISLAB", exchange="NSE", sector="pharma_healthcare", industry="Pharmaceuticals", cap_tier="large_cap", fno_eligible=True, catalyst="Custom synthesis opportunities and generic API growth.", country="IN"),
@@ -137,6 +137,7 @@ class UniverseManager:
     }
 
     POWER_ENERGY: Dict[str, StockMeta] = {
+        "RELIANCE.NS": StockMeta(name="Reliance Industries", symbol="RELIANCE", exchange="NSE", sector="power_energy", industry="Conglomerate / Refining", cap_tier="large_cap", fno_eligible=True, catalyst="O2C cash flows, telecom 5G monetization, retail expansion, and new energy.", country="IN", isin="INE002A01018"),
         "NTPC.NS": StockMeta(name="NTPC Limited", symbol="NTPC", exchange="NSE", sector="power_energy", industry="Utilities", cap_tier="large_cap", fno_eligible=True, catalyst="Renewable energy IPO value unlocking and thermal capacity additions.", country="IN"),
         "POWERGRID.NS": StockMeta(name="Power Grid Corp", symbol="POWERGRID", exchange="NSE", sector="power_energy", industry="Utilities", cap_tier="large_cap", fno_eligible=True, catalyst="Transmission capex cycle for renewable energy integration.", country="IN"),
         "TATAPOWER.NS": StockMeta(name="Tata Power", symbol="TATAPOWER", exchange="NSE", sector="power_energy", industry="Utilities", cap_tier="large_cap", fno_eligible=True, catalyst="Solar EPC order book and EV charging network expansion.", country="IN"),

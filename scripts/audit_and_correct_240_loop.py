@@ -27,8 +27,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("audit_240_loop")
 
 # Import Verification Harness
-sys.path.insert(0, str(Path(r"C:\Users\daarv\.gemini\antigravity\brain\01d86101-610a-41a9-b7f6-b8f747b4895e\scratch")))
-from eval_harness_base import verify_answer_correctness, _AUDIT_ASSERTIONS
+from modules.eval_harness_base import verify_answer_correctness, _AUDIT_ASSERTIONS
 
 
 def load_dataset() -> Dict[str, List[Dict[str, str]]]:
@@ -121,10 +120,25 @@ def self_correct_defect(agent_name: str, query_idx: int, query: str, defect_reas
         if aarka_coder.validate_code(code).get("syntax_valid"):
             return code
 
-    # 4. Verified Ground-Truth Specification Lookup
-    verified_spec = verified_ground_truth.resolve_verified_response(query, agent_name)
-    if verified_spec:
-        return verified_spec
+    # 4. Agent Reflection Re-prompt with Explicit Defect Feedback
+    try:
+        from modules import aarkaa_engine
+        feedback_prompt = (
+            f"You previously generated an answer with the following defect:\n"
+            f"Validation Defect: {defect_reason}\n\n"
+            f"Original Query: {query}\n\n"
+            f"Draft response:\n{draft_output}\n\n"
+            f"Rewrite the answer completely, explicitly addressing the defect with textbook rigor."
+        )
+        chatml = aarkaa_engine._build_chatml(
+            "You are Aarkaa AI, an enterprise-grade AI coding and quantitative reasoning engine.",
+            feedback_prompt
+        )
+        corrected = aarkaa_engine._generate(chatml, max_new_tokens=1024, temperature=0.2)
+        if corrected and len(corrected) > 50:
+            return corrected
+    except Exception as ref_exc:
+        logger.debug("Reflection generation failed: %s", ref_exc)
 
     return draft_output
 

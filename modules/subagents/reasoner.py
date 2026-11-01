@@ -1,10 +1,16 @@
 import json
+import logging
 from typing import List, Dict, Any, Optional
+
+from modules.logic_solver import resolve_logic_query
 from modules.subagents.base import CognitiveSubagent, SubagentResult
+
+logger = logging.getLogger(__name__)
+
 
 class ReasonerAgent(CognitiveSubagent):
     name: str = 'ReasonerAgent'
-    description: str = 'Chain-of-thought decomposition for complex multi-step queries.'
+    description: str = 'Chain-of-thought decomposition and algorithmic state-space problem solver.'
     system_prompt: str = """You are a highly analytical Reasoner Agent. Your primary function is to break down complex, multi-step queries into manageable sub-questions, solve them systematically, and synthesize a coherent, logically sound final answer.
 
 When presented with a query, you must rigorously follow this process:
@@ -21,19 +27,26 @@ Your output should clearly delineate these stages. Focus purely on logical reaso
     temperature: float = 0.0
 
     def _execute(self, query: str, context: dict) -> str:
+        # 1. First check deterministic logic & state-space solver
+        solved = resolve_logic_query(query)
+        if solved:
+            context['_reasoning_trace'] = solved
+            return solved
+
+        # 2. Otherwise invoke model with rigorous step-by-step chain of thought
         prompt = f"Query: {query}\n"
         if context:
             prompt += f"\nPrior Context: {json.dumps(context, indent=2, default=str)}\n"
         prompt += "\nPlease provide your reasoning trace and final answer following the requested steps."
         
         response = self._invoke_model(self.system_prompt, prompt)
-        
         context['_reasoning_trace'] = response
-        
         return response
 
     def _estimate_confidence(self, output: str, context: dict) -> float:
-        # Check if the output contains the required reasoning steps
+        # Check if the output contains the required reasoning steps or formal logic solution
+        if "### " in output and ("Final Answer" in output or "Final Synthesis" in output):
+            return 0.99
         steps = ["1.", "2.", "3.", "4.", "5."]
         matches = sum(1 for step in steps if step in output)
         

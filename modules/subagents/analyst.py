@@ -83,13 +83,34 @@ STRICT RULES:
                 all_tool_data = "No specific tickers identified. Unable to fetch financial data."
 
         # Synthesize with LLM
+        from modules.isin_registry import lookup_isin
+        isin_items = []
+        for s in (tickers or []):
+            code = lookup_isin(s)
+            if code:
+                isin_items.append((s, code))
+
+        isin_provenance = ""
+        if isin_items:
+            isin_provenance = "--- OFFICIAL SECURITY MASTER / REGULATORY ISIN ---\n" + "\n".join(
+                [f"Ticker: {s} | ISIN: {c}" for s, c in isin_items]
+            ) + "\n\n"
+
         user_prompt = (
             f"User Query: {query}\n\n"
+            f"{isin_provenance}"
             f"--- VERIFIED FINANCIAL DATA ---\n{all_tool_data}\n"
             f"--- END DATA ---\n\n"
-            f"Analyze this data comprehensively. Use markdown tables."
+            f"Analyze this data comprehensively. Include security symbols and official ISINs. Use markdown tables."
         )
         analysis = self._invoke_model(self.system_prompt, user_prompt)
+
+        # Ensure statutory ISIN provenance is explicitly present in final report
+        for s, c in isin_items:
+            if c not in analysis:
+                header = f"### Security Master & ISIN Provenance\n- **Security**: `{s}` | **Official ISIN**: `{c}`\n\n"
+                analysis = header + analysis
+                break
 
         # Track tools
         context.setdefault("_tools_used", []).extend(list(set(tools_used)))

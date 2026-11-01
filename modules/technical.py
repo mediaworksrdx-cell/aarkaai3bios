@@ -218,34 +218,36 @@ def get_signal(indicators: dict) -> str:
         score -= 1
 
     # MACD
-    if indicators["macd_histogram"] > 0:
-        score += 1
-    else:
-        score -= 1
-    if indicators["macd_crossover"] == "bullish":
+    macd_hist = indicators.get("macd_histogram")
+    if macd_hist is not None:
+        score += 1 if macd_hist > 0 else -1
+    macd_cross = indicators.get("macd_crossover")
+    if macd_cross == "bullish":
         score += 2
-    elif indicators["macd_crossover"] == "bearish":
+    elif macd_cross == "bearish":
         score -= 2
 
     # EMA alignment
-    if indicators["price_above_ema20"]:
+    if indicators.get("price_above_ema20"):
         score += 1
-    else:
+    elif indicators.get("price_above_ema20") is False:
         score -= 1
-    if indicators["ema20_above_ema50"]:
+    if indicators.get("ema20_above_ema50"):
         score += 1
-    else:
+    elif indicators.get("ema20_above_ema50") is False:
         score -= 1
 
     # Bollinger position
-    bb_pos = indicators["bb_position"]
-    if bb_pos < 0.2:
-        score += 1  # near lower band → potential bounce
-    elif bb_pos > 0.8:
-        score -= 1  # near upper band → potential reversal
+    bb_pos = indicators.get("bb_position")
+    if bb_pos is not None:
+        if bb_pos < 0.2:
+            score += 1  # near lower band → potential bounce
+        elif bb_pos > 0.8:
+            score -= 1  # near upper band → potential reversal
 
     # Volume confirmation
-    if indicators["volume_ratio"] > 1.5:
+    vol_ratio = indicators.get("volume_ratio")
+    if vol_ratio is not None and vol_ratio > 1.5:
         # High volume amplifies the current trend signal
         if score > 0:
             score += 1
